@@ -1,6 +1,7 @@
 # Development Workflow
 
 This document covers how work moves from an idea to `dev`, and from `dev` to `main`. That includes how Claude and the owner collaborate while the owner is learning.
+
 - Architecture: `architecture.md`.
 - Rules: `code-rules.md`.
 - Database practice: `database.md`.
@@ -10,29 +11,30 @@ This document covers how work moves from an idea to `dev`, and from `dev` to `ma
 
 Superpowers provides the process. The xuan-api skills plug in at fixed points.
 
-| Task | Path |
-|---|---|
+| Task                                                                        | Path                                                                                                                                                                                                              |
+| --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | New capability or subsystem; change to a boundary, contract or architecture | `superpowers:brainstorming` (architectural) → spec in `docs/superpowers/specs/` → `superpowers:writing-plans` → execution (§3 decides who types) → review → verify → `superpowers:finishing-a-development-branch` |
-| Small change to existing code | `superpowers:brainstorming` (bounded: a short design in chat, approval) → implement → review → verify |
-| **Trivial change** (§2) | inspect → implement → relevant verification |
-| Bug | `superpowers:systematic-debugging` → regression test (§11) → fix → review → verify |
-| Schema change | Whichever row above fits, with `xuan-database-change` for the schema part (§8) |
-| Contract change | §7, then whichever row above fits |
+| Small change to existing code                                               | `superpowers:brainstorming` (bounded: a short design in chat, approval) → implement → review → verify                                                                                                             |
+| **Trivial change** (§2)                                                     | inspect → implement → relevant verification                                                                                                                                                                       |
+| Bug                                                                         | `superpowers:systematic-debugging` → regression test (§11) → fix → review → verify                                                                                                                                |
+| Schema change                                                               | Whichever row above fits, with `xuan-database-change` for the schema part (§8)                                                                                                                                    |
+| Contract change                                                             | §7, then whichever row above fits                                                                                                                                                                                 |
 
 **Where the xuan-api skills plug in:**
 
-| Stage | What applies |
-|---|---|
+| Stage               | What applies                                                                                                                                                                                             |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Design and planning | Specs and plans respect `architecture.md`, `database.md` and `api-contract.md`. Each plan task names its skill and states the class and reason for any deviation from a DEFAULT or choice under a C rule |
-| Implementation | `xuan-api-feature` for capabilities, including their tests; it hands schema work to `xuan-database-change`. Test-first follows `superpowers:test-driven-development`, at the level §11 picks |
-| Review | `xuan-api-architecture-review` together with `superpowers:requesting-code-review` |
-| Done | `superpowers:verification-before-completion`, then §13 |
+| Implementation      | `xuan-api-feature` for capabilities, including their tests; it hands schema work to `xuan-database-change`. Test-first follows `superpowers:test-driven-development`, at the level §11 picks             |
+| Review              | `xuan-api-architecture-review` together with `superpowers:requesting-code-review`                                                                                                                        |
+| Done                | `superpowers:verification-before-completion`, then §13                                                                                                                                                   |
 
 **If a skill and the docs disagree, the docs win.** Fix the skill.
 
 ## 2. Trivial fast path
 
 A change is trivial when it's one of:
+
 - comment or doc wording;
 - formatting;
 - an obvious local rename or refactor inside one file;
@@ -49,29 +51,29 @@ A change is trivial when it's one of:
 
 ### 3.1 Roles
 
-| Claude | Owner |
-|---|---|
-| Explains the next task, the concept and why it exists | Runs setup, Yarn, Nest and Docker commands |
-| Gives the command, or a small code shape, when needed | Creates files and types the implementation |
-| Reviews what the owner wrote (`xuan-api-architecture-review`) | Configures PostgreSQL; creates, runs and reverts migrations; inspects the database |
-| Diagnoses failures (`superpowers:systematic-debugging`), challenges architecture violations, suggests tests | Runs tests; fixes issues with guidance |
-| **Waits.** Implements only a task the owner explicitly delegates | Decides what to delegate |
+| Claude                                                                                                      | Owner                                                                              |
+| ----------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Explains the next task, the concept and why it exists                                                       | Runs setup, Yarn, Nest and Docker commands                                         |
+| Gives the command, or a small code shape, when needed                                                       | Creates files and types the implementation                                         |
+| Reviews what the owner wrote (`xuan-api-architecture-review`)                                               | Configures PostgreSQL; creates, runs and reverts migrations; inspects the database |
+| Diagnoses failures (`superpowers:systematic-debugging`), challenges architecture violations, suggests tests | Runs tests; fixes issues with guidance                                             |
+| **Waits.** Implements only a task the owner explicitly delegates                                            | Decides what to delegate                                                           |
 
 ### 3.2 What Claude may run
 
 **Reading is not implementing.** Claude may freely read and inspect source files, configuration, documentation, generated output and diffs.
 
-| Allowed during review (safe, read-only) | Needs the owner's explicit approval, or a delegated task |
-|---|---|
-| `git status`, `git diff`, `git log` | Source-file edits |
-| lint, typecheck, build | Installing or removing packages |
-| Unit tests that don't mutate external state | `migration:generate` / `run` / `revert` |
-| Read-only `psql`: `SELECT`, `\d`, `\dt`, `EXPLAIN` that doesn't execute a mutating statement | Database reset, `TRUNCATE` |
-| Other clearly read-only inspection | E2E/integration suites (they mutate `xuan_test`) |
-| | Seed scripts |
-| | `docker compose up/down`, volume removal |
-| | Any SQL that mutates data or schema |
-| | Anything else that materially changes project or database state |
+| Allowed during review (safe, read-only)                                                      | Needs the owner's explicit approval, or a delegated task        |
+| -------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `git status`, `git diff`, `git log`                                                          | Source-file edits                                               |
+| lint, typecheck, build                                                                       | Installing or removing packages                                 |
+| Unit tests that don't mutate external state                                                  | `migration:generate` / `run` / `revert`                         |
+| Read-only `psql`: `SELECT`, `\d`, `\dt`, `EXPLAIN` that doesn't execute a mutating statement | Database reset, `TRUNCATE`                                      |
+| Other clearly read-only inspection                                                           | E2E/integration suites (they mutate `xuan_test`)                |
+|                                                                                              | Seed scripts                                                    |
+|                                                                                              | `docker compose up/down`, volume removal                        |
+|                                                                                              | Any SQL that mutates data or schema                             |
+|                                                                                              | Anything else that materially changes project or database state |
 
 For anything in the right-hand column, Claude recommends the exact command and waits for the owner to run it.
 
@@ -111,56 +113,56 @@ These are **learning targets and signals, not gates.** They help the owner judge
 
 **Record each delegated task class here:**
 
-| Task class | Delegated since | Notes |
-|---|---|---|
-| *(none yet)* | | |
+| Task class   | Delegated since | Notes |
+| ------------ | --------------- | ----- |
+| _(none yet)_ |                 |       |
 
 ## 4. Local setup
 
 **Tools already on the machine** (no new desktop tools without a stated need, purpose and required/optional status):
 
-| Tool | Used for |
-|---|---|
-| VS Code | Code |
-| Terminal | Nest, Yarn, Docker, migrations, `psql` |
-| Docker Desktop | Local PostgreSQL |
-| pgAdmin | Optional database GUI |
-| Postman | Manual exploratory API calls (automated tests are the real verification) |
-| SourceTree | Git visualization |
+| Tool           | Used for                                                                 |
+| -------------- | ------------------------------------------------------------------------ |
+| VS Code        | Code                                                                     |
+| Terminal       | Nest, Yarn, Docker, migrations, `psql`                                   |
+| Docker Desktop | Local PostgreSQL                                                         |
+| pgAdmin        | Optional database GUI                                                    |
+| Postman        | Manual exploratory API calls (automated tests are the real verification) |
+| SourceTree     | Git visualization                                                        |
 
 **Baseline:**
 
-| Item | Setup |
-|---|---|
-| Node | **24 LTS** via NVM for Windows (`nvm install 24`, `nvm use 24`). Pinned with `engines` and `.nvmrc` |
-| Yarn | **4**, via Corepack (`corepack enable`); version pinned by `packageManager`; `nodeLinker: node-modules`. Same as xuan-web |
-| NestJS | **12**, starting from the official starter's defaults (ESM, Vitest, TS ^6) |
-| TypeScript | **6.x, pinned.** TS 7 waits until Nest and `@nestjs/swagger` officially support it |
-| Lint / format | Lint must enforce I2 and I4 (tool settled by a verification spike: the starter's oxlint, else ESLint + boundaries). Prettier with xuan-web's settings |
-| PostgreSQL | Docker Compose `postgres:18`, service `db`, host port **5433** (the native PostgreSQL 12 on 5432 is left untouched). An init script creates `xuan_dev` and `xuan_test`, owned by login role `xuan_app`. Details and practice: `database.md` §11 |
-| Env files | Copy `.env.example` → `.env` (development) and `.env.test` (test, pointing at `xuan_test`) |
+| Item          | Setup                                                                                                                                                                                                                                           |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Node          | **24 LTS** via NVM for Windows (`nvm install 24`, `nvm use 24`). Pinned with `engines` and `.nvmrc`                                                                                                                                             |
+| Yarn          | **4**, via Corepack (`corepack enable`); version pinned by `packageManager`; `nodeLinker: node-modules`. Same as xuan-web                                                                                                                       |
+| NestJS        | **12**, starting from the official starter's defaults (ESM, Vitest, TS ^6)                                                                                                                                                                      |
+| TypeScript    | **6.x, pinned.** TS 7 waits until Nest and `@nestjs/swagger` officially support it                                                                                                                                                              |
+| Lint / format | Lint must enforce I2 and I4 (tool settled by a verification spike: the starter's oxlint, else ESLint + boundaries). Prettier with xuan-web's settings                                                                                           |
+| PostgreSQL    | Docker Compose `postgres:18`, service `db`, host port **5433** (the native PostgreSQL 12 on 5432 is left untouched). An init script creates `xuan_dev` and `xuan_test`, owned by login role `xuan_app`. Details and practice: `database.md` §11 |
+| Env files     | Copy `.env.example` → `.env` (development) and `.env.test` (test, pointing at `xuan_test`)                                                                                                                                                      |
 
 ## 5. Commands
 
 Each script is added together with the tool it runs.
 
-| Command | Purpose | Available |
-|---|---|---|
-| `yarn start:dev` | Dev server (`http://localhost:4000`) | With the Nest app |
-| `yarn build` / `yarn start:prod` | Build / run the build | With the Nest app |
-| `yarn lint` | Lint, including boundary rules | With lint |
-| `yarn typecheck` | `tsc --noEmit` | With the Nest app |
-| `yarn format` / `yarn format:check` | Prettier write / check | With Prettier |
-| `yarn test` | Unit tests | With Vitest |
-| `yarn test:e2e` | E2E against `xuan_test` (mutates it) | With the e2e harness |
-| `yarn db:up` / `yarn db:down` | Start / stop the Compose database | With Compose |
-| `yarn migration:generate` / `:create` / `:run` / `:revert` / `:show` | Migrations (through `loadConfig()`) | With TypeORM |
+| Command                                                              | Purpose                              | Available            |
+| -------------------------------------------------------------------- | ------------------------------------ | -------------------- |
+| `yarn start:dev`                                                     | Dev server (`http://localhost:4000`) | With the Nest app    |
+| `yarn build` / `yarn start:prod`                                     | Build / run the build                | With the Nest app    |
+| `yarn lint`                                                          | Lint, including boundary rules       | With lint            |
+| `yarn typecheck`                                                     | `tsc --noEmit`                       | With the Nest app    |
+| `yarn format` / `yarn format:check`                                  | Prettier write / check               | With Prettier        |
+| `yarn test`                                                          | Unit tests                           | With Vitest          |
+| `yarn test:e2e`                                                      | E2E against `xuan_test` (mutates it) | With the e2e harness |
+| `yarn db:up` / `yarn db:down`                                        | Start / stop the Compose database    | With Compose         |
+| `yarn migration:generate` / `:create` / `:run` / `:revert` / `:show` | Migrations (through `loadConfig()`)  | With TypeORM         |
 
 ## 6. Adding a dependency
 
 1. Name the responsibility it takes over, and confirm that responsibility exists **now**.
 2. `yarn add` (or `yarn add -D`). During learning-first mode the owner runs this (§3.2).
-3. Mention it in the PR description: *what it's for, and what we would otherwise hand-write*.
+3. Mention it in the PR description: _what it's for, and what we would otherwise hand-write_.
 
 ## 7. Changing the API contract
 
@@ -176,6 +178,7 @@ A mismatch between runtime/OpenAPI and Markdown is a contract defect: fix it exp
 ## 8. Changing the database schema
 
 Follow `xuan-database-change`, with `database.md` as the reference.
+
 - The migration SQL is read before it runs.
 - Reversible migrations are reverted and re-run locally.
 - A second `migration:generate` must come back empty.
@@ -184,15 +187,17 @@ Follow `xuan-database-change`, with `database.md` as the reference.
 
 ## 9. Git: branches, commits, PRs
 
-**Initial baseline: TBD.** The repository has no commits yet. The owner decides the first commit and when `main`/`dev` are created, after the documentation and skills are reviewed. Until then, nothing is committed.
+**Initial baseline: TBD.** The first commit on main contains CLAUDE.md, docs/ and .claude/skills/.
+dev is created from that commit.
+After this baseline, no direct commits are made to main or dev.
 
 The intended model once the baseline exists:
 
-| Branch | Role | Changes arrive by |
-|---|---|---|
-| `main` | Release / production-ready | Release PRs from `dev` only |
-| `dev` | Integration; the default branch | Task PRs only |
-| Task branch (`feat/`, `fix/`, `chore/`, `docs/`) | One task | The task's own commits |
+| Branch                                           | Role                            | Changes arrive by           |
+| ------------------------------------------------ | ------------------------------- | --------------------------- |
+| `main`                                           | Release / production-ready      | Release PRs from `dev` only |
+| `dev`                                            | Integration; the default branch | Task PRs only               |
+| Task branch (`feat/`, `fix/`, `chore/`, `docs/`) | One task                        | The task's own commits      |
 
 - **No direct commits to `dev` or `main`** after the baseline.
 - **Task:** branch from an up-to-date `dev` → implement → verify (§13) → PR to `dev` → review → merge. When a Superpowers skill asks for the base branch, it's `dev`.
@@ -200,6 +205,7 @@ The intended model once the baseline exists:
 - One task per branch and per PR. No `release/*` or `hotfix/*` until a real need appears (docs first, §15).
 
 **Naming** follows xuan-web's convention (its `development-workflow.md` §5.1):
+
 - Branches: `<type>/<action>-<scope>[-<detail>]`, e.g. `feat/build-services-catalog`, `chore/setup-database`; `fix/<scope>-<detail>`.
 - Commits: Conventional Commits `<type>(<scope>): <imperative description>`. Semantic, singular scopes such as `service`, `course`, `auth`, `database`, `http`, `config`, `tooling`.
 
@@ -207,36 +213,36 @@ The intended model once the baseline exists:
 
 There's no CI yet. Gates are added by trigger as the tooling exists:
 
-| Trigger | Gates |
-|---|---|
-| Task PR → `dev` | lint, typecheck, unit, e2e (with a PostgreSQL service container and the same env variables), the migration "generate twice" check |
-| Release PR `dev` → `main` | everything above + build |
+| Trigger                   | Gates                                                                                                                             |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Task PR → `dev`           | lint, typecheck, unit, e2e (with a PostgreSQL service container and the same env variables), the migration "generate twice" check |
+| Release PR `dev` → `main` | everything above + build                                                                                                          |
 
 ## 11. Testing
 
-Test **behavior that carries risk**, at the cheapest level that proves it (D40). `superpowers:test-driven-development` decides *when* (test first); this section decides *which level* and *what*.
+Test **behavior that carries risk**, at the cheapest level that proves it (D40). `superpowers:test-driven-development` decides _when_ (test first); this section decides _which level_ and _what_.
 
 ### Levels
 
-| Code | Level |
-|---|---|
-| Pure logic: Zod-issue translator, `loadConfig()` validation, future domain rules | **Unit**, table-driven (`*.spec.ts`, colocated) |
-| Platform behavior: `{ data }` envelope, 204 empty body, `undefined` → 500, `AppError` → envelope, unknown error → generic 500 with no leaked text, malformed JSON, over-limit body | **E2E** against a **test-only fixture controller** in `test/` |
-| Each endpoint outcome: success, each validation failure type, each business outcome, each translated constraint | **E2E**: real HTTP + real PostgreSQL + **exact body** (`toEqual`) |
-| The OpenAPI document builds with the expected named components | **E2E** |
-| Simple CRUD services with mocked repositories; key/alias/config objects with no logic | **None.** A mock can't prove a constraint |
+| Code                                                                                                                                                                               | Level                                                             |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Pure logic: Zod-issue translator, `loadConfig()` validation, future domain rules                                                                                                   | **Unit**, table-driven (`*.spec.ts`, colocated)                   |
+| Platform behavior: `{ data }` envelope, 204 empty body, `undefined` → 500, `AppError` → envelope, unknown error → generic 500 with no leaked text, malformed JSON, over-limit body | **E2E** against a **test-only fixture controller** in `test/`     |
+| Each endpoint outcome: success, each validation failure type, each business outcome, each translated constraint                                                                    | **E2E**: real HTTP + real PostgreSQL + **exact body** (`toEqual`) |
+| The OpenAPI document builds with the expected named components                                                                                                                     | **E2E**                                                           |
+| Simple CRUD services with mocked repositories; key/alias/config objects with no logic                                                                                              | **None.** A mock can't prove a constraint                         |
 
 ### Harness (`test/`)
 
 Created with the first e2e test.
 
-| Piece | Contract |
-|---|---|
-| Global setup | Loads config with `NODE_ENV=test`, runs the **I21 guard**, applies migrations to `xuan_test` once |
-| App factory | Builds `AppModule` with `@nestjs/testing`, calls the **same `configureApp()`** as `main.ts` (D6), and initializes it |
-| Database cleanup | Before each test: the I21 guard, then `TRUNCATE` all application tables (never the migrations table) |
-| Fixture controller | A test-only module exercising platform behavior without any business module |
-| Execution | E2E files run **serially** (shared database, D39) |
+| Piece              | Contract                                                                                                             |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| Global setup       | Loads config with `NODE_ENV=test`, runs the **I21 guard**, applies migrations to `xuan_test` once                    |
+| App factory        | Builds `AppModule` with `@nestjs/testing`, calls the **same `configureApp()`** as `main.ts` (D6), and initializes it |
+| Database cleanup   | Before each test: the I21 guard, then `TRUNCATE` all application tables (never the migrations table)                 |
+| Fixture controller | A test-only module exercising platform behavior without any business module                                          |
+| Execution          | E2E files run **serially** (shared database, D39)                                                                    |
 
 **The `_test` guard (I21)** refuses destructive cleanup unless the connected database is provably the dedicated test database: its name ends in `_test`, and it matches the configured test database. A wrong `.env.test` must never truncate `xuan_dev`.
 
@@ -250,10 +256,10 @@ A test never seen failing proves nothing.
 
 ## 12. Review flow
 
-| Review | Covers |
-|---|---|
-| `xuan-api-architecture-review` | Project rules, **evidence first**: a search hit is a lead, not a verdict. Severity: Blocker (INVARIANT) · Must justify (unexplained DEFAULT deviation) · Major (missing tests or checks) · Nit (PREFERENCE) · Question (depends on intent; no rule covers it). Never invents rules; unverified ≠ passing |
-| `superpowers:requesting-code-review` | General code quality |
+| Review                               | Covers                                                                                                                                                                                                                                                                                                   |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `xuan-api-architecture-review`       | Project rules, **evidence first**: a search hit is a lead, not a verdict. Severity: Blocker (INVARIANT) · Must justify (unexplained DEFAULT deviation) · Major (missing tests or checks) · Nit (PREFERENCE) · Question (depends on intent; no rule covers it). Never invents rules; unverified ≠ passing |
+| `superpowers:requesting-code-review` | General code quality                                                                                                                                                                                                                                                                                     |
 
 During learning-first mode, the review runs only safe checks itself (§3.2). Mutating suites are run by the owner, and their output is part of the evidence.
 
@@ -270,11 +276,13 @@ During learning-first mode, the review runs only safe checks itself (§3.2). Mut
 ## 14. Secrets
 
 **Always (I6):**
+
 - `.env.example` documents every variable with fake values.
 - `.env` and `.env.test` are gitignored.
 - Never paste real credentials, tokens or customer data into fixtures, tests, issues or plans.
 
 **Before making the repo public:**
+
 - [ ] Scan the full history for secrets (e.g. gitleaks); rotate anything found. Deleting isn't enough.
 - [ ] Remove real customer data and internal URLs.
 - [ ] README explains the architecture.
