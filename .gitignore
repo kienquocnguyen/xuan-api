@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Yarn runtime/cache
+.yarn/
+.pnp.*
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Test coverage
+coverage/
+
+# OS / editor
+.DS_Store
+Thumbs.db
