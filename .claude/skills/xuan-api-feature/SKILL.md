@@ -32,6 +32,7 @@ Rules and their reasons live in `docs/`. Cite rule IDs from `docs/code-rules.md`
 8. **Controller** (D2, D4, D5, I3): validated input → service → explicit mapping to the response DTO. Return type = the decorator's DTO (D16).
 9. **Docs decorators** (D15, I18): `@ApiEnvelopeResponse` / `@ApiNoContentResponse` + `@ApiErrorResponses` from the same definitions you throw.
 10. **Verify** (workflow §13): lint, typecheck, unit, e2e, with output observed. In learning mode the owner runs e2e. Then **REQUIRED SUB-SKILL:** `xuan-api-architecture-review`, then `superpowers:verification-before-completion`.
+11. **Close:** commit messages and the PR title and body follow `development-workflow.md` §9.2–§9.3. Use that template; don't invent one. A Verification box is ticked only for a check whose output was observed. Anything not run stays unchecked, even if the owner asks to "tick everything".
 
 ## Under time pressure
 

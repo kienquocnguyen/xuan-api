@@ -18,7 +18,7 @@ This checks a change against `docs/code-rules.md`: **evidence first, then judgme
    - else the PR target (`gh pr view --json baseRefName -q .baseRefName`);
    - else `dev` for a task branch, or `main` for a `dev` → `main` release.
 
-   Collect `git diff --name-only <base>...HEAD` plus uncommitted changes. **Before the Git baseline exists**, the scope is the uncommitted files, or the diff you were shown. Read the plan or PR for stated DEFAULT deviations and C-rule choices; none stated means unstated.
+   Collect `git diff --name-only <base>...HEAD` plus uncommitted changes. **Before the Git baseline exists**, the scope is the uncommitted files, or the diff you were shown. Read the plan or the PR's Notes for stated DEFAULT deviations and C-rule choices; none stated means unstated. The PR's Verification, Database and API Contract sections (`development-workflow.md` §9.3) are leads, not evidence. A ticked box whose output you haven't seen goes under Unverified.
 2. **Checks.** Run whichever exist: `yarn lint`, `yarn typecheck`, `yarn test`. Run `yarn test:e2e` only in delegated mode. **In learning mode, only safe checks run** (`development-workflow.md` §3.2), and e2e output comes from the owner. A boundary-lint failure is an INVARIANT finding.
 3. **Searches** over the changed files (below). Read every hit in context.
 4. **Read each changed file** against the I, D and C rules.

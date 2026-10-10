@@ -44,7 +44,7 @@ Learning or delegated, as in `development-workflow.md` §3:
 8. **Reversible?** `migration:revert`, `\d+` again, `migration:run` again. Always while learning.
 9. **Generate again.** The second `migration:generate` must be empty.
 10. **Prove it:** e2e on `xuan_test` for each invariant that has behavior (I21 guard), e.g. a translated constraint (`database.md` §9).
-11. **Close:** map status *implemented*; workflow §8 and DoD §13 are satisfied. Return to `xuan-api-feature` if the task continues.
+11. **Close:** map status *implemented*; workflow §8 and DoD §13 are satisfied. The PR gets the Database section from workflow §9.3, listing only the checks that were actually observed. Return to `xuan-api-feature` if the task continues.
 
 ## Quick reference
 

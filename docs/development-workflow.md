@@ -187,11 +187,7 @@ Follow `xuan-database-change`, with `database.md` as the reference.
 
 ## 9. Git: branches, commits, PRs
 
-**Initial baseline: TBD.** The first commit on main contains CLAUDE.md, docs/ and .claude/skills/.
-dev is created from that commit.
-After this baseline, no direct commits are made to main or dev.
-
-The intended model once the baseline exists:
+**Baseline: established.** The first commit on `main` contains `CLAUDE.md`, `docs/` and `.claude/skills/`. `dev` was created from it and is the default integration branch.
 
 | Branch                                           | Role                            | Changes arrive by           |
 | ------------------------------------------------ | ------------------------------- | --------------------------- |
@@ -204,10 +200,114 @@ The intended model once the baseline exists:
 - **Release:** verification on `dev` → PR `dev` → `main` → merge and deploy.
 - One task per branch and per PR. No `release/*` or `hotfix/*` until a real need appears (docs first, §15).
 
-**Naming** follows xuan-web's convention (its `development-workflow.md` §5.1):
+| Unit   | Is                       | Named by                                          |
+| ------ | ------------------------ | ------------------------------------------------- |
+| Branch | One task                 | `<type>/<action>-<scope>[-<detail>]`              |
+| Commit | One logical change in it | `<type>(<scope>): <imperative description>`       |
+| PR     | The task as a whole      | Title `<type>: <task description>` + the §9.3 body |
 
-- Branches: `<type>/<action>-<scope>[-<detail>]`, e.g. `feat/build-services-catalog`, `chore/setup-database`; `fix/<scope>-<detail>`.
-- Commits: Conventional Commits `<type>(<scope>): <imperative description>`. Semantic, singular scopes such as `service`, `course`, `auth`, `database`, `http`, `config`, `tooling`.
+### 9.1 Branches
+
+Naming follows xuan-web's convention (its `development-workflow.md` §5.1): `<type>/<action>-<scope>[-<detail>]`, e.g. `feat/build-services-catalog`, `chore/setup-database`; `fix/<scope>-<detail>`.
+
+### 9.2 Commits
+
+Conventional Commits: `<type>(<scope>): <imperative description>`.
+
+| Type       | For                                             |
+| ---------- | ----------------------------------------------- |
+| `feat`     | New capability                                  |
+| `fix`      | Bug fix                                         |
+| `chore`    | Tooling, setup, dependencies; no behavior       |
+| `docs`     | Documentation only                              |
+| `test`     | Tests only                                      |
+| `refactor` | Restructure without changing behavior           |
+
+- **Scope:** semantic and singular, e.g. `service`, `course`, `auth`, `database`, `http`, `config`, `tooling`, `content`, `booking`. If no scope is meaningful, leave it out (`docs: …`).
+- **Description:** imperative, concise, meaningful: `add`, `reject`, `cover`, not `added` or `adds`. Never `update files`, `fix stuff` or `changes`.
+- **One logical change per commit.**
+
+```text
+chore(tooling): scaffold NestJS application
+feat(service): add public services catalog
+fix(auth): reject expired refresh token
+docs(database): update services schema map
+test(service): cover unpublished service lookup
+```
+
+### 9.3 Pull requests
+
+**Title:** `<type>: <task description>`, with no scope. It describes the whole task; the commits inside carry the scopes. E.g. `chore: set up NestJS application`, `feat: add public services catalog`, `fix: reject unauthorized content edits`.
+
+**Body:** this is the canonical template. Skills point here instead of copying it.
+
+```markdown
+## Summary
+
+What this PR accomplishes and why, in one or two sentences.
+
+## Changes
+
+- concrete change
+- concrete change
+
+## Verification
+
+- [ ] `yarn lint`
+- [ ] `yarn typecheck`
+- [ ] `yarn test`
+- [ ] `yarn test:e2e`
+- [ ] `yarn build`
+
+## Notes
+
+- implementation decisions worth knowing
+- DEFAULT deviations, each with its reason
+- CONTEXT-DEPENDENT choices, each with its reason
+- deferred work / known limitations
+```
+
+- **Verification:** list only the commands that exist (§5) and are relevant to the PR, plus any manual check that matters (e.g. `GET /` → 404). A box is `[x]` **only when the owner ran it and observed the result** (or Claude did, in delegated mode). Anything not run stays `[ ]`.
+- **Notes:** only what a reviewer needs. If nothing is worth saying, omit the section rather than fill it with boilerplate. Stated DEFAULT deviations and C-rule choices go here; that's where `code-rules.md` and the review look for them.
+
+**Sections by change type.** Add one only when the PR made that kind of change, and list only the items that apply:
+
+```markdown
+## Database
+
+- migration: `<migration-name>`
+- physical database map (`database.md` §12) updated
+- migration SQL reviewed
+- migration run successfully
+- reversible migration reverted and re-run
+- second `migration:generate` is empty
+- `psql` inspection matches the approved map
+
+## API Contract
+
+- endpoint / behavior changed
+- response DTO / request schema updated
+- OpenAPI updated
+- error codes documented
+- exact-body e2e updated
+- xuan-web OpenAPI snapshot / paired contract impact reviewed
+
+## Security
+
+Relevant authentication / authorization / security behavior, and how it was verified.
+```
+
+A new dependency is mentioned under Changes or Notes, as §6 asks.
+
+**The PR description is evidence, not ceremony.** A reviewer should be able to answer from it:
+
+- what changed, and why?
+- how was it verified?
+- did the database change? did the API contract change?
+- which DEFAULT rules were deviated from, and which C-rule choices were made?
+- what is intentionally deferred?
+
+Never claim a check passed unless its output was observed. A ticked box is a claim, not proof. Review still inspects the code and the output (§12).
 
 ## 10. CI (progressive)
 
