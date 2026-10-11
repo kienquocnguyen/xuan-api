@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgres:18
+    container_name: xuan-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: xuan_app
+      POSTGRES_PASSWORD: xuan_local
+      POSTGRES_DB: xuan_dev
+    ports:
+      - '5433:5432'
+    volumes:
+      - xuan_postgres_data:/var/lib/postgresql
+
+volumes:
+  xuan_postgres_data:
