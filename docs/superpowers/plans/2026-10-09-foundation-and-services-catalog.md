@@ -948,8 +948,10 @@ test: {
   Script (migrations first, against `xuan_test`):
 
 ```json
-"test:e2e": "NODE_ENV=test yarn migration:run && NODE_ENV=test vitest run --config vitest.config.e2e.ts"
+"test:e2e": "NODE_ENV=test yarn test:db-guard && NODE_ENV=test yarn migration:run && NODE_ENV=test vitest run --config vitest.config.e2e.ts"
 ```
+
+  `test:db-guard` (added in Task 12 at the owner's request) runs the I21 guard before `migration:run` (`development-workflow.md`, Harness).
 
 - [ ] **Step 8: tests.** `test/http-contract.e2e-spec.ts`. The error half now; the success half arrives in Task 8:
 

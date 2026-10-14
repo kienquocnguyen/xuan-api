@@ -81,7 +81,7 @@ This is the **canonical rule registry** for `xuan-api`. For every rule it answer
 
 | ID | Rule | Enforcement | Why |
 |---|---|---|---|
-| I21 | Destructive test cleanup refuses to run unless it can prove it's connected to the dedicated test database, including the `_test` database-name check | e2e harness, review | development-workflow.md: Testing |
+| I21 | Destructive test cleanup refuses to run unless it can prove it's connected to the dedicated test database, including the `_test` database-name check | e2e harness, `test:db-guard` before `migration:run`, review | development-workflow.md: Testing |
 
 ---
 
