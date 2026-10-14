@@ -33,7 +33,8 @@
     "migration:create": "yarn typeorm migration:create",
     "migration:run": "yarn typeorm migration:run -d src/database/data-source.ts",
     "migration:revert": "yarn typeorm migration:revert -d src/database/data-source.ts",
-    "migration:show": "yarn typeorm migration:show -d src/database/data-source.ts"
+    "migration:show": "yarn typeorm migration:show -d src/database/data-source.ts",
+    "seed:services": "node --no-warnings --loader ts-node/esm src/modules/services/services.seed.ts"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

@@ -145,7 +145,7 @@ Content therefore conceptually has an **author user**. The Nest mechanism (guard
 
 ## 5. Open product decisions affecting the model
 
-- **Final catalog content.** The current offers are *Channel Kickstart Session* and *3-Month 1:1 Coaching*. Their slugs, exact titles and summaries for the seed are still the owner's to supply. Whether the UI needs structured display metadata (e.g. "90 minutes", "12 weeks") instead of copy in the summary is open.
+- **Final catalog content:** *settled 2026-10-14.* The seed (`src/modules/services/services.seed.ts`) holds the owner-approved slugs, titles and summaries for *Channel Kickstart Session* (`channel-kickstart`) and *3-Month 1:1 Coaching* (`3-month-1-1-coaching`). Still open: whether the UI needs structured display metadata (e.g. "90 minutes", "12 weeks") instead of copy in the summary.
 - **Application/booking details** (§3.1): the final form fields, where available slots come from and how they're held, email content, and whether and when payment is involved.
 - **Course format:** decides sections/lessons.
 - **Content publishing workflow,** and whether editors may publish.
