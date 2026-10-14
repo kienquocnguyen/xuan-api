@@ -236,7 +236,7 @@ The **actual, decided schema**, so the current database can be understood at a g
 
 | Table      | Status                                                    | Owning module                         | Settled in                                                                      |
 | ---------- | --------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------- |
-| `services` | **decided** (owner-approved 2026-10-09; revised 2026-10-11: `duration_minutes` removed). Migration `CreateServices1791710155502` exists on the WIP branch `feat/build-services-catalog`; the owner ran it on `xuan_dev` and inspected `\d+ services` by hand. Not re-verified on 2026-10-14 (Docker unavailable). It becomes *implemented* when plan Task 14 verifies it | `services` (entity `ServiceOffering`) | `docs/superpowers/plans/2026-10-09-foundation-and-services-catalog.md`, Task 13 |
+| `services` | **implemented** 2026-10-14 by migration `CreateServices1791710155502` (owner-approved 2026-10-09; revised 2026-10-11: `duration_minutes` removed). `\d+ services` matches this map on `xuan_dev` and `xuan_test`; revert/run round trip and an empty second `migration:generate` observed on `xuan_test`; invariants proven by `test/services-schema.e2e-spec.ts` | `services` (entity `ServiceOffering`) | `docs/superpowers/plans/2026-10-09-foundation-and-services-catalog.md`, Task 13 |
 
 #### `services`
 
