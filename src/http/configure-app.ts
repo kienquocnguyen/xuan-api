@@ -1,6 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import helmet from 'helmet';
 import type { AppConfig } from '../config/load-config.js';
+import { setupOpenApi } from './openapi/setup-open-api.js';
 
 /**
  * Nest's Express adapter rethrows body-parser's SyntaxError as a bare BadRequestException, dropping
@@ -22,8 +24,16 @@ function keepJsonParseMarker(error: unknown, _req: Request, _res: Response, next
   next(isParseFailure ? new InvalidJsonBodyError() : error);
 }
 
+/** App-level HTTP setup shared by main.ts and the e2e factory (D6). */
 export function configureApp(app: NestExpressApplication, config: AppConfig): void {
-  app.useBodyParser('json', { limit: '100kb' });
+  // Security headers and CORS first, so error responses (e.g. a body-parser failure) carry them too.
+  app.use(helmet({ contentSecurityPolicy: config.docs.enabled ? false : undefined })); // Swagger UI needs inline scripts (§16)
+  app.enableCors({
+    origin: [...config.cors.origins], // exact origins, never '*' (I20)
+    credentials: true,
+    allowedHeaders: ['Content-Type', 'X-Requested-With'],
+  });
+  app.useBodyParser('json', { limit: '100kb' }); // JSON only (D21)
   app.use(keepJsonParseMarker);
-  void config; // used from Task 11 on
+  if (config.docs.enabled) setupOpenApi(app); // D20
 }
