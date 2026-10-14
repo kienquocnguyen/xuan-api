@@ -192,7 +192,7 @@ TypeORM's `Repository<Entity>` already *is* the repository pattern. Wrapping it 
 
 ```
 request
-  │ JSON parser (JSON only, size limit; over-limit → 413) ─► helmet · CORS ─► [guards: auth slice]
+  │ helmet · CORS ─► JSON parser (JSON only, size limit; over-limit → 413) ─► [guards: auth slice]
   ▼
 APP_PIPE   StandardSchemaValidationPipe + Zod ── invalid ──► AppError(validation) ──────────────┐
   ▼                                                                                             │
@@ -358,7 +358,7 @@ Files and secrets: `development-workflow.md` (Secrets).
 ```
 main.ts          NestFactory.create(AppModule, { bodyParser: false })
                  → configureApp(app, config) → enableShutdownHooks() → listen(config.port)
-configureApp()   JSON parser (conservative limit) · helmet() · CORS · Swagger if config.docs.enabled
+configureApp()   helmet() · CORS · JSON parser (100kb) · parse-marker middleware · Swagger if config.docs.enabled
 HttpContractModule   APP_PIPE · APP_FILTER · APP_INTERCEPTOR
 ```
 

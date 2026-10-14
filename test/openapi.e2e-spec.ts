@@ -23,7 +23,15 @@ describe('OpenAPI document', () => {
       ]),
     );
     expect(Object.keys(doc.paths['/__fixture/echo'].post?.responses ?? {})).toEqual(
-      expect.arrayContaining(['201', '400', '500']),
+      expect.arrayContaining(['201', '400', '413', '500']),
     );
+  });
+
+  it('types details.fields on VALIDATION_FAILED responses (I18)', () => {
+    const doc = createOpenApiDocument(app);
+    const badRequest = JSON.stringify(doc.paths['/__fixture/echo'].post?.responses['400']);
+    expect(badRequest).toContain('#/components/schemas/ValidationErrorDetailsDto');
+    const tooLarge = JSON.stringify(doc.paths['/__fixture/echo'].post?.responses['413']);
+    expect(tooLarge).toContain('PAYLOAD_TOO_LARGE');
   });
 });

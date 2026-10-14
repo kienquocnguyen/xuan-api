@@ -60,6 +60,15 @@ describe('toContractError', () => {
     });
   });
 
+  it('treats a non-framework object carrying a 4xx status as unexpected (500), not a client error', () => {
+    const libraryError = Object.assign(new Error('upstream said 404'), { status: 404 });
+    expect(toContractError(libraryError)).toEqual({
+      status: 500,
+      unexpected: true,
+      body: envelope('INTERNAL_ERROR', 'Something went wrong. Please try again.'),
+    });
+  });
+
   it.each([
     new Error('relation "x" does not exist'),
     'a string',

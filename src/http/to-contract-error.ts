@@ -58,14 +58,13 @@ export function toContractError(exception: unknown): ContractError {
   return { status: c.status, unexpected: true, body: body(c.code, c.message) };
 }
 
-// Nest HttpExceptions and Express body-parser errors both carry an HTTP status.
+// Only Nest HttpExceptions and Express body-parser errors (http-errors with a string `type`, e.g.
+// 'entity.too.large') count as framework statuses. Any other object carrying `status` is a bug: 500.
 function frameworkStatus(exception: unknown): number | undefined {
   if (exception instanceof HttpException) return exception.getStatus();
   if (typeof exception === 'object' && exception !== null) {
-    const status =
-      (exception as { status?: unknown; statusCode?: unknown }).status ??
-      (exception as { statusCode?: unknown }).statusCode;
-    if (typeof status === 'number') return status;
+    const { status, type } = exception as { status?: unknown; type?: unknown };
+    if (typeof status === 'number' && typeof type === 'string') return status;
   }
   return undefined;
 }
