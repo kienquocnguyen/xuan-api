@@ -157,6 +157,7 @@ Each script is added together with the tool it runs.
 | `yarn format` / `yarn format:check`                                  | Prettier write / check               | With Prettier        |
 | `yarn test`                                                          | Unit tests                           | With Vitest          |
 | `yarn test:e2e`                                                      | E2E against `xuan_test` (mutates it) | With the e2e harness |
+| `yarn test:db-guard`                                                 | I21 preflight: exits 1 unless the configured database is `*_test` | With the e2e harness |
 | `yarn db:up` / `yarn db:down`                                        | Start / stop the Compose database    | With Compose         |
 | `yarn migration:generate` / `:create` / `:run` / `:revert` / `:show` | Migrations (through `loadConfig()`)  | With TypeORM         |
 
@@ -342,13 +343,20 @@ Created with the first e2e test.
 
 | Piece              | Contract                                                                                                             |
 | ------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| Global setup       | Loads config with `NODE_ENV=test`, runs the **I21 guard**, applies migrations to `xuan_test` once                    |
+| Preflight          | `yarn test:e2e` = `test:db-guard` → `migration:run` → Vitest, all with `NODE_ENV=test`; the **I21 guard** runs first |
 | App factory        | Builds `AppModule` with `@nestjs/testing`, calls the **same `configureApp()`** as `main.ts` (D6), and initializes it |
 | Database cleanup   | Before each test: the I21 guard, then `TRUNCATE` all application tables (never the migrations table)                 |
 | Fixture controller | A test-only module exercising platform behavior without any business module                                          |
 | Execution          | E2E files run **serially** (shared database, D39)                                                                    |
 
 **The `_test` guard (I21)** refuses destructive cleanup unless the connected database is provably the dedicated test database: its name ends in `_test`, and it matches the configured test database. A wrong `.env.test` must never truncate `xuan_dev`.
+
+The guard (`test/support/test-database-guard.ts`) runs at three points:
+- `yarn test:db-guard`, before `migration:run`. It resolves `DATABASE_URL` through `loadConfig()`, the same path as the TypeORM CLI, and exits 1 before TypeORM loads. It never trusts `NODE_ENV` alone.
+- `createTestApp`, before connecting and again on `current_database()`.
+- `resetDatabase`, before `TRUNCATE`.
+
+Refusals name the database, never the URL. Any other command that mutates the test database must run `test:db-guard` first.
 
 ### Bugs
 

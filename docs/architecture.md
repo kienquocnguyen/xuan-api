@@ -192,7 +192,7 @@ TypeORM's `Repository<Entity>` already *is* the repository pattern. Wrapping it 
 
 ```
 request
-  │ JSON parser (JSON only, size limit; over-limit → 413) ─► helmet · CORS ─► [guards: auth slice]
+  │ helmet · CORS ─► JSON parser (JSON only, size limit; over-limit → 413) ─► [guards: auth slice]
   ▼
 APP_PIPE   StandardSchemaValidationPipe + Zod ── invalid ──► AppError(validation) ──────────────┐
   ▼                                                                                             │
@@ -358,7 +358,7 @@ Files and secrets: `development-workflow.md` (Secrets).
 ```
 main.ts          NestFactory.create(AppModule, { bodyParser: false })
                  → configureApp(app, config) → enableShutdownHooks() → listen(config.port)
-configureApp()   JSON parser (conservative limit) · helmet() · CORS · Swagger if config.docs.enabled
+configureApp()   helmet() · CORS · JSON parser (100kb) · parse-marker middleware · Swagger if config.docs.enabled
 HttpContractModule   APP_PIPE · APP_FILTER · APP_INTERCEPTOR
 ```
 
@@ -434,14 +434,14 @@ These are decided by running real code, not by debate. If one disproves an assum
 
 | Item | Proven by |
 |---|---|
-| Zod issue vendor narrowing in the pipe's exception factory; detecting `REQUIRED` | Translator unit tests + validation e2e |
-| `.meta({ id })` gives named request components | "Document builds" e2e |
-| How the interceptor detects `@HttpCode(204)` | "204 empty body" fixture e2e |
-| `@ApiErrorResponses` adds `VALIDATION_FAILED` automatically or explicitly | Choose while implementing |
-| Helmet CSP vs the Swagger UI | Open `/docs` locally |
+| Zod issue vendor narrowing in the pipe's exception factory; detecting `REQUIRED` | Translator unit tests + validation e2e. **Result (2026-10-14, Zod 4.6):** the pipe hands the factory Zod's runtime issues, so `code`, `origin`, `keys` are present and read defensively. A missing value is `invalid_type` with the message "…received undefined" and no `input` field, so `REQUIRED` is detected from the message. `unrecognized_keys` at the root has `path: []` |
+| `.meta({ id })` gives named request components | "Document builds" e2e. **Result (2026-10-14, @nestjs/swagger 12.0.2):** yes. `@Body({ schema })` with a Zod schema carrying `.meta({ id: 'FixtureEchoDto' })` appears as the named component `FixtureEchoDto`, with no `standardSchemaConverter` fallback |
+| How the interceptor detects `@HttpCode(204)` | "204 empty body" fixture e2e. **Result (2026-10-14):** `Reflector.get(HTTP_CODE_METADATA, handler)`, with the constant imported from `@nestjs/common/constants.js` (exported under ESM; value `__httpCode__`) |
+| `@ApiErrorResponses` adds `VALIDATION_FAILED` automatically or explicitly | Choose while implementing. **Result (2026-10-14): explicitly.** Endpoints with input list `baselineErrors.VALIDATION_FAILED`; `500 INTERNAL_ERROR` is always added |
+| Helmet CSP vs the Swagger UI | Open `/docs` locally. **Result (2026-10-14, helmet 8.3):** helmet's CSP is switched off only when `DOCS_ENABLED=true`; `/docs` then serves the Swagger UI page and its assets (200), and `/docs-json` returns OpenAPI 3.0.0. With docs disabled the default CSP stays on. Helmet and CORS are registered **before** the JSON parser, so body-parser error responses carry the CORS headers too |
 | `process.loadEnvFile()` precedence vs real env vars | `loadConfig` unit test. **Result (2026-10-14, Node 24.21): a variable already set in the real environment wins;** the file never overrides it. `NODE_ENV=test` selects `.env.test`, otherwise `.env` |
 | Lint tool can enforce I2 and I4 (oxlint, else ESLint + boundaries) | A deliberate violation fails lint. **Result (2026-10-14): oxlint is enough.** `.oxlintrc.json` uses `no-restricted-properties` (`process.env`, `globalThis.process`), `no-restricted-imports` paths (`process`, `node:process`) outside `src/config/`, and per-folder pattern overrides for I2 (each override repeats the `process` paths, because an override replaces the base options). Probes for `process.env`, `import { env } from 'node:process'`, a default `node:process` import, `globalThis.process.env` and a cross-layer import all failed lint; lint is green without them. Review still covers anything lint can't see |
 | TypeORM CLI under ESM; entity glob in the CLI DataSource | First `migration:generate` (`database.md`). **Result (2026-10-14):** `typeorm-ts-node-esm -d src/database/data-source.ts` loads the TypeScript data source and `loadConfig()` directly (no build step); globs `src/modules/**/*.entity.ts` and `src/database/migrations/*.ts`. It generated `CreateServices`. `yarn migration:*` wrap it; `NODE_ENV=test` targets `xuan_test` |
 | Generated migrations stable with `uuidv7()` and named constraints | Generate twice; the second is empty |
 | Any `ON CONFLICT` insert names its target (D32). TypeORM's `.orIgnore()` is target-less, so find the mechanism that names it, for the first slice that uses `ON CONFLICT` | Read the logged SQL |
-| Malformed JSON and over-limit bodies reach the filter as `VALIDATION_FAILED` / `PAYLOAD_TOO_LARGE` | Fixture e2e |
+| Malformed JSON and over-limit bodies reach the filter as `VALIDATION_FAILED` / `PAYLOAD_TOO_LARGE` | Fixture e2e. **Result (2026-10-14, Nest 12):** the over-limit error reaches the filter raw (`status 413`, `entity.too.large`). Invalid JSON does **not**: `ExpressAdapter.mapException` rethrows every `SyntaxError` as `new BadRequestException(message)`, dropping `type`. `configureApp()` therefore adds an Express error middleware after the JSON parser that re-raises the parse failure as `InvalidJsonBodyError` (status 400, `type: 'entity.parse.failed'`), which Nest passes through unchanged |
