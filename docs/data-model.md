@@ -114,14 +114,13 @@ ServiceOffering ──► ServiceApplication ──(accepted)──► Appointme
 
 ## 4. Authorization (conceptual requirements)
 
-**Confirmed:** there is one user/account identity, and a user can carry an authorization meaning of **customer**, **editor** or **admin**.
+**Confirmed and implemented (2026-10-14, auth slice; `architecture.md` §17):**
+- One account per person (`users`), signing in with **Google only** in V1. Provider identities are separate rows (`auth_identities`: provider + provider user id), so Facebook can be added later without changing `users`.
+- **One role per user**, a `role` column: `user` (the customer), `editor` or `admin`. New accounts are `user`. No roles/permissions tables.
+- The local account is the source of truth for role and profile after sign-in; Google only bootstraps and syncs email, name and avatar.
+- Initial admins come from the `AUTH_ADMIN_EMAILS` allowlist (verified Google email). Admins move people between `user` and `editor`; removing an editor never deletes the account; no API grants or removes `admin`.
 
-**Not decided, pending the auth slice:**
-- whether a user has one role or several;
-- whether a role is a column on users, or `roles`/`user_roles` tables exist;
-- whether a richer permission system is ever justified.
-
-Nothing here implies any of those storage choices.
+**Future references to a user:** a content post's author, a service application's applicant (optional: guests apply too; the application keeps a snapshot of the submitted name/email for history, and the profile is used to prefill the form), appointments through their application, orders/payments, enrollments and course access.
 
 ### Two different authorization questions
 
@@ -134,21 +133,22 @@ Content therefore conceptually has an **author user**. The Nest mechanism (guard
 
 ### Content permissions
 
-| Action | Admin | Editor | Customer |
+| Action | Admin | Editor | User (customer) |
 |---|---|---|---|
 | Create a post | ✓ | ✓ (becomes its author) | ✗ |
 | Edit own post | ✓ | ✓ | ✗ |
 | Edit another user's post | ✓ | ✗ | ✗ |
-| Delete a post | ✓ | ✗ | ✗ |
-| **Publish** | ✓ | **OPEN product decision**: publish directly, or drafts for admin approval | ✗ |
-| Manage users / system administration | ✓ | ✗ | ✗ |
+| Publish / unpublish **own** post | ✓ | ✓ | ✗ |
+| Delete **own** post | ✓ | ✓ | ✗ |
+| Publish / unpublish / delete **another author's** post | ✓ | ✗ | ✗ |
+| Manage editors (user ↔ editor) / system administration | ✓ | ✗ | ✗ |
 
 ## 5. Open product decisions affecting the model
 
 - **Final catalog content:** *settled 2026-10-14.* The seed (`src/modules/services/services.seed.ts`) holds the owner-approved slugs, titles and summaries for *Channel Kickstart Session* (`channel-kickstart`) and *3-Month 1:1 Coaching* (`3-month-1-1-coaching`). Still open: whether the UI needs structured display metadata (e.g. "90 minutes", "12 weeks") instead of copy in the summary.
 - **Application/booking details** (§3.1): the final form fields, where available slots come from and how they're held, email content, and whether and when payment is involved.
 - **Course format:** decides sections/lessons.
-- **Content publishing workflow,** and whether editors may publish.
+- **Content publishing workflow** beyond the settled rule (editors publish and delete their own posts; admins any): drafts, scheduling, review.
 - **Newsletter (Creator Notes):** real capability or not.
 - **Enrollment vs entitlement:** one concept or two (decided with orders).
 - **Money:** currency, price units, formatting. That's why services carry **no price** in V1.

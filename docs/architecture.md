@@ -32,7 +32,7 @@ The design was decided in `docs/superpowers/specs/2026-10-09-xuan-api-foundation
 | Pipe | Request validation |
 | Filter | Errors → contract |
 | Interceptor | Success envelope |
-| Guard | Authorization (arrives with auth) |
+| Guard | Authentication and authorization: `CsrfGuard`, then `AccessGuard` with `@Public()` / `@Roles()` (§17) |
 
 **Not adopted by default:**
 - presentation/application/domain/infrastructure folders
@@ -50,7 +50,7 @@ Each needs a concrete problem (C1, C4).
 | Organize by business domain | Globals and hidden dependencies → DI |
 | Controller → service → persistence | Controllers importing other domains' models → I1, I2 |
 | Validate before business logic | Validation inside controllers → global pipe (D7) |
-| Auth is cross-cutting | Manual role checks everywhere → guards (auth slice) |
+| Auth is cross-cutting | Manual role checks everywhere → guards and decorators (§17) |
 | Domain folders | Ad hoc status codes → `AppError` + filter (§9). App-only integrity → constraints. Schema drift → migrations |
 
 ## 2. System context
@@ -86,10 +86,11 @@ src/
   config/            loadConfig(): env → Zod → frozen AppConfig
   errors/            AppError, ErrorKind, baseline error codes
   database/          TypeORM root config, CLI DataSource, migrations/, Postgres error facts
-  http/              HttpContractModule (global pipe/filter/interceptor), configureApp(),
-                     validation translator, OpenAPI helpers, error schemas
+  http/              HttpContractModule (global pipe/filter/interceptor/CSRF guard), configureApp(),
+                     validation translator, OpenAPI helpers, error schemas, auth/ (decorators, roles, ownership)
   modules/
     services/        services.module.ts · .controller.ts · .service.ts · service-offering.entity.ts · dto/   (first slice)
+    users/           users, auth_identities, sessions · auth + admin controllers · AccessGuard · google/ gateway (§17)
 test/                e2e specs, test-only fixture controller, test support (development-workflow.md: Testing)
 ```
 
@@ -192,7 +193,7 @@ TypeORM's `Repository<Entity>` already *is* the repository pattern. Wrapping it 
 
 ```
 request
-  │ helmet · CORS ─► JSON parser (JSON only, size limit; over-limit → 413) ─► [guards: auth slice]
+  │ helmet · CORS ─► JSON parser (JSON only, size limit; over-limit → 413) ─► cookie-parser ─► CsrfGuard ─► AccessGuard (§17)
   ▼
 APP_PIPE   StandardSchemaValidationPipe + Zod ── invalid ──► AppError(validation) ──────────────┐
   ▼                                                                                             │
@@ -350,6 +351,13 @@ real env vars (production) ─────────────────�
 | `DATABASE_URL` | |
 | `CORS_ORIGINS` | comma-separated exact origins |
 | `DOCS_ENABLED` | default false |
+| `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth client (secret) |
+| `GOOGLE_CALLBACK_URL` | `https` in production |
+| `AUTH_WEB_URL` | Web app origin to return to; must be one of `CORS_ORIGINS` |
+| `AUTH_COOKIE_SECRET` | ≥ 32 chars; signs the OAuth state cookie (secret). Backend-specific: never reuse another app's auth secret |
+| `AUTH_COOKIE_SECURE` | default true; must be true in production |
+| `AUTH_SESSION_TTL_DAYS` | 1–90, default 14 |
+| `AUTH_ADMIN_EMAILS` | comma-separated; initial admin bootstrap (§17) |
 
 Files and secrets: `development-workflow.md` (Secrets).
 
@@ -374,7 +382,7 @@ HttpContractModule   APP_PIPE · APP_FILTER · APP_INTERCEPTOR
 | Shutdown hooks (D22) | Enabled | TypeORM closes its pool on SIGTERM |
 | Docs (D20) | `/docs` + `/docs-json` only when config enables them | Off by default; contract §6: non-production or protected |
 | Rate limiting (D23) | Not in the first slice; **required on public writes before public launch** | A launch gate, not a learning-slice concern |
-| Auth guard, cookies, CSRF header/Origin enforcement | Deferred to the auth slice (§15) | — |
+| Auth guard, cookies, CSRF header/Origin enforcement | `CsrfGuard` + global `AccessGuard`; `cookie-parser` with `AUTH_COOKIE_SECRET` (§17) | Default deny; cookie sessions need CSRF defense in depth (`api-contract.md` §8) |
 
 ## 13. Decisions log
 
@@ -397,6 +405,7 @@ Each entry ends with *revisit when*. The full reasoning and the rejected alterna
   - **Learned later:** body validation and write conflicts, with authenticated admin service management.
   - **Supersedes** the frozen spec's D12 (a `Subscribers` newsletter slice). Later product clarification showed newsletter subscription wasn't a confirmed capability, and a learning slice must be a real one. Newsletter ("Creator Notes") now *needs product confirmation* (`data-model.md`). If confirmed, it's introduced explicitly as a newsletter/email-subscription capability.
   - *Revisit when* never: the next slices build on it.
+- **AD13. Auth: Google-only sign-in, opaque server-side sessions, one role column, default-deny guard, ownership policy in `http/auth/`.** Spec A1–A14. *Revisit when* a second identity provider, a non-browser API client (tokens), or a permission need beyond three roles appears.
 
 ## 14. Open product questions
 
@@ -405,19 +414,18 @@ These are shared with xuan-web. Agents ask instead of guessing.
 - Money: currency, price units, formatting.
 - Locale/i18n of API `message` texts.
 - Concurrency on admin edits: last-write-wins vs optimistic concurrency.
-- The domain questions (final catalog content, the service application/booking details, course format, content publishing and editor publish permission, newsletter): `data-model.md` §5.
+- The domain questions (final catalog content, the service application/booking details, course format, content publishing workflow, newsletter): `data-model.md` §5.
 
 ## 15. Deferred architecture
 
 | Deferred | Trigger |
 |---|---|
-| Auth: global guard + `@Public()`, users, **role persistence** (one or many roles; column or tables), cookies, refresh lifecycle, CSRF header and Origin enforcement. It must support both **role-based** and **resource-ownership** authorization; the conceptual requirements (admin / editor / customer, author ownership of content) are in `data-model.md` §4 | Auth slice design |
-| Content: post types, rich text, media, draft/publish state, publishing workflow, editor publish permission (open) | Content slice (after auth) |
+| Content: post types, rich text, media, draft/publish state, publishing workflow (editors publish their **own** posts, §17) | Content slice |
 | Newsletter subscriptions ("Creator Notes") | Product confirmation |
 | Service applications and appointments: persistence, statuses, slot availability and holds (no double acceptance), Google Calendar / Meet integration, applicant emails. Confirmed concepts in `data-model.md` §3.1 | Application/booking slice design |
 | Rate limiting + `trust proxy` | **Before public launch** (D23) |
 | Pagination implementation (`PageQueryDto`, `PageInfoDto`, paginated decorator) | The first list that needs it (the services list's pagination is settled in its plan) |
-| First request-body validation and first conflict → `AppError` (409) | Admin service management (auth slice) or courses |
+| First request-body validation (first 409 arrived with `ADMIN_ROLE_LOCKED`) | Admin service management or courses |
 | Cross-module ORM relation metadata (C12) | First real database relation between modules |
 | Module-to-module details; cross-module transactions | First real consumer (orders/entitlements) |
 | Query classes, dedicated mappers, local layering | C1, C2, C4 signals |
@@ -445,3 +453,35 @@ These are decided by running real code, not by debate. If one disproves an assum
 | Generated migrations stable with `uuidv7()` and named constraints | Generate twice; the second is empty. **Result (2026-10-14, TypeORM 1.1):** stable. With `CreateServices1791710155502` applied, a second `migration:generate` reports "No changes in database schema" on both `xuan_dev` and `xuan_test`; `uuidv7()` defaults and `pk_`/`uq_`/`ck_` names declared in the entity round-trip unchanged |
 | Any `ON CONFLICT` insert names its target (D32). TypeORM's `.orIgnore()` is target-less, so find the mechanism that names it, for the first slice that uses `ON CONFLICT` | Read the logged SQL. **Result (2026-10-14, TypeORM 1.1):** `.orUpdate(columns, 'uq_services_slug')` with a **string** target emits `ON CONFLICT ON CONSTRAINT "uq_services_slug" DO UPDATE SET …` (an array target would emit a column list). Used by `yarn seed:services` |
 | Malformed JSON and over-limit bodies reach the filter as `VALIDATION_FAILED` / `PAYLOAD_TOO_LARGE` | Fixture e2e. **Result (2026-10-14, Nest 12):** the over-limit error reaches the filter raw (`status 413`, `entity.too.large`). Invalid JSON does **not**: `ExpressAdapter.mapException` rethrows every `SyntaxError` as `new BadRequestException(message)`, dropping `type`. `configureApp()` therefore adds an Express error middleware after the JSON parser that re-raises the parse failure as `InvalidJsonBodyError` (status 400, `type: 'entity.parse.failed'`), which Nest passes through unchanged |
+
+## 17. Authentication and authorization
+
+Design and trade-offs: `docs/superpowers/specs/2026-10-14-user-auth-and-rbac-design.md` (A1–A14). Physical tables: `database.md` §12. Contract: `api-contract.md` §7, §8, §11.
+
+```
+Browser ─GET /auth/google?returnTo─► API: signed xc_oauth cookie {state, nonce, PKCE verifier, returnTo, exp}
+        ◄──302 to Google──────────── (scope openid email profile, S256 challenge, nonce)
+Google ─302 /auth/google/callback?code&state─► API: verify cookie + state → exchange code (PKCE) → verify ID token
+                                                  (signature, aud, iss, exp, nonce, email_verified)
+                                               → UsersService.signInWithGoogle (one transaction)
+                                               → revoke presented session → new session → xc_session cookie
+        ◄──302 AUTH_WEB_URL + returnTo (or /login?authError=CODE)
+Browser ─GET /auth/me (credentials)──► AccessGuard: xc_session → SHA-256 → sessions ⋈ users → request.user
+```
+
+| Piece | Where | Rule |
+|---|---|---|
+| Google | `modules/users/google/` gateway (C5) | Only identity leaves it; Google tokens are discarded. E2E uses a fake |
+| Sessions | `modules/users/sessions.service.ts` | Opaque 256-bit token in `xc_session` (HttpOnly, SameSite=Lax, host-only, `Secure` per config); only its SHA-256 is stored; absolute TTL; logout deletes the row |
+| Default deny | `AccessGuard` (`APP_GUARD`, users module) | Every route needs a session unless `@Public()` (401 `UNAUTHENTICATED`); `@Roles(...)` → 403 `FORBIDDEN`. The role is read from `users` per request, so demotions apply at once |
+| CSRF | `CsrfGuard` (`APP_GUARD`, `http/auth/`), runs first | POST/PUT/PATCH/DELETE need `X-Requested-With: XMLHttpRequest`; an `Origin` header must be allowlisted |
+| Decorators | `http/auth/` | `@Public()`, `@Roles(...)`, `@CurrentUser()`; any module may import them (§4) |
+| Ownership | `http/auth/ownership.ts` | `assertCanManageOwnedResource(actor, ownerId)`: admin any, editor own, user none. Services call it after loading the record |
+| Roles | `users.role` | `user` \| `editor` \| `admin`, one per user; explicit lists at each route |
+| Admin bootstrap | `AUTH_ADMIN_EMAILS` | A verified listed email becomes `admin` at sign-in; removal never demotes |
+| Editor management | `admin-users.controller.ts` | Only `user ↔ editor`; an admin target is `409 ADMIN_ROLE_LOCKED` |
+| Redirect routes | `@RawResponse()` (`http/`) | The OAuth routes write their own 302s; the success interceptor leaves them alone (AD6 opt-out) |
+
+**Future providers (Facebook):** widen `ck_auth_identities_provider`, add a gateway and two routes. A new identity whose email belongs to another account is refused (`ACCOUNT_CONFLICT`), as for Google; linking is an explicit action by a signed-in user, never an email match.
+
+**Future references to `users.id`:** `content_posts.author_id` (ownership via the policy above), `service_applications.user_id` (nullable: guests apply; the application snapshots the submitted name/email for history while `users` stays the live profile used for prefill), appointments through their application, `orders.user_id`, `enrollments.user_id` / course access.
