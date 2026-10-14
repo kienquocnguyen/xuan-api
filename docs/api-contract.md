@@ -209,6 +209,8 @@ The authoritative list is the OpenAPI document. This table records deliberate be
 | `GET /services` | Public. Returns the Services catalog, the offers shown on Work With Me and the homepage "Ways", as `{ data: ServiceDto[] }`. **Published services only**, ordered by `sort_order` then `slug`, **not paginated in V1**. Errors: `500 INTERNAL_ERROR` |
 | `GET /services/:slug` | Public. Returns one published service as `{ data: ServiceDto }`. **No slug-format validation** (a stated D7 deviation: the slug is an opaque lookup key). An unknown, unpublished or malformed slug → `404 NOT_FOUND`. Errors: `404 NOT_FOUND`; `500 INTERNAL_ERROR` |
 
+Both are implemented (`src/modules/services/`, 2026-10-14) and proven by exact-body e2e (`test/services.e2e-spec.ts`) and the OpenAPI e2e.
+
 **`ServiceDto`** = `{ id, slug, title, summary }`. It has no price, no duration and no booking or calendar fields. `isPublished`, `sortOrder` and `createdAt` stay internal. A service is a catalog offer, not an appointment (`data-model.md` §3.1). Application, booking and calendar endpoints aren't part of the current contract; they come with the application/booking slice.
 
 No newsletter/subscription endpoint is part of the current contract. That capability needs product confirmation (`data-model.md`).

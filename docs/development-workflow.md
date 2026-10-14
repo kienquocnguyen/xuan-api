@@ -160,6 +160,7 @@ Each script is added together with the tool it runs.
 | `yarn test:db-guard`                                                 | I21 preflight: exits 1 unless the configured database is `*_test` | With the e2e harness |
 | `yarn db:up` / `yarn db:down`                                        | Start / stop the Compose database    | With Compose         |
 | `yarn migration:generate` / `:create` / `:run` / `:revert` / `:show` | Migrations (through `loadConfig()`)  | With TypeORM         |
+| `yarn seed:services`                                                | Upsert the approved Services catalog (mutates the target DB; run `test:db-guard` first for `xuan_test`) | With the Services seed |
 
 Prefix `NODE_ENV=test` (e.g. `NODE_ENV=test yarn migration:run`) to target `xuan_test` through `.env.test`.
 
