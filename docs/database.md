@@ -263,7 +263,7 @@ erDiagram
 | `summary`          | `varchar(500)` | yes      | —          | **CK** `ck_services_summary_not_blank`                      | The card/detail description                                                                                                                                         |
 | `is_published`     | `boolean`      | yes      | `false`    | —                                                           | Only published services are visible through the public API. Unpublished = draft                                                                                     |
 | `sort_order`       | `integer`      | yes      | `0`        | —                                                           | Display order in the catalog (ties broken by `slug`)                                                                                                                |
-| `created_at`       | `timestamptz`  | yes      | `now()`    | —                                                           | When the row was created (D27). **No `updated_at`:** the table has no update path in V1 (seed and admin come later)                                                 |
+| `created_at`       | `timestamptz`  | yes      | `now()`    | —                                                           | When the row was created (D27). **No `updated_at` yet.** The only writer is the idempotent seed (`yarn seed:services`): it upserts on `uq_services_slug`, so a re-run updates `title`, `summary`, `is_published` and `sort_order` in place while `id` and `created_at` stay stable. Admin editing comes later                                                 |
 
 **Table-level constraints and indexes:**
 
