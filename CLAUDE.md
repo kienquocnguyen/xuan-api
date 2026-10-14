@@ -69,6 +69,7 @@ Located in `.claude/skills/`. They're changed only with `superpowers:writing-ski
 - **xuan-api-feature**: adding, changing or fixing a backend capability (learning and delegated modes).
 - **xuan-database-change**: any schema change, including schema-only tasks.
 - **xuan-api-architecture-review**: evidence-first review before done or a PR, and of the owner's code.
+- **xuan-git-branch-cohesion**: **mandatory before** creating, splitting or deleting a branch, cherry-picking, rebasing, porting from an old branch, or deciding whether docs/tests/plumbing belong on the current branch.
 
 ## Working with Superpowers
 
