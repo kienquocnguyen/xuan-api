@@ -6,6 +6,7 @@ import { Roles } from '../../http/auth/auth.decorators.js';
 import { ROLES } from '../../http/auth/role.js';
 import { ApiEnvelopeResponse } from '../../http/openapi/api-envelope-response.js';
 import { ApiErrorResponses } from '../../http/openapi/api-error-responses.js';
+import { ApiSchemaParameters } from '../../http/openapi/api-schema-parameters.js';
 import { AdminUserDto, toAdminUserDto } from './dto/admin-user.dto.js';
 import { usersErrors } from './users.errors.js';
 import { UsersService } from './users.service.js';
@@ -31,6 +32,7 @@ export class AdminUsersController {
   /** Unpaginated in V1: a small, admin-only list (pagination arrives with the first list that needs it). */
   @Get('users')
   @ApiEnvelopeResponse(AdminUserDto, { isArray: true })
+  @ApiSchemaParameters('query', adminUsersQuerySchema)
   @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN)
   async listUsers(
     @Query({ schema: adminUsersQuerySchema }) query: z.infer<typeof adminUsersQuerySchema>,
@@ -42,6 +44,7 @@ export class AdminUsersController {
   /** user → editor; idempotent for an editor; 409 for an admin. */
   @Put('editors/:userId')
   @ApiEnvelopeResponse(AdminUserDto)
+  @ApiSchemaParameters('path', editorTargetSchema)
   @ApiErrorResponses(
     VALIDATION_FAILED,
     UNAUTHENTICATED,
@@ -59,6 +62,7 @@ export class AdminUsersController {
   @Delete('editors/:userId')
   @HttpCode(204)
   @ApiNoContentResponse({ description: 'The user is not an editor (any more).' })
+  @ApiSchemaParameters('path', editorTargetSchema)
   @ApiErrorResponses(
     VALIDATION_FAILED,
     UNAUTHENTICATED,

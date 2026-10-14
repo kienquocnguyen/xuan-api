@@ -15,6 +15,7 @@ import { CurrentUser, Public } from '../../http/auth/auth.decorators.js';
 import type { AuthenticatedUser } from '../../http/auth/role.js';
 import { ApiEnvelopeResponse } from '../../http/openapi/api-envelope-response.js';
 import { ApiErrorResponses } from '../../http/openapi/api-error-responses.js';
+import { ApiSchemaParameters } from '../../http/openapi/api-schema-parameters.js';
 import { RawResponse } from '../../http/raw-response.decorator.js';
 import { CurrentUserDto, toCurrentUserDto } from './dto/current-user.dto.js';
 import {
@@ -57,6 +58,7 @@ export class AuthController {
   @Get('google')
   @RawResponse()
   @ApiFoundResponse({ description: 'Redirect to Google sign-in.' })
+  @ApiSchemaParameters('query', googleSignInQuerySchema)
   @ApiErrorResponses(baselineErrors.VALIDATION_FAILED)
   startGoogleSignIn(
     @Query({ schema: googleSignInQuerySchema }) query: z.infer<typeof googleSignInQuerySchema>,
