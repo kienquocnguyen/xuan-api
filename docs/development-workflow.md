@@ -115,8 +115,9 @@ These are **learning targets and signals, not gates.** They help the owner judge
 
 | Task class   | Delegated since | Notes |
 | ------------ | --------------- | ----- |
-| Foundation and HTTP contract platform: remaining plan Tasks 1–12 (`2026-10-09-foundation-and-services-catalog.md`) | 2026-10-14 | Claude implements, verifies and reviews. The owner approves each phase PR |
+| Foundation and HTTP contract platform: remaining plan Tasks 1–12 (`2026-10-09-foundation-and-services-catalog.md`) | 2026-10-14 | Claude implements, verifies and reviews. The owner approved each phase PR until merge delegation (row below) |
 | Services catalog: remaining plan Tasks 14–18 | 2026-10-14, effective once Task 12 is done | Refits the preserved WIP on `feat/build-services-catalog` onto the platform |
+| Git workflow, including merging task PRs into `dev` | 2026-10-14 (after PR #5) | Claude branches, commits, pushes, opens PRs and **merges them into `dev`** with a merge commit once: the outcome is complete; verification is observed; architecture and fresh whole-branch reviews have passed; no Critical or blocking Important finding is open; and the PR is mergeable under branch protection. Never a direct push to `dev`, a force-push to a protected branch or a protection bypass. Branch boundaries follow `xuan-git-branch-cohesion` |
 | Database operations inside delegated tasks | — (not delegated) | Migration run/revert, resets, `TRUNCATE`, volume or database removal and other destructive or state-changing database steps still need the owner's explicit approval each time (`xuan-database-change`) |
 
 ## 4. Local setup

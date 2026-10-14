@@ -26,7 +26,7 @@ Only when **all** of these are true:
 - local `dev` has been updated from `origin/dev`;
 - the new work is an independent mergeable outcome.
 
-If the next outcome depends on an unmerged PR, **do not stack.** Close that PR first: get it through review and merge it, since merging is delegated when its conditions hold. If the merge is blocked on the owner, use the time for work that doesn't need a branch: read-only inspection, reading the plan, drafting the next physical map in the ledger. Then branch from the updated `dev`.
+If the next outcome depends on an unmerged PR, **do not stack.** Close that PR first: get it through review and merge it, since merging into `dev` is delegated when its conditions hold (`development-workflow.md` §3.5). If the merge is blocked on the owner, use the time for work that doesn't need a branch: read-only inspection, reading the plan, drafting the next physical map in the ledger. Then branch from the updated `dev`.
 
 ## Never
 
