@@ -6,6 +6,14 @@ const valid = {
   DATABASE_URL: 'postgres://xuan_app:s3cret@localhost:5433/xuan_dev',
   CORS_ORIGINS: 'http://localhost:3000, https://xuancreative.com',
   DOCS_ENABLED: 'true',
+  GOOGLE_CLIENT_ID: 'client-id.apps.googleusercontent.com',
+  GOOGLE_CLIENT_SECRET: 'google-s3cret',
+  GOOGLE_CALLBACK_URL: 'http://localhost:4000/auth/google/callback',
+  AUTH_WEB_URL: 'http://localhost:3000',
+  AUTH_COOKIE_SECRET: 'x'.repeat(32),
+  AUTH_COOKIE_SECURE: 'false',
+  AUTH_SESSION_TTL_DAYS: '7',
+  AUTH_ADMIN_EMAILS: ' Owner@Example.com , second@example.com',
 };
 
 describe('loadConfig', () => {
@@ -16,6 +24,18 @@ describe('loadConfig', () => {
       database: { url: valid.DATABASE_URL },
       cors: { origins: ['http://localhost:3000', 'https://xuancreative.com'] },
       docs: { enabled: true },
+      auth: {
+        google: {
+          clientId: valid.GOOGLE_CLIENT_ID,
+          clientSecret: valid.GOOGLE_CLIENT_SECRET,
+          callbackUrl: valid.GOOGLE_CALLBACK_URL,
+        },
+        webUrl: 'http://localhost:3000',
+        cookieSecret: valid.AUTH_COOKIE_SECRET,
+        cookieSecure: false,
+        sessionTtlDays: 7,
+        adminEmails: ['owner@example.com', 'second@example.com'],
+      },
     });
   });
 
@@ -40,6 +60,35 @@ describe('loadConfig', () => {
   ])('rejects an invalid %s and names it', (name, env) => {
     expect(() => loadConfig(env)).toThrow(ConfigError);
     expect(() => loadConfig(env)).toThrow(name);
+  });
+
+  it('defaults the cookie to Secure, sessions to 14 days and no admin emails', () => {
+    const { AUTH_COOKIE_SECURE, AUTH_SESSION_TTL_DAYS, AUTH_ADMIN_EMAILS, ...rest } = valid;
+    const config = loadConfig(rest);
+    expect(config.auth.cookieSecure).toBe(true);
+    expect(config.auth.sessionTtlDays).toBe(14);
+    expect(config.auth.adminEmails).toEqual([]);
+  });
+
+  it.each([
+    ['GOOGLE_CLIENT_ID', { ...valid, GOOGLE_CLIENT_ID: undefined }],
+    ['GOOGLE_CLIENT_SECRET', { ...valid, GOOGLE_CLIENT_SECRET: '' }],
+    ['GOOGLE_CALLBACK_URL', { ...valid, GOOGLE_CALLBACK_URL: 'not a url' }],
+    ['AUTH_COOKIE_SECRET', { ...valid, AUTH_COOKIE_SECRET: 'too-short' }],
+    ['AUTH_WEB_URL', { ...valid, AUTH_WEB_URL: 'http://localhost:5173' }],
+    ['AUTH_WEB_URL', { ...valid, AUTH_WEB_URL: 'http://localhost:3000/app' }],
+    ['AUTH_SESSION_TTL_DAYS', { ...valid, AUTH_SESSION_TTL_DAYS: '365' }],
+    ['AUTH_ADMIN_EMAILS', { ...valid, AUTH_ADMIN_EMAILS: 'owner@example.com, not-an-email' }],
+    ['AUTH_COOKIE_SECURE', { ...valid, NODE_ENV: 'production', AUTH_COOKIE_SECURE: 'false' }],
+    ['GOOGLE_CALLBACK_URL', { ...valid, NODE_ENV: 'production', AUTH_COOKIE_SECURE: 'true' }],
+  ])('rejects an invalid auth setting %s and names it', (name, env) => {
+    expect(() => loadConfig(env)).toThrow(ConfigError);
+    expect(() => loadConfig(env)).toThrow(name);
+  });
+
+  it('never prints a secret in the error', () => {
+    const env = { ...valid, AUTH_COOKIE_SECRET: 'short-s3cret' };
+    expect(() => loadConfig(env)).toThrow(/^Invalid configuration: AUTH_COOKIE_SECRET$/);
   });
 
   it('never prints a value in the error', () => {
