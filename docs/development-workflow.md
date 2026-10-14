@@ -160,6 +160,8 @@ Each script is added together with the tool it runs.
 | `yarn db:up` / `yarn db:down`                                        | Start / stop the Compose database    | With Compose         |
 | `yarn migration:generate` / `:create` / `:run` / `:revert` / `:show` | Migrations (through `loadConfig()`)  | With TypeORM         |
 
+Prefix `NODE_ENV=test` (e.g. `NODE_ENV=test yarn migration:run`) to target `xuan_test` through `.env.test`.
+
 ## 6. Adding a dependency
 
 1. Name the responsibility it takes over, and confirm that responsibility exists **now**.

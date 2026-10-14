@@ -79,4 +79,4 @@ Located in `.claude/skills/`. They're changed only with `superpowers:writing-ski
 ## Dependencies and commands
 
 - Install a dependency only when a task needs its responsibility now. **Yarn 4 only.**
-- Commands arrive with their tools: `docs/development-workflow.md` §5. None exist yet.
+- Commands arrive with their tools: `docs/development-workflow.md` §5 lists them; `package.json` has the ones that exist.

@@ -27,7 +27,12 @@
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "db:up": "docker compose up -d db",
     "db:down": "docker compose stop db",
-    "typeorm": "typeorm-ts-node-esm"
+    "typeorm": "typeorm-ts-node-esm",
+    "migration:generate": "yarn typeorm migration:generate -d src/database/data-source.ts",
+    "migration:create": "yarn typeorm migration:create",
+    "migration:run": "yarn typeorm migration:run -d src/database/data-source.ts",
+    "migration:revert": "yarn typeorm migration:revert -d src/database/data-source.ts",
+    "migration:show": "yarn typeorm migration:show -d src/database/data-source.ts"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

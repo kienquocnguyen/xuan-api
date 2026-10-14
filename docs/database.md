@@ -236,7 +236,7 @@ The **actual, decided schema**, so the current database can be understood at a g
 
 | Table      | Status                                                    | Owning module                         | Settled in                                                                      |
 | ---------- | --------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------- |
-| `services` | **decided** (owner-approved 2026-10-09; revised 2026-10-11: `duration_minutes` removed; no migration yet) | `services` (entity `ServiceOffering`) | `docs/superpowers/plans/2026-10-09-foundation-and-services-catalog.md`, Task 13 |
+| `services` | **decided** (owner-approved 2026-10-09; revised 2026-10-11: `duration_minutes` removed). Migration `CreateServices1791710155502` exists on the WIP branch `feat/build-services-catalog`; the owner ran it on `xuan_dev` and inspected `\d+ services` by hand. Not re-verified on 2026-10-14 (Docker unavailable). It becomes *implemented* when plan Task 14 verifies it | `services` (entity `ServiceOffering`) | `docs/superpowers/plans/2026-10-09-foundation-and-services-catalog.md`, Task 13 |
 
 #### `services`
 

@@ -441,7 +441,7 @@ These are decided by running real code, not by debate. If one disproves an assum
 | Helmet CSP vs the Swagger UI | Open `/docs` locally |
 | `process.loadEnvFile()` precedence vs real env vars | `loadConfig` unit test. **Result (2026-10-14, Node 24.21): a variable already set in the real environment wins;** the file never overrides it. `NODE_ENV=test` selects `.env.test`, otherwise `.env` |
 | Lint tool can enforce I2 and I4 (oxlint, else ESLint + boundaries) | A deliberate violation fails lint. **Result (2026-10-14): oxlint is enough.** `no-restricted-properties` (process.env) and per-folder `no-restricted-imports` overrides in `.oxlintrc.json`; the probe `src/http/lint-probe.ts` failed with exactly the I2 and I4 errors, and lint is green without it |
-| TypeORM CLI under ESM; entity glob in the CLI DataSource | First `migration:generate` (`database.md`) |
+| TypeORM CLI under ESM; entity glob in the CLI DataSource | First `migration:generate` (`database.md`). **Result (2026-10-14):** `typeorm-ts-node-esm -d src/database/data-source.ts` loads the TypeScript data source and `loadConfig()` directly (no build step); globs `src/modules/**/*.entity.ts` and `src/database/migrations/*.ts`. It generated `CreateServices`. `yarn migration:*` wrap it; `NODE_ENV=test` targets `xuan_test` |
 | Generated migrations stable with `uuidv7()` and named constraints | Generate twice; the second is empty |
 | Any `ON CONFLICT` insert names its target (D32). TypeORM's `.orIgnore()` is target-less, so find the mechanism that names it, for the first slice that uses `ON CONFLICT` | Read the logged SQL |
 | Malformed JSON and over-limit bodies reach the filter as `VALIDATION_FAILED` / `PAYLOAD_TOO_LARGE` | Fixture e2e |
