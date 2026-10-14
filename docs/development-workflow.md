@@ -13,7 +13,7 @@ Superpowers provides the process. The xuan-api skills plug in at fixed points.
 
 | Task                                                                        | Path                                                                                                                                                                                                              |
 | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| New capability or subsystem; change to a boundary, contract or architecture | `superpowers:brainstorming` (architectural) → spec in `docs/superpowers/specs/` → `superpowers:writing-plans` → execution (§3 decides who types) → review → verify → `superpowers:finishing-a-development-branch` |
+| New capability or subsystem; change to a boundary, contract or architecture | `superpowers:brainstorming` (architectural) → spec in `docs/superpowers/specs/` → `superpowers:writing-plans` → execution (§3 decides who types) → review → verify → `superpowers:finishing-a-development-branch` (PR to `dev`; never its branch-deletion step, §9) |
 | Small change to existing code                                               | `superpowers:brainstorming` (bounded: a short design in chat, approval) → implement → review → verify                                                                                                             |
 | **Trivial change** (§2)                                                     | inspect → implement → relevant verification                                                                                                                                                                       |
 | Bug                                                                         | `superpowers:systematic-debugging` → regression test (§11) → fix → review → verify                                                                                                                                |
@@ -117,7 +117,7 @@ These are **learning targets and signals, not gates.** They help the owner judge
 | ------------ | --------------- | ----- |
 | Foundation and HTTP contract platform: remaining plan Tasks 1–12 (`2026-10-09-foundation-and-services-catalog.md`) | 2026-10-14 | Claude implements, verifies and reviews. The owner approved each phase PR until merge delegation (row below) |
 | Services catalog: remaining plan Tasks 14–18 | 2026-10-14, effective once Task 12 is done | Refits the preserved WIP on `feat/build-services-catalog` onto the platform |
-| Git workflow, including merging task PRs into `dev` | 2026-10-14 (after PR #5) | Claude branches, commits, pushes, opens PRs and **merges them into `dev`** with a merge commit once: the outcome is complete; verification is observed; architecture and fresh whole-branch reviews have passed; no Critical or blocking Important finding is open; and the PR is mergeable under branch protection. Never a direct push to `dev`, a force-push to a protected branch or a protection bypass. Branch boundaries follow `xuan-git-branch-cohesion` |
+| Git workflow, including merging task PRs into `dev` (and, since 2026-10-14, the `dev` → `main` release PR) | 2026-10-14 (after PR #5) | Claude branches, commits, pushes, opens PRs and **merges them into their target** (`dev` for work branches; `main` only for the `dev` release PR, §9) with a merge commit once: the outcome is complete; verification is observed; architecture and fresh whole-branch reviews have passed; no Critical or blocking Important finding is open; and the PR is mergeable under branch protection. Never a direct push to `dev`, a force-push to a protected branch or a protection bypass. **Merging never includes deleting the branch**: merged branches are kept locally and remotely unless the owner explicitly instructs deletion (§9). Branch boundaries follow `xuan-git-branch-cohesion` |
 | Database operations inside delegated tasks | — (not delegated) | Migration run/revert, resets, `TRUNCATE`, volume or database removal and other destructive or state-changing database steps still need the owner's explicit approval each time (`xuan-database-change`) |
 
 ## 4. Local setup
@@ -196,16 +196,33 @@ Follow `xuan-database-change`, with `database.md` as the reference.
 
 **Baseline: established.** The first commit on `main` contains `CLAUDE.md`, `docs/` and `.claude/skills/`. `dev` was created from it and is the default integration branch.
 
-| Branch                                           | Role                            | Changes arrive by           |
-| ------------------------------------------------ | ------------------------------- | --------------------------- |
-| `main`                                           | Release / production-ready      | Release PRs from `dev` only |
-| `dev`                                            | Integration; the default branch | Task PRs only               |
-| Task branch (`feat/`, `fix/`, `chore/`, `docs/`) | One mergeable outcome           | The outcome's own commits   |
+**This Git flow is the owner's final, canonical workflow.** Agents follow it exactly and don't substitute another branching model. If a task seems to need a different topology, stop and ask the owner.
 
-- **No direct commits to `dev` or `main`** after the baseline.
-- **Task:** branch from an up-to-date `dev` (after the previous outcome merged) → implement → verify (§13) → PR to `dev` → review → merge. When a Superpowers skill asks for the base branch, it's `dev`.
-- **Release:** verification on `dev` → PR `dev` → `main` → merge and deploy.
-- **One cohesive, independently mergeable outcome per branch and per PR**, not one file type or tiny task. Implementation, tests, migrations, seeds, OpenAPI, docs and the config/bootstrap/plumbing that outcome needs all live on its branch as scoped commits. No dependent (stacked) branches, cherry-pick or rebase chains: finish → review → merge → branch again from `dev`. Where work goes is decided with `xuan-git-branch-cohesion`. No `release/*` or `hotfix/*` until a real need appears (docs first, §15).
+| Branch                                                                | Role                                    | Changes arrive by                     |
+| --------------------------------------------------------------------- | --------------------------------------- | ------------------------------------- |
+| `main`                                                                | Production                              | Release PRs from `dev` only           |
+| `dev`                                                                 | Integration; the default branch         | Feature/fix (and other work) PRs only |
+| Work branch (`feat/`, `fix/`; also `chore/`, `refactor/`, `docs/`, `test/`) | One cohesive mergeable outcome    | The outcome's own commits             |
+
+```text
+Feature:  dev → feat/* → PR → dev → KEEP branch
+Bug:      dev → fix/*  → PR → dev → KEEP branch
+Release:  dev → PR → main → production
+```
+
+- **Feature:** check out `dev` → update it from `origin/dev` → create `feat/<feature-name>` from it → implement the complete outcome → scoped commits → push → PR `feat/…` → `dev` → review and verify (§12, §13) → merge into `dev` → **keep the branch, locally and remotely**.
+- **Bug fix** (found during development or integration): check out and update `dev` → create `fix/<bug-name>` → fix + tests (+ docs if needed) → push → PR `fix/…` → `dev` → review and verify → merge into `dev` → **keep the branch, locally and remotely**.
+- **Release:** when the integrated app on `dev` is verified and ready → PR `dev` → `main` → review → merge → production. Feature/fix branches never merge directly into `main`.
+- **No hotfix flow is defined.** No `hotfix/*`, `release/*` branches or back-merges until the owner defines one (docs first, §15).
+- **Branch types:** `feat/*` and `fix/*` are the product-development branches. `chore/`, `refactor/`, `docs/`, `test/` are for independent outcomes of that kind. Never invent a prefix to separate file categories.
+- **One cohesive, independently mergeable outcome per branch and per PR**, not one file type or tiny task. Implementation, tests, migrations, seeds, OpenAPI, docs and the config/bootstrap/plumbing that outcome needs all live on its branch as scoped commits. Where work goes is decided with `xuan-git-branch-cohesion`.
+- **Branch base:** normal work starts from the latest `dev`, never from another active feature/fix or WIP branch. No dependent (stacked) branches: feature A → PR → `dev`, then updated `dev` → feature B. An exceptional topology needs the owner's approval first.
+- **Merge does not mean delete.** Merged branches are kept, locally and remotely, as historical/reference branches (SourceTree history, comparing implementations, debugging regressions, onboarding). **Never delete a local or remote branch after merge unless the owner explicitly instructs it.** "Cleanup", "finish/close the task", "merge complete" or "clean repository" are not that instruction. Superpowers skills that delete a branch after merging (e.g. `finishing-a-development-branch`) are overridden here: skip their branch-deletion step. GitHub's "delete branch on merge" setting stays off.
+- **Cherry-pick** is not part of normal development: not between active branches, not to assemble one outcome from several branches. It's an exceptional recovery tool (e.g. one isolated commit from abandoned work) and needs the owner's approval unless the owner requested that exact operation.
+- **Rebase** never maintains stacks of dependent branches, and `rebase`, `rebase --onto`, cherry-pick or force-push are never used to repair avoidable topology. A rebase that rewrites or materially alters pushed history needs the owner's approval first.
+- **Force-push:** never to `main`, `dev` or a shared branch; not routine on feature/fix branches. Any history rewrite needs the owner's approval.
+- **No direct commits or pushes to `dev` or `main`** after the baseline. When a Superpowers skill asks for the base branch, it's `dev`.
+- **PR merge autonomy** (§3.5): the agent may push, open the PR and merge it into its target (`dev` for work branches; `main` only for a `dev` release PR) when the merge conditions hold. Merging never includes deleting the source branch. Database operations keep their own approval (`xuan-database-change`); Git autonomy never grants it.
 
 | Unit   | Is                       | Named by                                          |
 | ------ | ------------------------ | ------------------------------------------------- |
