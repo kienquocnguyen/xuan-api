@@ -4,11 +4,14 @@ import type { DataSource, EntityManager, Repository } from 'typeorm';
 import { APP_CONFIG } from '../../config/app-config.module.js';
 import type { AppConfig } from '../../config/load-config.js';
 import { isUniqueViolation } from '../../database/postgres-errors.js';
+import { AppError } from '../../errors/app-error.js';
+import { baselineErrors } from '../../errors/baseline-errors.js';
+import type { Role } from '../../http/auth/role.js';
 import { AuthIdentity } from './auth-identity.entity.js';
 import { profileFromGoogle, type SyncedProfile } from './google-profile.js';
 import type { GoogleIdentity } from './google/google-identity.gateway.js';
 import { User } from './user.entity.js';
-import { SignInError } from './users.errors.js';
+import { SignInError, usersErrors } from './users.errors.js';
 
 /** Accounts: lookups, Google sign-in and role management. */
 @Injectable()
@@ -21,6 +24,40 @@ export class UsersService {
 
   findById(id: string): Promise<User | null> {
     return this.users.findOneBy({ id });
+  }
+
+  listUsers(role?: Role): Promise<User[]> {
+    return this.users.find({
+      where: role ? { role } : {},
+      order: { createdAt: 'ASC', id: 'ASC' },
+    });
+  }
+
+  /** user → editor. Idempotent for an editor; an admin is locked (auth design A12). */
+  grantEditor(userId: string): Promise<User> {
+    return this.moveRole(userId, 'user', 'editor');
+  }
+
+  /** editor → user. Idempotent for a user; an admin is locked. The account is never deleted. */
+  async revokeEditor(userId: string): Promise<void> {
+    await this.moveRole(userId, 'editor', 'user');
+  }
+
+  /**
+   * One conditional UPDATE (`WHERE role = from`), so an admin row can never be changed here, even if its role
+   * changes concurrently. The read afterwards tells not-found, locked and done apart.
+   */
+  private async moveRole(userId: string, from: Role, to: Role): Promise<User> {
+    await this.users
+      .createQueryBuilder()
+      .update(User)
+      .set({ role: to })
+      .where('id = :userId AND role = :from', { userId, from })
+      .execute();
+    const user = await this.users.findOneBy({ id: userId });
+    if (!user) throw new AppError(baselineErrors.NOT_FOUND);
+    if (user.role === 'admin') throw new AppError(usersErrors.ADMIN_ROLE_LOCKED);
+    return user;
   }
 
   /**
