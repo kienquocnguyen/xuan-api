@@ -180,8 +180,8 @@ An untranslated violation is a bug: 500 + log, never a generic 409 (I15).
 **Environment:**
 
 - Docker Compose `postgres:18` on host port **5433**. The native PostgreSQL 12 on 5432 is left untouched.
-- Databases `xuan_dev` and `xuan_test`, owned by the login role `xuan_app`.
-- The `postgres` superuser is for admin experiments only.
+- Databases `xuan_dev` and `xuan_test`, owned by the login role `xuan_app`. `docker-compose.yml` makes `xuan_app` the image's bootstrap role (`POSTGRES_USER`, a superuser in this local container) and `xuan_dev` its default database. `docker/postgres/init/01-create-test-database.sql` creates `xuan_test` when a fresh volume is first initialized.
+- There is no separate `postgres` role in this setup. A non-superuser runtime role is a deployment concern (below).
 - Separate migration and runtime roles are deferred to deployment.
 - Setup: `development-workflow.md` (Local setup).
 
