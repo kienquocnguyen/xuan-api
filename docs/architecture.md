@@ -405,7 +405,7 @@ These are shared with xuan-web. Agents ask instead of guessing.
 - Money: currency, price units, formatting.
 - Locale/i18n of API `message` texts.
 - Concurrency on admin edits: last-write-wins vs optimistic concurrency.
-- The domain questions (which offers exist, booking workflow, course format, content publishing and editor publish permission, newsletter): `data-model.md` §5.
+- The domain questions (final catalog content, the service application/booking details, course format, content publishing and editor publish permission, newsletter): `data-model.md` §5.
 
 ## 15. Deferred architecture
 
@@ -414,6 +414,7 @@ These are shared with xuan-web. Agents ask instead of guessing.
 | Auth: global guard + `@Public()`, users, **role persistence** (one or many roles; column or tables), cookies, refresh lifecycle, CSRF header and Origin enforcement. It must support both **role-based** and **resource-ownership** authorization; the conceptual requirements (admin / editor / customer, author ownership of content) are in `data-model.md` §4 | Auth slice design |
 | Content: post types, rich text, media, draft/publish state, publishing workflow, editor publish permission (open) | Content slice (after auth) |
 | Newsletter subscriptions ("Creator Notes") | Product confirmation |
+| Service applications and appointments: persistence, statuses, slot availability and holds (no double acceptance), Google Calendar / Meet integration, applicant emails. Confirmed concepts in `data-model.md` §3.1 | Application/booking slice design |
 | Rate limiting + `trust proxy` | **Before public launch** (D23) |
 | Pagination implementation (`PageQueryDto`, `PageInfoDto`, paginated decorator) | The first list that needs it (the services list's pagination is settled in its plan) |
 | First request-body validation and first conflict → `AppError` (409) | Admin service management (auth slice) or courses |
@@ -438,9 +439,9 @@ These are decided by running real code, not by debate. If one disproves an assum
 | How the interceptor detects `@HttpCode(204)` | "204 empty body" fixture e2e |
 | `@ApiErrorResponses` adds `VALIDATION_FAILED` automatically or explicitly | Choose while implementing |
 | Helmet CSP vs the Swagger UI | Open `/docs` locally |
-| `process.loadEnvFile()` precedence vs real env vars | `loadConfig` unit test |
-| Lint tool can enforce I2 and I4 (oxlint, else ESLint + boundaries) | A deliberate violation fails lint |
-| TypeORM CLI under ESM; entity glob in the CLI DataSource | First `migration:generate` (`database.md`) |
+| `process.loadEnvFile()` precedence vs real env vars | `loadConfig` unit test. **Result (2026-10-14, Node 24.21): a variable already set in the real environment wins;** the file never overrides it. `NODE_ENV=test` selects `.env.test`, otherwise `.env` |
+| Lint tool can enforce I2 and I4 (oxlint, else ESLint + boundaries) | A deliberate violation fails lint. **Result (2026-10-14): oxlint is enough.** `.oxlintrc.json` uses `no-restricted-properties` (`process.env`, `globalThis.process`), `no-restricted-imports` paths (`process`, `node:process`) outside `src/config/`, and per-folder pattern overrides for I2 (each override repeats the `process` paths, because an override replaces the base options). Probes for `process.env`, `import { env } from 'node:process'`, a default `node:process` import, `globalThis.process.env` and a cross-layer import all failed lint; lint is green without them. Review still covers anything lint can't see |
+| TypeORM CLI under ESM; entity glob in the CLI DataSource | First `migration:generate` (`database.md`). **Result (2026-10-14):** `typeorm-ts-node-esm -d src/database/data-source.ts` loads the TypeScript data source and `loadConfig()` directly (no build step); globs `src/modules/**/*.entity.ts` and `src/database/migrations/*.ts`. It generated `CreateServices`. `yarn migration:*` wrap it; `NODE_ENV=test` targets `xuan_test` |
 | Generated migrations stable with `uuidv7()` and named constraints | Generate twice; the second is empty |
 | Any `ON CONFLICT` insert names its target (D32). TypeORM's `.orIgnore()` is target-less, so find the mechanism that names it, for the first slice that uses `ON CONFLICT` | Read the logged SQL |
 | Malformed JSON and over-limit bodies reach the filter as `VALIDATION_FAILED` / `PAYLOAD_TOO_LARGE` | Fixture e2e |

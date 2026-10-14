@@ -2,9 +2,10 @@
 
 Backend for **Xuan Creative**: NestJS 12 · REST · PostgreSQL 18 · TypeORM 1.x · Zod 4 · OpenAPI. A modular monolith in its own repo, deployed separately from `xuan-web` (Next.js). The generated OpenAPI document is the executable contract between them (`docs/api-contract.md` §0).
 
-**Status:** documentation phase. No application code yet. Git baseline:
-A single initial engineering-system commit is established on main.
-dev branches from that baseline and is the default integration branch (`docs/development-workflow.md` §9).
+**Status:** foundation implementation in progress, in learning-first mode.
+- Done: the NestJS 12 application, validated application config, a local PostgreSQL 18 environment, and TypeORM connected.
+- Current slice: the public Services catalog (`docs/superpowers/plans/2026-10-09-foundation-and-services-catalog.md`).
+- Git: `main` holds the engineering-system baseline; `dev` is the default integration branch (`docs/development-workflow.md` §9).
 
 ## Working mode: LEARNING-FIRST (active)
 
@@ -78,4 +79,4 @@ Located in `.claude/skills/`. They're changed only with `superpowers:writing-ski
 ## Dependencies and commands
 
 - Install a dependency only when a task needs its responsibility now. **Yarn 4 only.**
-- Commands arrive with their tools: `docs/development-workflow.md` §5. None exist yet.
+- Commands arrive with their tools: `docs/development-workflow.md` §5 lists them; `package.json` has the ones that exist.

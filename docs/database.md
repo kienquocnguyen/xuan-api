@@ -180,8 +180,8 @@ An untranslated violation is a bug: 500 + log, never a generic 409 (I15).
 **Environment:**
 
 - Docker Compose `postgres:18` on host port **5433**. The native PostgreSQL 12 on 5432 is left untouched.
-- Databases `xuan_dev` and `xuan_test`, owned by the login role `xuan_app`.
-- The `postgres` superuser is for admin experiments only.
+- Databases `xuan_dev` and `xuan_test`, owned by the login role `xuan_app`. `docker-compose.yml` makes `xuan_app` the image's bootstrap role (`POSTGRES_USER`, a superuser in this local container) and `xuan_dev` its default database. `docker/postgres/init/01-create-test-database.sql` creates `xuan_test` when a fresh volume is first initialized.
+- There is no separate `postgres` role in this setup. A non-superuser runtime role is a deployment concern (below).
 - Separate migration and runtime roles are deferred to deployment.
 - Setup: `development-workflow.md` (Local setup).
 
@@ -236,11 +236,11 @@ The **actual, decided schema**, so the current database can be understood at a g
 
 | Table      | Status                                                    | Owning module                         | Settled in                                                                      |
 | ---------- | --------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------- |
-| `services` | **decided** (owner-approved 2026-10-09; no migration yet) | `services` (entity `ServiceOffering`) | `docs/superpowers/plans/2026-10-09-foundation-and-services-catalog.md`, Task 13 |
+| `services` | **decided** (owner-approved 2026-10-09; revised 2026-10-11: `duration_minutes` removed). Migration `CreateServices1791710155502` exists on the WIP branch `feat/build-services-catalog`; the owner ran it on `xuan_dev` and inspected `\d+ services` by hand. Not re-verified on 2026-10-14 (Docker unavailable). It becomes *implemented* when plan Task 14 verifies it | `services` (entity `ServiceOffering`) | `docs/superpowers/plans/2026-10-09-foundation-and-services-catalog.md`, Task 13 |
 
 #### `services`
 
-One row per offer Xuân provides, shown on Work With Me and the homepage "Ways". **No price in V1** (money is an open product question).
+One row per offer Xuân provides, shown on Work With Me and the homepage "Ways". It's a **public offer catalog, not an appointment table**. **No price in V1** (money is an open product question). **No duration:** offers aren't all fixed-length sessions (a 90-minute session, a 12-week program), so display copy like "90 minutes" or "12 weeks" doesn't force a numeric column. Explicit display metadata can be added later if the UI needs it.
 
 ```mermaid
 erDiagram
@@ -249,7 +249,6 @@ erDiagram
         varchar_80 slug UK "uq_services_slug · CK ck_services_slug_format"
         varchar_120 title "required · CK ck_services_title_not_blank"
         varchar_500 summary "required · CK ck_services_summary_not_blank"
-        integer duration_minutes "nullable · CK ck_services_duration_minutes_positive"
         boolean is_published "required · DEFAULT false"
         integer sort_order "required · DEFAULT 0"
         timestamptz created_at "required · DEFAULT now()"
@@ -262,7 +261,6 @@ erDiagram
 | `slug`             | `varchar(80)`  | yes      | —          | **UQ** `uq_services_slug`; **CK** `ck_services_slug_format` | The URL key in `/services/:slug`. Unique, so a URL names one service. The format check is the canonical form (D30)                                                  |
 | `title`            | `varchar(120)` | yes      | —          | **CK** `ck_services_title_not_blank`                        | The offer's name. `NOT NULL` alone would still allow `''` or `'   '`                                                                                                |
 | `summary`          | `varchar(500)` | yes      | —          | **CK** `ck_services_summary_not_blank`                      | The card/detail description                                                                                                                                         |
-| `duration_minutes` | `integer`      | **no**   | —          | **CK** `ck_services_duration_minutes_positive`              | Length of one session (e.g. 60, 90). **NULL** when the offer isn't a single fixed-length session (e.g. a 3-month coaching program, whose length lives in its title) |
 | `is_published`     | `boolean`      | yes      | `false`    | —                                                           | Only published services are visible through the public API. Unpublished = draft                                                                                     |
 | `sort_order`       | `integer`      | yes      | `0`        | —                                                           | Display order in the catalog (ties broken by `slug`)                                                                                                                |
 | `created_at`       | `timestamptz`  | yes      | `now()`    | —                                                           | When the row was created (D27). **No `updated_at`:** the table has no update path in V1 (seed and admin come later)                                                 |
@@ -276,5 +274,6 @@ erDiagram
 | `ck_services_slug_format`               | CHECK       | `slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'` | Lowercase kebab-case only: `kickstart-session` ✓, `Kickstart` ✗, `a--b` ✗, `-x` ✗. Makes "lowercase" impossible to violate                                                                            |
 | `ck_services_title_not_blank`           | CHECK       | `btrim(title) <> ''`                | Rejects empty and whitespace-only titles                                                                                                                                                              |
 | `ck_services_summary_not_blank`         | CHECK       | `btrim(summary) <> ''`              | Same for the summary                                                                                                                                                                                  |
-| `ck_services_duration_minutes_positive` | CHECK       | `duration_minutes > 0`              | A CHECK passes when the expression is NULL, so NULL stays allowed while `0` and negatives are rejected                                                                                                |
 | _(no other index)_                      | —           | —                                   | The catalog is a handful of rows: `WHERE is_published ORDER BY sort_order` is a sequential scan, which is the fastest plan at this size. Add `ix_services_…` only when `EXPLAIN` on real data says so |
+
+**Not in this table:** service applications, appointments and the Google Calendar / Meet integration. They are confirmed future domain concepts (`data-model.md`), but their physical design belongs to the later booking/application slice. They appear here only once that slice's plan settles them.

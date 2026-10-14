@@ -1,10 +1,95 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "env": { "node": true },
   "rules": {
     "typescript/no-explicit-any": "off",
-    "typescript/no-floating-promises": "error"
+    "typescript/no-floating-promises": "error",
+    "no-restricted-properties": [
+      "error",
+      { "object": "process", "property": "env", "message": "Only src/config/ reads process.env (I4)." },
+      { "object": "globalThis", "property": "process", "message": "Only src/config/ reads the environment (I4)." }
+    ],
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          { "name": "process", "message": "Only src/config/ reads the environment (I4)." },
+          { "name": "node:process", "message": "Only src/config/ reads the environment (I4)." }
+        ]
+      }
+    ]
   },
-  "env": {
-    "node": true
-  }
+  "overrides": [
+    { "files": ["src/config/**"], "rules": { "no-restricted-properties": "off" } },
+    {
+      "files": ["src/config/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": ["**/errors/**", "**/database/**", "**/http/**", "**/modules/**", "**/config/**"],
+                "message": "config/ imports no application layer (I2)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/errors/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              { "name": "process", "message": "Only src/config/ reads the environment (I4)." },
+              { "name": "node:process", "message": "Only src/config/ reads the environment (I4)." }
+            ],
+            "patterns": [
+              {
+                "group": ["**/errors/**", "**/database/**", "**/http/**", "**/modules/**", "**/config/**"],
+                "message": "errors/ imports no application layer (I2)."
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/database/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              { "name": "process", "message": "Only src/config/ reads the environment (I4)." },
+              { "name": "node:process", "message": "Only src/config/ reads the environment (I4)." }
+            ],
+            "patterns": [
+              { "group": ["**/errors/**", "**/http/**", "**/modules/**"], "message": "database/ imports only config/ (I2)." }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "files": ["src/http/**"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              { "name": "process", "message": "Only src/config/ reads the environment (I4)." },
+              { "name": "node:process", "message": "Only src/config/ reads the environment (I4)." }
+            ],
+            "patterns": [
+              { "group": ["**/database/**", "**/modules/**"], "message": "http/ imports only config/ and errors/ (I2)." }
+            ]
+          }
+        ]
+      }
+    }
+  ]
 }

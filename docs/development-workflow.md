@@ -115,7 +115,9 @@ These are **learning targets and signals, not gates.** They help the owner judge
 
 | Task class   | Delegated since | Notes |
 | ------------ | --------------- | ----- |
-| _(none yet)_ |                 |       |
+| Foundation and HTTP contract platform: remaining plan Tasks 1–12 (`2026-10-09-foundation-and-services-catalog.md`) | 2026-10-14 | Claude implements, verifies and reviews. The owner approves each phase PR |
+| Services catalog: remaining plan Tasks 14–18 | 2026-10-14, effective once Task 12 is done | Refits the preserved WIP on `feat/build-services-catalog` onto the platform |
+| Database operations inside delegated tasks | — (not delegated) | Migration run/revert, resets, `TRUNCATE`, volume or database removal and other destructive or state-changing database steps still need the owner's explicit approval each time (`xuan-database-change`) |
 
 ## 4. Local setup
 
@@ -139,7 +141,7 @@ These are **learning targets and signals, not gates.** They help the owner judge
 | NestJS        | **12**, starting from the official starter's defaults (ESM, Vitest, TS ^6)                                                                                                                                                                      |
 | TypeScript    | **6.x, pinned.** TS 7 waits until Nest and `@nestjs/swagger` officially support it                                                                                                                                                              |
 | Lint / format | Lint must enforce I2 and I4 (tool settled by a verification spike: the starter's oxlint, else ESLint + boundaries). Prettier with xuan-web's settings                                                                                           |
-| PostgreSQL    | Docker Compose `postgres:18`, service `db`, host port **5433** (the native PostgreSQL 12 on 5432 is left untouched). An init script creates `xuan_dev` and `xuan_test`, owned by login role `xuan_app`. Details and practice: `database.md` §11 |
+| PostgreSQL    | Docker Compose `postgres:18`, service `db`, host port **5433** (the native PostgreSQL 12 on 5432 is left untouched). The image creates `xuan_dev` and an init script creates `xuan_test` (fresh volumes only), both owned by login role `xuan_app`. `yarn db:up` / `yarn db:down` start and stop it. Details and practice: `database.md` §11 |
 | Env files     | Copy `.env.example` → `.env` (development) and `.env.test` (test, pointing at `xuan_test`)                                                                                                                                                      |
 
 ## 5. Commands
@@ -157,6 +159,8 @@ Each script is added together with the tool it runs.
 | `yarn test:e2e`                                                      | E2E against `xuan_test` (mutates it) | With the e2e harness |
 | `yarn db:up` / `yarn db:down`                                        | Start / stop the Compose database    | With Compose         |
 | `yarn migration:generate` / `:create` / `:run` / `:revert` / `:show` | Migrations (through `loadConfig()`)  | With TypeORM         |
+
+Prefix `NODE_ENV=test` (e.g. `NODE_ENV=test yarn migration:run`) to target `xuan_test` through `.env.test`.
 
 ## 6. Adding a dependency
 

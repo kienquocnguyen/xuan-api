@@ -11,6 +11,7 @@ services:
       - '5433:5432'
     volumes:
       - xuan_postgres_data:/var/lib/postgresql
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
 
 volumes:
   xuan_postgres_data:

@@ -1,6 +1,8 @@
 # Foundation + Services Catalog Implementation Plan
 
 > **For agentic workers:** this plan runs in **learning-first mode** (`docs/development-workflow.md` §3). Tasks tagged `[learn]` are typed and run by the owner; Claude explains, gives shapes, reviews (`xuan-api-architecture-review`) and waits. Claude implements a task only if the owner re-tags it `[delegate]`. Every code task follows **REQUIRED SUB-SKILL:** `xuan-api-feature`. Schema work follows **REQUIRED SUB-SKILL:** `xuan-database-change`. Steps use checkbox (`- [ ]`) syntax.
+>
+> **Delegation transition (2026-10-14):** the owner delegated the remaining work. Tasks 1–12 are now `[delegate]`; Tasks 14–18 are `[delegate]` once Task 12 is done. Database operations that `xuan-database-change` gates (migration run/revert, resets, anything destructive) still need the owner's approval. Current state per task: § "Execution status".
 
 **Goal:** a running NestJS 12 API whose platform (config, database, contract envelopes, errors, validation, CORS, OpenAPI, e2e harness) is proven by tests, serving the first real slice: the public Services catalog (`GET /services`, `GET /services/:slug`) from PostgreSQL.
 
@@ -38,7 +40,7 @@
 These conditions are likely to bite in real use, and no happy-path test covers them. Each line names the task that adds its test.
 
 1. **Drafts leaking.** An unpublished service must be invisible in **both** the list and the slug lookup (404). Tests: Task 15, Task 16.
-2. **`durationMinutes: null` serialization.** A program without a fixed session length must serialize as `null`, not be omitted. Test: Task 15 (exact body).
+2. **Internal fields leaking.** `isPublished`, `sortOrder` and `createdAt` must never appear in a response; the body is exactly `{ id, slug, title, summary }`. Test: Task 15 (exact body).
 3. **Odd slugs** (`/services/Kickstart`, `/services/%20`, a 300-character slug) → `404 NOT_FOUND` envelope, never 500. Test: Task 16.
 4. **A disallowed browser origin** gets no `Access-Control-Allow-Origin`; an allowed one gets it plus `Access-Control-Allow-Credentials: true`. Test: Task 11.
 5. **A non-JSON body** (`text/plain`, form-encoded) reaching a validated endpoint → `400 VALIDATION_FAILED`, never processed as data. Test: Task 11.
@@ -63,6 +65,28 @@ How to verify · Expected result · Common failure to watch for
 | D. Services catalog | 13–18 | `feat/build-services-catalog` |
 
 Each phase ends with `xuan-api-architecture-review` → the PR to `dev` (or a reviewed `git merge --no-ff` if no remote exists).
+
+## Execution status (reconciled 2026-10-14)
+
+The first sessions were manual, and some work happened out of order. This table is the verified state of the repository on 2026-10-14 (audit + owner's manual verification). It supersedes the checkboxes below, which were never ticked.
+
+| Task | Status | Evidence / what remains |
+|---|---|---|
+| 0 Git baseline | DONE | `main`/`dev`; PRs #1–#3 merged |
+| 1 Nest skeleton | PARTIAL | Starter, ESM, Yarn 4, `engines`, `.gitignore` done. **Remains:** `.nvmrc` (Step 1), remove the sample (Step 7). **Step 8 superseded:** port 4000 now comes from config (Task 3) |
+| 2 TS pin / lint boundaries | PARTIAL | TS `6.0.2` pinned exactly. **Remains:** Steps 2–6 |
+| 3 `loadConfig` | PARTIAL | A validated, frozen `loadConfig()` exists (merged in PR #3). **Remains:** `env.schema.ts`, `ConfigError`, the `source` parameter, `.env.test`, `AppConfigModule`, the precedence spike, the full test table |
+| 4 Local Postgres 18 | PARTIAL / REVISED | `docker-compose.yml` with `postgres:18` on 5433 (`xuan_app` is the image's bootstrap role, `xuan_dev` its default database). `xuan_test` was created by hand. **Remains:** a reproducible `xuan_test` (init script) and the `db:*` scripts. **Revised:** keep the existing Compose file and role; see Task 4's note |
+| 5 TypeORM + CLI | PARTIAL / REVISED | Connected through `TypeOrmModule.forRoot`, `synchronize: false`. The CLI runs `typeorm-ts-node-esm` on `src/database/data-source.ts` and generated `CreateServices`. **Remains:** `DatabaseModule` + `APP_CONFIG`, the `migration:*` scripts, `xuan_test` targeting, the §16 record. **Revised:** the CLI keeps the working ts-node ESM approach instead of `dist/` globs; see Task 5's note |
+| 6–12 HTTP contract platform | NOT STARTED | — |
+| 13 Schema checkpoint | DONE / REVISED | Approved 2026-10-09; revised 2026-10-11 (no duration) |
+| 14 Entity + migration | PARTIAL (WIP branch) | Entity, module and migration on `feat/build-services-catalog`. The owner ran the migration on `xuan_dev` and inspected `\d+ services` (manual). **Remains:** Steps 5–9 (round trip, empty second generate, schema e2e, §12 status) |
+| 15 `GET /services` | PARTIAL (WIP branch) | Query and mapping work (manual Postman check). **Remains:** refit onto the Phase C platform (envelope, controller-side mapping D5, `ServiceDto` class, OpenAPI), and the tests |
+| 16 `GET /services/:slug` | PARTIAL (WIP branch) | Lookup + 404 via a **temporary** `AppError`/filter in `modules/services/errors/`. **Remains:** baseline `NOT_FOUND` + envelope (Tasks 6–7), the tests including odd slugs. No slug-format validation is needed (Task 13's D7 deviation) |
+| 17 Seed | NOT STARTED | Needs the owner's seed copy |
+| 18 Close the slice | PARTIAL | `api-contract.md` §11 already recorded |
+
+**Branches as executed:** Tasks 1–5 remainders on `chore/complete-foundation`. The Services WIP is preserved on `feat/build-services-catalog` and is rebased onto `dev` after Phase C.
 
 ## File map
 
@@ -132,7 +156,7 @@ test/
 
 ### Task 1: Nest 12 project skeleton
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -181,13 +205,13 @@ import { Module } from '@nestjs/common';
 export class AppModule {}
 ```
 
-- [ ] **Step 8:** In `src/main.ts`, change the port to `4000` temporarily; Task 11 replaces this file. Then run `yarn build`, then `yarn start:dev`, and open `http://localhost:4000` (expect a Nest 404 JSON). Stop the server.
+- [ ] **Step 8:** *(Superseded 2026-10-14: the port already comes from `loadConfig()`, default 4000. Only the 404 check below remains.)* In `src/main.ts`, change the port to `4000` temporarily; Task 11 replaces this file. Then run `yarn build`, then `yarn start:dev`, and open `http://localhost:4000` (expect a Nest 404 JSON). Stop the server.
 
 ---
 
 ### Task 2: TypeScript pin, format and lint boundaries
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -254,7 +278,7 @@ export default tseslint.config(
 
 ### Task 3: Validated configuration (`loadConfig`)
 
-**`[learn]`** · branch `feat/setup-config-and-database`
+**`[delegate]`** (was `[learn]`) · branch `feat/setup-config-and-database`
 
 | | |
 |---|---|
@@ -435,7 +459,7 @@ DOCS_ENABLED=true
 
 ### Task 4: Local PostgreSQL 18
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -445,6 +469,8 @@ DOCS_ENABLED=true
 | **Verify** | `docker compose exec db psql -U xuan_app xuan_dev -c "SELECT version(), current_user, current_database();"` |
 | **Expected** | `PostgreSQL 18.x`, `xuan_app`, `xuan_dev` |
 | **Common failure** | Editing the init script after the first start: it won't re-run until the volume is removed (`yarn db:down` + `docker compose down -v`) |
+
+> **Reconciliation note (2026-10-14):** the repository already has `docker-compose.yml` with `POSTGRES_USER: xuan_app`, `POSTGRES_DB: xuan_dev` and an initialized volume holding the migrated `services` table. Switching to the Step 1–2 shape (a separate `postgres` superuser) would need a volume reset, a destructive operation. So the remaining work keeps the existing file and role, and adds only `docker/postgres/init/01-create-test-database.sql` (`CREATE DATABASE xuan_test OWNER xuan_app;`), mounted at `/docker-entrypoint-initdb.d`, plus the `db:*` scripts. A fresh volume gets both databases; the existing volume (where `xuan_test` was created by hand) is untouched.
 
 - [ ] **Step 1:** `compose.yaml`:
 
@@ -483,7 +509,7 @@ CREATE DATABASE xuan_test OWNER xuan_app;
 
 ### Task 5: TypeORM root + migration CLI
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -522,6 +548,8 @@ import type { AppConfig } from '../config/load-config.js';
 })
 export class DatabaseModule {}
 ```
+
+> **Reconciliation note (2026-10-14):** Steps 3–4 and 6 are revised. The CLI already works through `typeorm-ts-node-esm` on the TypeScript sources (it generated `CreateServices`), so `data-source.ts` keeps `src/**` globs and the scripts call `typeorm-ts-node-esm -d src/database/data-source.ts` instead of building `dist/` first. The result is recorded in `architecture.md` §16.
 
 - [ ] **Step 3:** `src/database/data-source.ts`:
 
@@ -564,7 +592,7 @@ export default new DataSource({
 
 ### Task 6: Application errors and contract error mapping
 
-**`[learn]`** · branch `feat/build-http-contract-platform`
+**`[delegate]`** (was `[learn]`) · branch `feat/build-http-contract-platform`
 
 | | |
 |---|---|
@@ -756,7 +784,7 @@ function frameworkStatus(exception: unknown): number | undefined {
 
 ### Task 7: E2E harness, global filter and the fixture module
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -979,7 +1007,7 @@ describe('HTTP contract (fixture)', () => {
 
 ### Task 8: Success envelope interceptor (`{ data }`, 204, `undefined` → 500)
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -1050,7 +1078,7 @@ export class SuccessEnvelopeInterceptor implements NestInterceptor {
 
 ### Task 9: Validation pipe + field-error translation
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -1217,7 +1245,7 @@ it('missing required field → REQUIRED', async () => {
 
 ### Task 10: OpenAPI helpers and the document-build test
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -1370,7 +1398,7 @@ describe('OpenAPI document', () => {
 
 ### Task 11: Bootstrap: JSON-only body, helmet, CORS, Swagger, `main.ts`
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -1480,7 +1508,7 @@ await bootstrap();
 
 ### Task 12: Phase C checkpoint review
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -1513,7 +1541,7 @@ await bootstrap();
 
 - [ ] **Step 1:** Read `database.md` §12 → `services`. For each row, say why it exists.
 - [ ] **Step 2:** Decide or confirm the open points:
-  - `duration_minutes` nullable (programs), yes or no;
+  - no duration column (revised 2026-10-11: `services` is a public offer catalog, not an appointment table; offers range from a 90-minute session to a 12-week program, `data-model.md` §3.1);
   - `summary` length 500;
   - `title` 120;
   - `slug` format `^[a-z0-9]+(-[a-z0-9]+)*$`;
@@ -1523,14 +1551,16 @@ await bootstrap();
 
 **Settled in this plan** (record in `api-contract.md` §11 during Task 18):
 - `GET /services` → `{ data: ServiceDto[] }`, published only, ordered by `sort_order`, then `slug`, **not paginated**.
-- `GET /services/:slug` → `{ data: ServiceDto }` for a published service, else `404 NOT_FOUND`. **No slug-format validation:** any string is a lookup key, and an impossible slug simply isn't found. This is a **stated D7 deviation**: the slug is an opaque key, so a format error would add a 400 the client can't act on differently from a 404.
-- `ServiceDto` = `{ id, slug, title, summary, durationMinutes }`. `isPublished`, `sortOrder` and `createdAt` stay internal.
+- `GET /services/:slug` → `{ data: ServiceDto }` for a published service; an unknown, unpublished or malformed slug → `404 NOT_FOUND`. **No slug-format validation:** any string is a lookup key, and an impossible slug simply isn't found. This is a **stated D7 deviation**: the slug is an opaque key, so a format error would add a 400 the client can't act on differently from a 404.
+- `ServiceDto` = `{ id, slug, title, summary }`. `isPublished`, `sortOrder` and `createdAt` stay internal. No duration, price, booking or calendar fields.
+
+**Approved** by the owner on 2026-10-09; revised 2026-10-11 to drop `duration_minutes` / `durationMinutes` (before any migration existed). Applications, appointments and calendar integration are future concepts of the application/booking slice, not of this one.
 
 ---
 
 ### Task 14: `ServiceOffering` entity + first migration
 
-**`[learn]`** · **REQUIRED SUB-SKILL:** `xuan-database-change`
+**`[delegate]` after Task 12** (was `[learn]`) · **REQUIRED SUB-SKILL:** `xuan-database-change`
 
 | | |
 |---|---|
@@ -1541,7 +1571,7 @@ await bootstrap();
 | **Expected** | Names `pk_services`, `uq_services_slug`, `ck_services_*`; `created_at timestamp with time zone`; `id DEFAULT uuidv7()` |
 | **Common failure** | Hashed `PK_…`/`UQ_…` names, or `TIMESTAMP` without a time zone. Fix the **entity** and regenerate |
 
-**Interfaces, produces:** `class ServiceOffering { id: string; slug: string; title: string; summary: string; durationMinutes: number | null; isPublished: boolean; sortOrder: number; createdAt: Date }`; `ServicesModule` (registers `forFeature([ServiceOffering])`).
+**Interfaces, produces:** `class ServiceOffering { id: string; slug: string; title: string; summary: string; isPublished: boolean; sortOrder: number; createdAt: Date }`; `ServicesModule` (registers `forFeature([ServiceOffering])`).
 
 - [ ] **Step 1:** `src/modules/services/service-offering.entity.ts`:
 
@@ -1554,7 +1584,6 @@ import { Check, Column, CreateDateColumn, Entity, PrimaryColumn, Unique } from '
 @Check('ck_services_slug_format', `"slug" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`)
 @Check('ck_services_title_not_blank', `btrim("title") <> ''`)
 @Check('ck_services_summary_not_blank', `btrim("summary") <> ''`)
-@Check('ck_services_duration_minutes_positive', `"duration_minutes" > 0`)
 export class ServiceOffering {
   @PrimaryColumn({ type: 'uuid', default: () => 'uuidv7()', primaryKeyConstraintName: 'pk_services' })
   id!: string;
@@ -1567,9 +1596,6 @@ export class ServiceOffering {
 
   @Column({ type: 'varchar', length: 500 })
   summary!: string;
-
-  @Column({ name: 'duration_minutes', type: 'integer', nullable: true })
-  durationMinutes!: number | null;
 
   @Column({ name: 'is_published', type: 'boolean', default: false })
   isPublished!: boolean;
@@ -1601,10 +1627,9 @@ export class ServicesModule {}
 ```sql
 CREATE TABLE "services" ("id" uuid NOT NULL DEFAULT uuidv7(), "slug" character varying(80) NOT NULL,
   "title" character varying(120) NOT NULL, "summary" character varying(500) NOT NULL,
-  "duration_minutes" integer, "is_published" boolean NOT NULL DEFAULT false,
+  "is_published" boolean NOT NULL DEFAULT false,
   "sort_order" integer NOT NULL DEFAULT 0, "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
   CONSTRAINT "uq_services_slug" UNIQUE ("slug"),
-  CONSTRAINT "ck_services_duration_minutes_positive" CHECK ("duration_minutes" > 0),
   CONSTRAINT "ck_services_summary_not_blank" CHECK (btrim("summary") <> ''),
   CONSTRAINT "ck_services_title_not_blank" CHECK (btrim("title") <> ''),
   CONSTRAINT "ck_services_slug_format" CHECK ("slug" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
@@ -1626,7 +1651,7 @@ import { ServiceOffering } from '../src/modules/services/service-offering.entity
 import { createTestApp } from './support/create-test-app.js';
 import { resetDatabase } from './support/reset-database.js';
 
-const valid = { slug: 'kickstart-session', title: 'Kickstart', summary: 'One focused session.', durationMinutes: 90 };
+const valid = { slug: 'kickstart-session', title: 'Kickstart', summary: 'One focused session.' };
 
 const constraintOf = async (promise: Promise<unknown>) => {
   try { await promise; } catch (error) {
@@ -1652,18 +1677,12 @@ describe('services table invariants', () => {
     expect(row.sortOrder).toBe(0);
   });
 
-  it('allows a null duration (programs)', async () => {
-    await repo.insert({ ...valid, durationMinutes: null });
-    expect((await repo.findOneByOrFail({ slug: valid.slug })).durationMinutes).toBeNull();
-  });
-
   it.each([
     ['duplicate slug', 'uq_services_slug', async (r: Repository<ServiceOffering>) => { await r.insert(valid); return r.insert(valid); }],
     ['uppercase slug', 'ck_services_slug_format', (r: Repository<ServiceOffering>) => r.insert({ ...valid, slug: 'Kickstart' })],
     ['double-dash slug', 'ck_services_slug_format', (r: Repository<ServiceOffering>) => r.insert({ ...valid, slug: 'a--b' })],
     ['blank title', 'ck_services_title_not_blank', (r: Repository<ServiceOffering>) => r.insert({ ...valid, title: '   ' })],
     ['blank summary', 'ck_services_summary_not_blank', (r: Repository<ServiceOffering>) => r.insert({ ...valid, summary: '' })],
-    ['zero duration', 'ck_services_duration_minutes_positive', (r: Repository<ServiceOffering>) => r.insert({ ...valid, durationMinutes: 0 })],
   ])('rejects %s via %s', async (_name, constraint, act) => {
     expect(await constraintOf(act(repo))).toBe(constraint);
   });
@@ -1680,7 +1699,7 @@ describe('services table invariants', () => {
 
 ### Task 15: `GET /services` (catalog list)
 
-**`[learn]`** · **REQUIRED SUB-SKILL:** `xuan-api-feature`
+**`[delegate]` after Task 12** (was `[learn]`) · **REQUIRED SUB-SKILL:** `xuan-api-feature`
 
 | | |
 |---|---|
@@ -1688,7 +1707,7 @@ describe('services table invariants', () => {
 | **Why this exists** | The first real payload through the whole stack: repository → service → controller mapping → envelope → OpenAPI |
 | **Concept** | Explicit response DTO + mapping (I10, D5); why `isPublished` and `createdAt` don't leave the module; exact-body tests |
 | **Verify** | `yarn test:e2e` |
-| **Expected** | List tests green, including the draft-hiding and `null`-duration cases (Review Focus 1, 2) |
+| **Expected** | List tests green, including the draft-hiding and exact-body cases (Review Focus 1, 2) |
 | **Common failure** | Returning the entities ("they have no secrets"). The exact-body test fails on the extra fields, and that's what it's for |
 
 **Interfaces, produces:**
@@ -1715,23 +1734,23 @@ describe('Services catalog', () => {
   afterAll(async () => { await app.close(); });
 
   const seed = (rows: Partial<ServiceOffering>[]) =>
-    repo.insert(rows.map((r) => ({ title: 'T', summary: 'S', durationMinutes: 60, isPublished: true, sortOrder: 0, ...r })));
+    repo.insert(rows.map((r) => ({ title: 'T', summary: 'S', isPublished: true, sortOrder: 0, ...r })));
 
   const idOf = async (slug: string) => (await repo.findOneByOrFail({ slug })).id;
 
   describe('GET /services', () => {
     it('returns published services ordered by sort_order then slug, as ServiceDto only', async () => {
       await seed([
-        { slug: 'coaching-3-months', title: '3-Month 1:1 Coaching', summary: 'Three months.', durationMinutes: null, sortOrder: 2 },
-        { slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.', durationMinutes: 90, sortOrder: 1 },
+        { slug: 'coaching-3-months', title: '3-Month 1:1 Coaching', summary: 'Three months.', sortOrder: 2 },
+        { slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.', sortOrder: 1 },
         { slug: 'draft-offer', isPublished: false, sortOrder: 0 },
       ]);
       const res = await request(app.getHttpServer()).get('/services');
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
         data: [
-          { id: await idOf('kickstart-session'), slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.', durationMinutes: 90 },
-          { id: await idOf('coaching-3-months'), slug: 'coaching-3-months', title: '3-Month 1:1 Coaching', summary: 'Three months.', durationMinutes: null },
+          { id: await idOf('kickstart-session'), slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.' },
+          { id: await idOf('coaching-3-months'), slug: 'coaching-3-months', title: '3-Month 1:1 Coaching', summary: 'Three months.' },
         ],
       });
     });
@@ -1758,8 +1777,6 @@ export class ServiceDto {
   @ApiProperty({ example: 'kickstart-session' }) slug!: string;
   @ApiProperty() title!: string;
   @ApiProperty() summary!: string;
-  @ApiProperty({ type: 'integer', nullable: true, description: 'Length of one session in minutes; null when the offer is not a single fixed-length session.' })
-  durationMinutes!: number | null;
 }
 
 /** Whitelist by construction: only these fields reach the wire (I10). */
@@ -1769,7 +1786,6 @@ export function toServiceDto(offering: ServiceOffering): ServiceDto {
     slug: offering.slug,
     title: offering.title,
     summary: offering.summary,
-    durationMinutes: offering.durationMinutes,
   };
 }
 ```
@@ -1825,7 +1841,7 @@ export class ServicesController {
 
 ### Task 16: `GET /services/:slug`
 
-**`[learn]`** · **REQUIRED SUB-SKILL:** `xuan-api-feature`
+**`[delegate]` after Task 12** (was `[learn]`) · **REQUIRED SUB-SKILL:** `xuan-api-feature`
 
 | | |
 |---|---|
@@ -1845,11 +1861,11 @@ describe('GET /services/:slug', () => {
   const notFound = { data: null, error: { code: 'NOT_FOUND', message: 'The requested resource was not found.', details: {} } };
 
   it('returns one published service', async () => {
-    await seed([{ slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.', durationMinutes: 90 }]);
+    await seed([{ slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.' }]);
     const res = await request(app.getHttpServer()).get('/services/kickstart-session');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
-      data: { id: await idOf('kickstart-session'), slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.', durationMinutes: 90 },
+      data: { id: await idOf('kickstart-session'), slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.' },
     });
   });
 
@@ -1923,7 +1939,7 @@ it('documents the services endpoints', async () => {
 
 ### Task 17: Idempotent catalog seed
 
-**`[learn]`**
+**`[delegate]` after Task 12** (was `[learn]`)
 
 | | |
 |---|---|
@@ -1934,7 +1950,7 @@ it('documents the services endpoints', async () => {
 | **Expected** | Same rows after the second run; an edited title updates in place |
 | **Common failure** | `.orIgnore()`, which emits a target-less `ON CONFLICT DO NOTHING` (verification spike) |
 
-**Owner input required before Step 2:** the real offers and their copy. That's the open product decision "which offers exist" (`data-model.md` §5: homepage design vs live Work With Me page). The rows below are **placeholders**, to be replaced.
+**Owner input required before Step 2:** the final slugs, titles and summaries. The current offers are *Channel Kickstart Session* and *3-Month 1:1 Coaching* (`data-model.md` §3, §5). The rows below are **placeholders**, to be replaced.
 
 - [ ] **Step 1:** `src/modules/services/services.seed.ts` (module code may import `database/`, I2):
 
@@ -1943,8 +1959,9 @@ import dataSource from '../../database/data-source.js';
 import { ServiceOffering } from './service-offering.entity.js';
 
 // Placeholder copy: the owner replaces these rows with the decided offers before running.
-const catalog: Array<Pick<ServiceOffering, 'slug' | 'title' | 'summary' | 'durationMinutes' | 'isPublished' | 'sortOrder'>> = [
-  { slug: 'mot-mot-cung-xuan', title: '1:1 cùng Xuân', summary: 'REPLACE: one-on-one session description.', durationMinutes: 60, isPublished: true, sortOrder: 1 },
+const catalog: Array<Pick<ServiceOffering, 'slug' | 'title' | 'summary' | 'isPublished' | 'sortOrder'>> = [
+  { slug: 'channel-kickstart-session', title: 'Channel Kickstart Session', summary: 'REPLACE: 90-minute 1:1 session description.', isPublished: true, sortOrder: 1 },
+  { slug: 'coaching-3-months', title: '3-Month 1:1 Coaching', summary: 'REPLACE: 12-week coaching program description.', isPublished: true, sortOrder: 2 },
 ];
 
 async function seed(): Promise<void> {
@@ -1956,7 +1973,7 @@ async function seed(): Promise<void> {
       .into(ServiceOffering)
       .values(catalog)
       // Named target (D32): a future unrelated unique constraint must never be silently absorbed.
-      .orUpdate(['title', 'summary', 'duration_minutes', 'is_published', 'sort_order'], 'uq_services_slug')
+      .orUpdate(['title', 'summary', 'is_published', 'sort_order'], 'uq_services_slug')
       .execute();
   } finally {
     await dataSource.destroy();
@@ -1979,7 +1996,7 @@ await seed();
 
 ### Task 18: Close the slice: contract, docs, review, PR
 
-**`[learn]`**
+**`[delegate]` after Task 12** (was `[learn]`)
 
 | | |
 |---|---|
