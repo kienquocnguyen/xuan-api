@@ -107,6 +107,8 @@ describe('Services catalog', () => {
       ['uppercase kebab slug', 'Kickstart-Session'],
       ['whitespace slug', '%20'],
       ['very long slug', 'a'.repeat(300)],
+      ['NUL-byte slug', '%00'],
+      ['non-ASCII slug', '%C3%A9'],
     ])('%s → 404 NOT_FOUND', async (_n, slug) => {
       await seed([{ slug: 'kickstart-session' }]);
       const res = await request(app.getHttpServer()).get(`/services/${slug}`);
