@@ -5,7 +5,7 @@ Backend for **Xuan Creative**: NestJS 12 · REST · PostgreSQL 18 · TypeORM 1.x
 **Status:** foundation implementation in progress, in learning-first mode.
 - Done: the NestJS 12 application, config, PostgreSQL 18 + TypeORM, the HTTP contract platform, and the public Services catalog.
 - Current slice: users, Google sign-in and role-based access (`docs/superpowers/plans/2026-10-14-user-auth-and-rbac.md`).
-- Git: `main` holds the engineering-system baseline; `dev` is the default integration branch (`docs/development-workflow.md` §9).
+- Git: `main` is production; `dev` is the default integration branch (see "Git workflow" below).
 
 ## Working mode: LEARNING-FIRST (active)
 
@@ -69,7 +69,23 @@ Located in `.claude/skills/`. They're changed only with `superpowers:writing-ski
 - **xuan-api-feature**: adding, changing or fixing a backend capability (learning and delegated modes).
 - **xuan-database-change**: any schema change, including schema-only tasks.
 - **xuan-api-architecture-review**: evidence-first review before done or a PR, and of the owner's code.
-- **xuan-git-branch-cohesion**: **mandatory before** creating, splitting or deleting a branch, cherry-picking, rebasing, porting from an old branch, or deciding whether docs/tests/plumbing belong on the current branch.
+- **xuan-git-branch-cohesion**: **mandatory before** creating, splitting or deleting a branch, merging or finishing a branch, cherry-picking, rebasing, force-pushing, porting from an old branch, or deciding whether docs/tests/plumbing belong on the current branch.
+
+## Git workflow (canonical, FINAL)
+
+The owner defined this flow. Follow it exactly; never improvise another Git strategy. Before **any** Git topology decision (creating, basing, deleting a branch, cherry-pick, rebase, force-push, PR target), read `.claude/skills/xuan-git-branch-cohesion/SKILL.md`. Full rules: `docs/development-workflow.md` §9.
+
+```text
+Feature:  dev → feat/* → PR → dev → KEEP branch
+Bug:      dev → fix/*  → PR → dev → KEEP branch
+Release:  dev → PR → main → production
+```
+
+- Normal work branches from the latest `dev`; one cohesive outcome per branch (code, tests, migrations, OpenAPI, docs, config, plumbing together).
+- **Do not delete local or remote branches after merge unless the owner explicitly instructs you to delete them.** Merge ≠ delete; "cleanup" or "finish the task" is not permission. This overrides any Superpowers step that deletes a branch.
+- Cherry-pick and history-rewriting rebase are exceptional and need owner approval. No stacked branches. Never force-push `main`, `dev` or shared branches; no direct pushes to `dev`/`main`.
+- No hotfix flow exists yet; if one seems needed, ask the owner.
+- Merging PRs is delegated (§3.5); database mutations are not (`xuan-database-change`).
 
 ## Working with Superpowers
 
