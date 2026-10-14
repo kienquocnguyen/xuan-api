@@ -35,6 +35,38 @@ describe('HTTP contract (fixture)', () => {
     expect(res.body.error.code).toBe('INTERNAL_ERROR');
   });
 
+  it('valid body → echoed in { data }', async () => {
+    const body = { name: 'Xuan', address: { city: 'HCM' } };
+    const res = await request(app.getHttpServer()).post('/__fixture/echo').send(body);
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ data: body });
+  });
+
+  it('invalid body → VALIDATION_FAILED with dot paths and field codes', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/__fixture/echo')
+      .send({ name: 'toolong', address: { city: 3 }, tags: ['abcd'], isAdmin: true });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_FAILED');
+    expect(res.body.error.details.fields).toEqual(
+      expect.arrayContaining([
+        { field: 'name', code: 'TOO_LONG', message: 'This value is too long.' },
+        { field: 'address.city', code: 'INVALID_TYPE', message: 'This value has the wrong type.' },
+        { field: 'tags.0', code: 'TOO_LONG', message: 'This value is too long.' },
+        { field: 'isAdmin', code: 'UNKNOWN_FIELD', message: 'This field is not allowed.' },
+      ]),
+    );
+  });
+
+  it('missing required field → REQUIRED', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/__fixture/echo')
+      .send({ address: { city: 'HCM' } });
+    expect(res.body.error.details.fields).toEqual([
+      { field: 'name', code: 'REQUIRED', message: 'This field is required.' },
+    ]);
+  });
+
   it('AppError → its envelope and status', async () => {
     const res = await request(app.getHttpServer()).get('/__fixture/app-error');
     expect(res.status).toBe(404);

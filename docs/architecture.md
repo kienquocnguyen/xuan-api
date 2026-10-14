@@ -434,7 +434,7 @@ These are decided by running real code, not by debate. If one disproves an assum
 
 | Item | Proven by |
 |---|---|
-| Zod issue vendor narrowing in the pipe's exception factory; detecting `REQUIRED` | Translator unit tests + validation e2e |
+| Zod issue vendor narrowing in the pipe's exception factory; detecting `REQUIRED` | Translator unit tests + validation e2e. **Result (2026-10-14, Zod 4.6):** the pipe hands the factory Zod's runtime issues, so `code`, `origin`, `keys` are present and read defensively. A missing value is `invalid_type` with the message "…received undefined" and no `input` field, so `REQUIRED` is detected from the message. `unrecognized_keys` at the root has `path: []` |
 | `.meta({ id })` gives named request components | "Document builds" e2e |
 | How the interceptor detects `@HttpCode(204)` | "204 empty body" fixture e2e. **Result (2026-10-14):** `Reflector.get(HTTP_CODE_METADATA, handler)`, with the constant imported from `@nestjs/common/constants.js` (exported under ESM; value `__httpCode__`) |
 | `@ApiErrorResponses` adds `VALIDATION_FAILED` automatically or explicitly | Choose while implementing |
