@@ -24,7 +24,9 @@ describe('HTTP contract (fixture)', () => {
   });
 
   it('@HttpCode(204) → empty body', async () => {
-    const res = await request(app.getHttpServer()).post('/__fixture/no-content');
+    const res = await request(app.getHttpServer())
+      .post('/__fixture/no-content')
+      .set('X-Requested-With', 'XMLHttpRequest');
     expect(res.status).toBe(204);
     expect(res.text).toBe('');
   });
@@ -37,7 +39,10 @@ describe('HTTP contract (fixture)', () => {
 
   it('valid body → echoed in { data }', async () => {
     const body = { name: 'Xuan', address: { city: 'HCM' } };
-    const res = await request(app.getHttpServer()).post('/__fixture/echo').send(body);
+    const res = await request(app.getHttpServer())
+      .post('/__fixture/echo')
+      .set('X-Requested-With', 'XMLHttpRequest')
+      .send(body);
     expect(res.status).toBe(201);
     expect(res.body).toEqual({ data: body });
   });
@@ -45,6 +50,7 @@ describe('HTTP contract (fixture)', () => {
   it('invalid body → VALIDATION_FAILED with dot paths and field codes', async () => {
     const res = await request(app.getHttpServer())
       .post('/__fixture/echo')
+      .set('X-Requested-With', 'XMLHttpRequest')
       .send({ name: 'toolong', address: { city: 3 }, tags: ['abcd'], isAdmin: true });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION_FAILED');
@@ -61,6 +67,7 @@ describe('HTTP contract (fixture)', () => {
   it('missing required field → REQUIRED', async () => {
     const res = await request(app.getHttpServer())
       .post('/__fixture/echo')
+      .set('X-Requested-With', 'XMLHttpRequest')
       .send({ address: { city: 'HCM' } });
     expect(res.body.error.details.fields).toEqual([
       { field: 'name', code: 'REQUIRED', message: 'This field is required.' },
@@ -89,6 +96,7 @@ describe('HTTP contract (fixture)', () => {
   it('malformed JSON → VALIDATION_FAILED with no fields', async () => {
     const res = await request(app.getHttpServer())
       .post('/__fixture/echo')
+      .set('X-Requested-With', 'XMLHttpRequest')
       .set('Content-Type', 'application/json')
       .send('{"name":');
     expect(res.status).toBe(400);
@@ -100,6 +108,7 @@ describe('HTTP contract (fixture)', () => {
   it('body over 100kb → PAYLOAD_TOO_LARGE', async () => {
     const res = await request(app.getHttpServer())
       .post('/__fixture/echo')
+      .set('X-Requested-With', 'XMLHttpRequest')
       .set('Content-Type', 'application/json')
       .send(JSON.stringify({ name: 'x'.repeat(200_000) }));
     expect(res.status).toBe(413);

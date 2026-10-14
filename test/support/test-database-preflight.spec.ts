@@ -3,7 +3,16 @@ import { testDatabasePreflight } from './test-database-preflight.js';
 
 const PASSWORD = 's3cret-pw';
 const url = (path: string) => `postgresql://xuan_app:${PASSWORD}@localhost:5433${path}`;
-const base = { NODE_ENV: 'test', PORT: '4000', CORS_ORIGINS: 'http://localhost:3000' } as const;
+const base = {
+  NODE_ENV: 'test',
+  PORT: '4000',
+  CORS_ORIGINS: 'http://localhost:3000',
+  GOOGLE_CLIENT_ID: 'test-client',
+  GOOGLE_CLIENT_SECRET: 'test-secret',
+  GOOGLE_CALLBACK_URL: 'http://localhost:4000/auth/google/callback',
+  AUTH_WEB_URL: 'http://localhost:3000',
+  AUTH_COOKIE_SECRET: 'c'.repeat(32),
+} as const;
 
 const refusals = [
   ['a development database', url('/xuan_dev')],

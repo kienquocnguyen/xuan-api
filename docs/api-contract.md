@@ -127,41 +127,41 @@ xuan-api: Zod request schemas + response DTO classes + @nestjs/swagger
 
 ## 7. Authentication and cookies
 
-> **Consumer expectation; producer design pending the auth slice.** Nothing in this section is implemented or decided on the API side yet. It's mirrored so the expectation is visible. The auth slice will confirm or change it through §9.
+**Implemented (2026-10-14, auth slice; design spec A1–A14).** Google is the only sign-in method. The app session is an opaque server-side session in an HttpOnly cookie; there are no access/refresh tokens, no register/login/refresh endpoints, and no token ever appears in a response body.
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /auth/register` | Create account; sets session cookies |
-| `POST /auth/login` | Sets session cookies |
-| `POST /auth/refresh` | Rotates the refresh token; issues a new access token |
-| `POST /auth/logout` | Revokes the refresh token; clears cookies |
-| `GET /users/me` | Current user + roles; 401 if no session |
+| `GET /auth/google?returnTo=/path` | Browser navigation. Starts Google sign-in (302 to Google). `returnTo` is an optional relative path; anything else → `400 VALIDATION_FAILED` |
+| `GET /auth/google/callback` | Google's redirect back (not in OpenAPI). Success → 302 to `AUTH_WEB_URL + returnTo` with the session cookie set. Failure → 302 to `AUTH_WEB_URL/login?authError=<CODE>` |
+| `GET /auth/me` | Current user `{ data: CurrentUserDto }`; `401 UNAUTHENTICATED` without a valid session |
+| `POST /auth/logout` | Ends the session, clears the cookie, `204`. Works without a session |
 
-| Cookie | Expected attributes |
+`authError` codes (query string, not an error envelope): `GOOGLE_SIGN_IN_FAILED` (cancelled, bad/expired/forged state, failed exchange), `EMAIL_NOT_VERIFIED`, `ACCOUNT_CONFLICT` (the email belongs to another account; no silent linking).
+
+| Cookie | Attributes |
 |---|---|
-| Access token (JWT) | `HttpOnly; Secure; SameSite=Lax; Path=/`; **no `Domain`** (host-only on `api.xuancreative.com`); short-lived (≈15 min) |
-| Refresh token | `HttpOnly; Secure; SameSite=Lax; Path=/auth/refresh`; host-only; longer-lived; rotated on every use; revocable server-side |
+| `xc_session` | Random 256-bit token; `HttpOnly; SameSite=Lax; Path=/`; **no `Domain`** (host-only on the API host); `Max-Age` = `AUTH_SESSION_TTL_DAYS` (default 14); `Secure` unless `AUTH_COOKIE_SECURE=false` (local HTTP only, refused in production). Server-side revocable; the database stores only its SHA-256 |
+| `xc_oauth` | Signed, single-use OAuth state for the Google round trip; `HttpOnly; SameSite=Lax; Path=/auth/google; Max-Age=600` |
 
-- Local dev may drop `Secure` when `NODE_ENV=development`, never in production.
-- JWT secrets and DB credentials exist only in `xuan-api`'s environment.
-- The frontend never reads, stores or decodes tokens.
+- The frontend never reads, stores or decodes the session; it sends `credentials: 'include'` and asks `GET /auth/me`.
+- Routing by role is the frontend's job: `user` → home; `editor`/`admin` → dashboard. Authorization is always enforced by the API.
+- A new sign-in replaces any session presented with it (no session fixation).
 
 ## 8. CORS and CSRF: defense in depth
 
-**Implemented now (I20, D21):**
+**Implemented (I20, D21, auth slice):**
 - strict CORS allowlist of exact origins, with `credentials: true`;
 - allowed headers `Content-Type` and `X-Requested-With`;
 - JSON-only body parsing;
-- safe methods never mutate.
-
-**Pending the auth slice:** rejecting state-changing requests that lack the custom header, and `Origin`/`Referer` validation.
+- safe methods never mutate (the one exception is the OAuth callback GET, protected by the signed single-use state, PKCE and nonce);
+- **every POST/PUT/PATCH/DELETE needs `X-Requested-With: XMLHttpRequest`**, and an `Origin` header, when present, must be an allowed origin; otherwise `403 FORBIDDEN` (`CsrfGuard`).
 
 | Layer | What it does | What it does *not* cover |
 |---|---|---|
-| `SameSite=Lax` cookies *(auth slice)* | Cookies aren't sent on cross-*site* subrequests | Same-site attackers; top-level GET navigations, which is why GET must be safe |
+| `SameSite=Lax` cookies | Cookies aren't sent on cross-*site* subrequests | Same-site attackers; top-level GET navigations, which is why GET must be safe |
 | Strict CORS allowlist + `credentials: true` | Only listed origins can read responses or send non-simple credentialed requests. No wildcard origin | "Simple" requests are still *sent*, even if their responses can't be read |
-| JSON bodies + custom header (`X-Requested-With: XMLHttpRequest`) on state-changing requests *(enforcement: auth slice)* | Forces a CORS preflight | Depends on CORS being correct; nothing against XSS |
-| `Origin` validation on state-changing requests *(auth slice)* | Rejects requests from origins outside the allowlist even when the cookie would be sent | XSS on an allowed origin |
+| JSON bodies + custom header (`X-Requested-With: XMLHttpRequest`) on state-changing requests | Forces a CORS preflight | Depends on CORS being correct; nothing against XSS |
+| `Origin` validation on state-changing requests | Rejects requests from origins outside the allowlist even when the cookie would be sent | XSS on an allowed origin |
 | Safe methods never mutate | Makes Lax's top-level-GET allowance harmless | — |
 | XSS prevention (sanitized rich content, CSP later) | Protects every layer above | — |
 
@@ -208,10 +208,20 @@ The authoritative list is the OpenAPI document. This table records deliberate be
 |---|---|
 | `GET /services` | Public. Returns the Services catalog, the offers shown on Work With Me and the homepage "Ways", as `{ data: ServiceDto[] }`. **Published services only**, ordered by `sort_order` then `slug`, **not paginated in V1**. Errors: `500 INTERNAL_ERROR` |
 | `GET /services/:slug` | Public. Returns one published service as `{ data: ServiceDto }`. **No slug-format validation** (a stated D7 deviation: the slug is an opaque lookup key). An unknown, unpublished or malformed slug → `404 NOT_FOUND`. Errors: `404 NOT_FOUND`; `500 INTERNAL_ERROR` |
+| `GET /auth/me` | Session. `{ data: CurrentUserDto }`. Errors: `401 UNAUTHENTICATED`; `500` |
+| `POST /auth/logout` | Public, CSRF-checked. `204`, idempotent. Errors: `403 FORBIDDEN` (missing header / foreign `Origin`); `500` |
+| `GET /auth/google`, `GET /auth/google/callback` | Browser navigations (302), see §7 |
+| `GET /admin/users?role=` | Admin. `{ data: AdminUserDto[] }` oldest first; optional exact `role` filter; **not paginated in V1** (small admin-only list). Errors: `400`, `401`, `403`, `500` |
+| `PUT /admin/editors/:userId` | Admin. Makes a `user` an `editor`; idempotent for an editor → `{ data: AdminUserDto }`. Errors: `400` (malformed id), `401`, `403`, `404 NOT_FOUND`, `409 ADMIN_ROLE_LOCKED` (target is an admin, including yourself), `500` |
+| `DELETE /admin/editors/:userId` | Admin. Makes an `editor` a `user` (the account stays); idempotent for a user → `204`. Errors as for `PUT` |
 
 Both are implemented (`src/modules/services/`, 2026-10-14) and proven by exact-body e2e (`test/services.e2e-spec.ts`) and the OpenAPI e2e.
 
 **`ServiceDto`** = `{ id, slug, title, summary }`. It has no price, no duration and no booking or calendar fields. `isPublished`, `sortOrder` and `createdAt` stay internal. A service is a catalog offer, not an appointment (`data-model.md` §3.1). Application, booking and calendar endpoints aren't part of the current contract; they come with the application/booking slice.
+
+**`CurrentUserDto`** = `{ id, email, displayName, avatarUrl: string | null, role: 'user' | 'editor' | 'admin' }`. **`AdminUserDto`** = the same + `createdAt` (ISO 8601). No provider ids, session data, tokens or timestamps beyond `createdAt`.
+
+**Authorization:** every route requires a session unless documented as public (401 otherwise); role-gated routes answer 403 to other roles; author-owned resources (future posts) answer 403 to editors who aren't the author. No admin-role changes through the API.
 
 No newsletter/subscription endpoint is part of the current contract. That capability needs product confirmation (`data-model.md`).
 
@@ -227,8 +237,9 @@ This file is ahead of `xuan-web/docs/api-contract.md` on the points below. Under
 | 4 | §4 baseline codes | Add `413 PAYLOAD_TOO_LARGE`; 400 also covers invalid JSON; 404 also covers unknown routes |
 | 5 | §4 validation details | Add the field-code table (`REQUIRED`, `INVALID_TYPE`, `INVALID_FORMAT`, `TOO_SHORT`/`TOO_LONG`, `TOO_SMALL`/`TOO_LARGE`, `UNKNOWN_FIELD`, `INVALID`); array dot paths; one `UNKNOWN_FIELD` entry per key; invalid JSON → `fields: []`; malformed path ids → `INVALID_FORMAT` |
 | 6 | §6 | API side is Zod request schemas + response DTO classes; request components are named; component names are consumer contract identifiers |
-| 7 | §7 | Mark as "consumer expectation; producer design pending the auth slice" |
-| 8 | §8 | Mark which layers are implemented now and which are pending the auth slice |
+| 7 | §7 | **Replace** the expected register/login/refresh + JWT access/refresh cookies with the implemented contract: Google-only (`GET /auth/google?returnTo=` navigation, `/login?authError=` codes), one opaque `xc_session` cookie, **`GET /auth/me` instead of `GET /users/me`**, `POST /auth/logout`. **Remove the apiClient refresh/retry flow** (no refresh endpoint; a 401 means signed out) |
+| 8 | §8 | All layers implemented: the web apiClient **must send `X-Requested-With: XMLHttpRequest` on every POST/PUT/PATCH/DELETE** |
 | 9 | §9 | Add the contract-identifier rules (coordinated change; breaking for generated consumers; staging when needed) |
 | 10 | endpoint notes | Public Services catalog: `GET /services`, `GET /services/:slug` (no price in V1); `ServiceDto` = `{ id, slug, title, summary }` (no duration); published only, ordered, unpaginated; unknown/unpublished/malformed slug → 404 |
+| 11 | endpoint notes | Auth + admin: `CurrentUserDto`, `AdminUserDto`, `/admin/users`, `PUT`/`DELETE /admin/editors/:userId`, `ADMIN_ROLE_LOCKED` (409); role routing (user → home, editor/admin → dashboard) |
 | — | outside the contract | xuan-web's `architecture.md` lists a planned `subscribers` feature. Newsletter ("Creator Notes") now *needs product confirmation*; if confirmed, rename it to an explicit newsletter capability |

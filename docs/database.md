@@ -237,6 +237,7 @@ The **actual, decided schema**, so the current database can be understood at a g
 | Table      | Status                                                    | Owning module                         | Settled in                                                                      |
 | ---------- | --------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------- |
 | `services` | **implemented** 2026-10-14 by migration `CreateServices1791710155502` (owner-approved 2026-10-09; revised 2026-10-11: `duration_minutes` removed). `\d+ services` matches this map on `xuan_dev` and `xuan_test`; revert/run round trip and an empty second `migration:generate` observed on `xuan_test`; invariants proven by `test/services-schema.e2e-spec.ts` | `services` (entity `ServiceOffering`) | `docs/superpowers/plans/2026-10-09-foundation-and-services-catalog.md`, Task 13 |
+| `users`, `auth_identities`, `sessions` | **implemented** 2026-10-14 by migration `CreateUsersAndAuth1791980708763` (auth design spec §3). Owner-approved runs: `xuan_test` (guarded run, revert/run round trip, empty second generate) and `xuan_dev`; `\d` matches this map on both; invariants proven by `test/users-schema.e2e-spec.ts` | `users` | `docs/superpowers/plans/2026-10-14-user-auth-and-rbac.md`, Task 2 |
 
 #### `services`
 
@@ -277,3 +278,77 @@ erDiagram
 | _(no other index)_                      | —           | —                                   | The catalog is a handful of rows: `WHERE is_published ORDER BY sort_order` is a sequential scan, which is the fastest plan at this size. Add `ix_services_…` only when `EXPLAIN` on real data says so |
 
 **Not in this table:** service applications, appointments and the Google Calendar / Meet integration. They are confirmed future domain concepts (`data-model.md`), but their physical design belongs to the later booking/application slice. They appear here only once that slice's plan settles them.
+
+#### `users`, `auth_identities`, `sessions`
+
+Accounts, how they sign in, and their open sessions (auth design spec, `docs/superpowers/specs/2026-10-14-user-auth-and-rbac-design.md`). One module (`users`) owns all three, so the foreign keys stay inside it (C12 isn't triggered). `users` holds **no provider-specific columns**: Google today and Facebook later are rows in `auth_identities`.
+
+```mermaid
+erDiagram
+    users ||--o{ auth_identities : "signs in with"
+    users ||--o{ sessions : "holds"
+    users {
+        uuid id PK "pk_users · DEFAULT uuidv7()"
+        varchar_320 email UK "uq_users_email · CK ck_users_email_lowercase"
+        varchar_200 display_name "required · CK ck_users_display_name_not_blank"
+        varchar_2048 avatar_url "nullable"
+        varchar_16 role "required · DEFAULT 'user' · CK ck_users_role"
+        timestamptz created_at "required · DEFAULT now()"
+        timestamptz updated_at "required · DEFAULT now()"
+    }
+    auth_identities {
+        uuid id PK "pk_auth_identities · DEFAULT uuidv7()"
+        uuid user_id FK "fk_auth_identities_user_id → users · ON DELETE CASCADE"
+        varchar_32 provider "required · CK ck_auth_identities_provider"
+        varchar_255 provider_user_id "required"
+        timestamptz created_at "required · DEFAULT now()"
+    }
+    sessions {
+        uuid id PK "pk_sessions · DEFAULT uuidv7()"
+        uuid user_id FK "fk_sessions_user_id → users · ON DELETE CASCADE"
+        char_64 token_hash UK "uq_sessions_token_hash"
+        timestamptz expires_at "required"
+        timestamptz created_at "required · DEFAULT now()"
+    }
+```
+
+**`users`**
+
+| Column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_users` | Every future owner FK points here: `content_posts.author_id`, `service_applications.user_id`, `orders.user_id`, `enrollments.user_id` (D26) |
+| `email` | `varchar(320)` | yes | — | **UQ** `uq_users_email`; **CK** `ck_users_email_lowercase` | The verified email, the canonical contact for prefill. One account per email; stored lowercase (D30). 320 = RFC 5321 maximum |
+| `display_name` | `varchar(200)` | yes | — | **CK** `ck_users_display_name_not_blank` | Shown in the app and used for prefill. Falls back to the email's local part when Google sends no name |
+| `avatar_url` | `varchar(2048)` | no | — | — | The provider's profile picture URL, if any |
+| `role` | `varchar(16)` | yes | `'user'` | **CK** `ck_users_role`: `role IN ('user','editor','admin')` | One role per user (design A6). A CHECK, not an enum type, so adding a role is a one-line migration |
+| `created_at` | `timestamptz` | yes | `now()` | — | D27 |
+| `updated_at` | `timestamptz` | yes | `now()` | — | Rows change: profile sync on sign-in and role changes (D27). Maintained by TypeORM `@UpdateDateColumn` |
+
+**`auth_identities`**
+
+| Column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_auth_identities` | — |
+| `user_id` | `uuid` | yes | — | **FK** `fk_auth_identities_user_id` → `users(id)` `ON DELETE CASCADE` | An identity has no meaning without its account |
+| `provider` | `varchar(32)` | yes | — | **CK** `ck_auth_identities_provider`: `provider IN ('google')` | Facebook later = widen this CHECK |
+| `provider_user_id` | `varchar(255)` | yes | — | part of `uq_auth_identities_provider_provider_user_id` | Google's stable `sub`. Never the email: emails change, `sub` doesn't |
+| `created_at` | `timestamptz` | yes | `now()` | — | Insert-only rows, so no `updated_at` |
+
+**`sessions`**
+
+| Column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_sessions` | — |
+| `user_id` | `uuid` | yes | — | **FK** `fk_sessions_user_id` → `users(id)` `ON DELETE CASCADE`; **IX** `ix_sessions_user_id` | Deleting an account ends its sessions; the index serves the cascade and "sign out everywhere" later |
+| `token_hash` | `char(64)` | yes | — | **UQ** `uq_sessions_token_hash` | SHA-256 hex of the cookie token. The raw token is never stored, so a database leak can't be replayed as sessions |
+| `expires_at` | `timestamptz` | yes | — | — | Absolute expiry (`AUTH_SESSION_TTL_DAYS`). Expired rows are deleted when presented; bulk cleanup is deferred |
+| `created_at` | `timestamptz` | yes | `now()` | — | Insert-only |
+
+**Table-level constraints and indexes:**
+
+| Name | Kind | Definition | Note |
+|---|---|---|---|
+| `uq_auth_identities_provider_provider_user_id` | UNIQUE | `(provider, provider_user_id)` | One account per external identity; the sign-in lookup |
+| `uq_auth_identities_user_id_provider` | UNIQUE | `(user_id, provider)` | At most one identity per provider per account; its leading `user_id` also indexes the FK |
+| `ix_sessions_user_id` | INDEX | `(user_id)` | FK index for the cascade |
+| `uq_sessions_token_hash` | UNIQUE | `(token_hash)` | The per-request session lookup |

@@ -7,6 +7,17 @@ export type AppConfig = Readonly<{
   database: Readonly<{ url: string }>;
   cors: Readonly<{ origins: readonly string[] }>;
   docs: Readonly<{ enabled: boolean }>;
+  auth: Readonly<{
+    google: Readonly<{ clientId: string; clientSecret: string; callbackUrl: string }>;
+    /** Web app origin that sign-in redirects back to. */
+    webUrl: string;
+    /** Signs the OAuth state cookie. */
+    cookieSecret: string;
+    cookieSecure: boolean;
+    sessionTtlDays: number;
+    /** Verified Google emails that become admin on sign-in (bootstrap, never demotes). */
+    adminEmails: readonly string[];
+  }>;
 }>;
 
 export class ConfigError extends Error {}
@@ -25,6 +36,18 @@ export function loadConfig(source: NodeJS.ProcessEnv = readEnvironment()): AppCo
     database: Object.freeze({ url: env.DATABASE_URL }),
     cors: Object.freeze({ origins: Object.freeze([...env.CORS_ORIGINS]) }),
     docs: Object.freeze({ enabled: env.DOCS_ENABLED }),
+    auth: Object.freeze({
+      google: Object.freeze({
+        clientId: env.GOOGLE_CLIENT_ID,
+        clientSecret: env.GOOGLE_CLIENT_SECRET,
+        callbackUrl: env.GOOGLE_CALLBACK_URL,
+      }),
+      webUrl: new URL(env.AUTH_WEB_URL).origin,
+      cookieSecret: env.AUTH_COOKIE_SECRET,
+      cookieSecure: env.AUTH_COOKIE_SECURE,
+      sessionTtlDays: env.AUTH_SESSION_TTL_DAYS,
+      adminEmails: Object.freeze([...env.AUTH_ADMIN_EMAILS]),
+    }),
   });
 }
 

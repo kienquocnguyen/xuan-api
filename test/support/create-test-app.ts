@@ -6,14 +6,36 @@ import { AppModule } from '../../src/app.module.js';
 import { APP_CONFIG } from '../../src/config/app-config.module.js';
 import { loadConfig, type AppConfig } from '../../src/config/load-config.js';
 import { configureApp } from '../../src/http/configure-app.js';
+import { GOOGLE_IDENTITY_GATEWAY } from '../../src/modules/users/google/google-identity.gateway.js';
+import { FakeGoogleIdentityGateway } from './fake-google-identity.gateway.js';
 import { assertTestDatabase, testDatabaseName } from './test-database-guard.js';
 
-/** Same AppModule + same configureApp() as main.ts (D6). Refuses to start against a non-*_test database (I21). */
-export async function createTestApp(extraImports: Type[] = []): Promise<NestExpressApplication> {
-  testDatabaseName(loadConfig().database.url); // fail closed before any connection is opened
+export type TestAppOptions = Readonly<{
+  /** Overrides AUTH_ADMIN_EMAILS for this app only. */
+  adminEmails?: readonly string[];
+}>;
+
+/**
+ * Same AppModule + same configureApp() as main.ts (D6). Refuses to start against a non-*_test database (I21).
+ * Google is always replaced by FakeGoogleIdentityGateway: e2e never contacts Google.
+ */
+export async function createTestApp(
+  extraImports: Type[] = [],
+  options: TestAppOptions = {},
+): Promise<NestExpressApplication> {
+  const loaded = loadConfig();
+  testDatabaseName(loaded.database.url); // fail closed before any connection is opened
+  const testConfig: AppConfig = options.adminEmails
+    ? { ...loaded, auth: { ...loaded.auth, adminEmails: options.adminEmails } }
+    : loaded;
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule, ...extraImports],
-  }).compile();
+  })
+    .overrideProvider(APP_CONFIG)
+    .useValue(testConfig)
+    .overrideProvider(GOOGLE_IDENTITY_GATEWAY)
+    .useValue(new FakeGoogleIdentityGateway())
+    .compile();
   const app = moduleRef.createNestApplication<NestExpressApplication>({
     bodyParser: false,
     logger: ['error'],
@@ -26,4 +48,8 @@ export async function createTestApp(extraImports: Type[] = []): Promise<NestExpr
   configureApp(app, config);
   await app.init();
   return app;
+}
+
+export function fakeGoogle(app: NestExpressApplication): FakeGoogleIdentityGateway {
+  return app.get(GOOGLE_IDENTITY_GATEWAY);
 }

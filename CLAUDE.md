@@ -3,8 +3,8 @@
 Backend for **Xuan Creative**: NestJS 12 · REST · PostgreSQL 18 · TypeORM 1.x · Zod 4 · OpenAPI. A modular monolith in its own repo, deployed separately from `xuan-web` (Next.js). The generated OpenAPI document is the executable contract between them (`docs/api-contract.md` §0).
 
 **Status:** foundation implementation in progress, in learning-first mode.
-- Done: the NestJS 12 application, validated application config, a local PostgreSQL 18 environment, and TypeORM connected.
-- Current slice: the public Services catalog (`docs/superpowers/plans/2026-10-09-foundation-and-services-catalog.md`).
+- Done: the NestJS 12 application, config, PostgreSQL 18 + TypeORM, the HTTP contract platform, and the public Services catalog.
+- Current slice: users, Google sign-in and role-based access (`docs/superpowers/plans/2026-10-14-user-auth-and-rbac.md`).
 - Git: `main` holds the engineering-system baseline; `dev` is the default integration branch (`docs/development-workflow.md` §9).
 
 ## Working mode: LEARNING-FIRST (active)
