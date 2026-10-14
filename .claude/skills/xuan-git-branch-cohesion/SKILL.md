@@ -53,7 +53,7 @@ If the next outcome depends on an unmerged PR, **do not stack.** Close that PR f
 
 10. **Cherry-pick** is a recovery tool (one isolated commit from abandoned work), never normal flow. Ask first unless the owner requested that exact cherry-pick.
 11. **Rebase is not a substitute for bad topology.** No `rebase`, `rebase --onto`, cherry-pick or force-push to keep stacks alive or repair avoidable splits. A history-rewriting rebase needs approval.
-12. **Force-push:** never `main`, `dev` or shared branches; never routine. No direct pushes to `dev` or `main`.
+12. **Force-push:** never `main`, `dev` or shared branches; never routine. Any history rewrite needs approval. No direct pushes to `dev` or `main`.
 13. **No hotfix flow exists.** Don't assume `hotfix/*`, `release/*` or back-merges; ask.
 
 ## Never
