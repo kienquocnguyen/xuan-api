@@ -1,72 +1,37 @@
-import { z } from 'zod';
-import { loadEnvFile } from 'node:process';
-import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
-
-const envFile = resolve(process.cwd(), '.env');
-if (existsSync(envFile)) {
-  loadEnvFile(envFile);
-}
-
-const envSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-
-  PORT: z.coerce.number().int().positive().default(4000),
-
-  DATABASE_URL: z.string().min(1),
-
-  CORS_ORIGINS: z.string().default('http://localhost:3000'),
-
-  DOCS_ENABLED: z
-    .enum(['true', 'false'])
-    .default('false')
-    .transform((value) => value === 'true'),
-});
+import { envSchema } from './env.schema.js';
 
 export type AppConfig = Readonly<{
   env: 'development' | 'test' | 'production';
   port: number;
-  database: {
-    url: string;
-  };
-  cors: {
-    origins: string[];
-  };
-  docs: {
-    enabled: boolean;
-  };
+  database: Readonly<{ url: string }>;
+  cors: Readonly<{ origins: readonly string[] }>;
+  docs: Readonly<{ enabled: boolean }>;
 }>;
 
-export function loadConfig(): AppConfig {
-  const result = envSchema.safeParse(process.env);
+export class ConfigError extends Error {}
 
+/** Reads, validates, normalizes and freezes configuration. Throws ConfigError naming variables only (I5). */
+export function loadConfig(source: NodeJS.ProcessEnv = readEnvironment()): AppConfig {
+  const result = envSchema.safeParse(source);
   if (!result.success) {
-    const variables = [
-      ...new Set(
-        result.error.issues
-          .map((issue) => issue.path[0])
-          .filter((key): key is string => typeof key === 'string'),
-      ),
-    ];
-
-    throw new Error(`Invalid environment configuration: ${variables.join(', ')}`);
+    const names = [...new Set(result.error.issues.map((issue) => String(issue.path[0])))];
+    throw new ConfigError(`Invalid configuration: ${names.join(', ')}`);
   }
-
   const env = result.data;
-
   return Object.freeze({
     env: env.NODE_ENV,
     port: env.PORT,
-    database: Object.freeze({
-      url: env.DATABASE_URL,
-    }),
-    cors: Object.freeze({
-      origins: env.CORS_ORIGINS.split(',')
-        .map((origin) => origin.trim())
-        .filter(Boolean),
-    }),
-    docs: Object.freeze({
-      enabled: env.DOCS_ENABLED,
-    }),
+    database: Object.freeze({ url: env.DATABASE_URL }),
+    cors: Object.freeze({ origins: Object.freeze([...env.CORS_ORIGINS]) }),
+    docs: Object.freeze({ enabled: env.DOCS_ENABLED }),
   });
+}
+
+// The only place that touches process.env (I4). Local files are optional; production uses real env vars,
+// which win over the file (loadEnvFile never overrides a variable that is already set; architecture.md §16).
+function readEnvironment(): NodeJS.ProcessEnv {
+  const file = process.env.NODE_ENV === 'test' ? '.env.test' : '.env';
+  if (existsSync(file)) process.loadEnvFile(file);
+  return process.env;
 }

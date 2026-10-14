@@ -439,7 +439,7 @@ These are decided by running real code, not by debate. If one disproves an assum
 | How the interceptor detects `@HttpCode(204)` | "204 empty body" fixture e2e |
 | `@ApiErrorResponses` adds `VALIDATION_FAILED` automatically or explicitly | Choose while implementing |
 | Helmet CSP vs the Swagger UI | Open `/docs` locally |
-| `process.loadEnvFile()` precedence vs real env vars | `loadConfig` unit test |
+| `process.loadEnvFile()` precedence vs real env vars | `loadConfig` unit test. **Result (2026-10-14, Node 24.21): a variable already set in the real environment wins;** the file never overrides it. `NODE_ENV=test` selects `.env.test`, otherwise `.env` |
 | Lint tool can enforce I2 and I4 (oxlint, else ESLint + boundaries) | A deliberate violation fails lint. **Result (2026-10-14): oxlint is enough.** `no-restricted-properties` (process.env) and per-folder `no-restricted-imports` overrides in `.oxlintrc.json`; the probe `src/http/lint-probe.ts` failed with exactly the I2 and I4 errors, and lint is green without it |
 | TypeORM CLI under ESM; entity glob in the CLI DataSource | First `migration:generate` (`database.md`) |
 | Generated migrations stable with `uuidv7()` and named constraints | Generate twice; the second is empty |
