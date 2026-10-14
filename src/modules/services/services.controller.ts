@@ -1,11 +1,13 @@
 import { Controller, Get, Param } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { baselineErrors } from '../../errors/baseline-errors.js';
+import { Public } from '../../http/auth/auth.decorators.js';
 import { ApiEnvelopeResponse } from '../../http/openapi/api-envelope-response.js';
 import { ApiErrorResponses } from '../../http/openapi/api-error-responses.js';
 import { ServiceDto, toServiceDto } from './dto/service.dto.js';
 import { ServicesCatalogService } from './services.service.js';
 
+@Public() // the catalog is public
 @ApiTags('services')
 @Controller('services')
 export class ServicesController {

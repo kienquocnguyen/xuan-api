@@ -38,6 +38,7 @@ describe('CORS and body parsing', () => {
   ])('%s body is not parsed → VALIDATION_FAILED', async (_n, type, payload) => {
     const res = await request(app.getHttpServer())
       .post('/__fixture/echo')
+      .set('X-Requested-With', 'XMLHttpRequest')
       .set('Content-Type', type)
       .send(payload);
     expect(res.status).toBe(400);
@@ -47,6 +48,7 @@ describe('CORS and body parsing', () => {
   it('error responses to an allowed origin still carry CORS headers', async () => {
     const res = await request(app.getHttpServer())
       .post('/__fixture/echo')
+      .set('X-Requested-With', 'XMLHttpRequest')
       .set('Origin', 'http://localhost:3000')
       .set('Content-Type', 'application/json')
       .send('{"name":');

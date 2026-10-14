@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AppError } from '../../src/errors/app-error.js';
 import { baselineErrors } from '../../src/errors/baseline-errors.js';
 import { ApiEnvelopeResponse } from '../../src/http/openapi/api-envelope-response.js';
+import { Public } from '../../src/http/auth/auth.decorators.js';
 import { ApiErrorResponses } from '../../src/http/openapi/api-error-responses.js';
 
 export const fixtureSchema = z
@@ -18,6 +19,7 @@ class FixtureEchoResultDto {
   @ApiProperty() name!: string;
 }
 
+@Public() // platform fixtures exercise the HTTP contract, not auth
 @Controller('__fixture')
 class FixtureController {
   @Get('payload') payload() {

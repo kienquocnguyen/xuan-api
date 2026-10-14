@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from 'express';
 import type { NestExpressApplication } from '@nestjs/platform-express';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import type { AppConfig } from '../config/load-config.js';
 import { setupOpenApi } from './openapi/setup-open-api.js';
@@ -35,5 +36,6 @@ export function configureApp(app: NestExpressApplication, config: AppConfig): vo
   });
   app.useBodyParser('json', { limit: '100kb' }); // JSON only (D21)
   app.use(keepJsonParseMarker);
+  app.use(cookieParser(config.auth.cookieSecret)); // signs/verifies the OAuth state cookie (auth design §4)
   if (config.docs.enabled) setupOpenApi(app); // D20
 }
