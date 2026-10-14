@@ -9,9 +9,7 @@ if (existsSync(envFile)) {
 }
 
 const envSchema = z.object({
-  NODE_ENV: z
-    .enum(['development', 'test', 'production'])
-    .default('development'),
+  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 
   PORT: z.coerce.number().int().positive().default(4000),
 
@@ -51,9 +49,7 @@ export function loadConfig(): AppConfig {
       ),
     ];
 
-    throw new Error(
-      `Invalid environment configuration: ${variables.join(', ')}`,
-    );
+    throw new Error(`Invalid environment configuration: ${variables.join(', ')}`);
   }
 
   const env = result.data;

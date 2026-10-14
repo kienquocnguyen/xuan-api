@@ -9,8 +9,7 @@ describe('loadConfig', () => {
   });
 
   it('uses port 4000 by default', () => {
-    process.env.DATABASE_URL =
-      'postgresql://xuan_app:test@localhost:5433/xuan_dev';
+    process.env.DATABASE_URL = 'postgresql://xuan_app:test@localhost:5433/xuan_dev';
 
     const config = loadConfig();
 
@@ -18,8 +17,7 @@ describe('loadConfig', () => {
   });
 
   it('parses DOCS_ENABLED as a boolean', () => {
-    process.env.DATABASE_URL =
-      'postgresql://xuan_app:test@localhost:5433/xuan_dev';
+    process.env.DATABASE_URL = 'postgresql://xuan_app:test@localhost:5433/xuan_dev';
     process.env.DOCS_ENABLED = 'true';
 
     const config = loadConfig();
