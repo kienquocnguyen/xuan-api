@@ -1,6 +1,8 @@
 # Foundation + Services Catalog Implementation Plan
 
 > **For agentic workers:** this plan runs in **learning-first mode** (`docs/development-workflow.md` §3). Tasks tagged `[learn]` are typed and run by the owner; Claude explains, gives shapes, reviews (`xuan-api-architecture-review`) and waits. Claude implements a task only if the owner re-tags it `[delegate]`. Every code task follows **REQUIRED SUB-SKILL:** `xuan-api-feature`. Schema work follows **REQUIRED SUB-SKILL:** `xuan-database-change`. Steps use checkbox (`- [ ]`) syntax.
+>
+> **Delegation transition (2026-10-14):** the owner delegated the remaining work. Tasks 1–12 are now `[delegate]`; Tasks 14–18 are `[delegate]` once Task 12 is done. Database operations that `xuan-database-change` gates (migration run/revert, resets, anything destructive) still need the owner's approval. Current state per task: § "Execution status".
 
 **Goal:** a running NestJS 12 API whose platform (config, database, contract envelopes, errors, validation, CORS, OpenAPI, e2e harness) is proven by tests, serving the first real slice: the public Services catalog (`GET /services`, `GET /services/:slug`) from PostgreSQL.
 
@@ -63,6 +65,28 @@ How to verify · Expected result · Common failure to watch for
 | D. Services catalog | 13–18 | `feat/build-services-catalog` |
 
 Each phase ends with `xuan-api-architecture-review` → the PR to `dev` (or a reviewed `git merge --no-ff` if no remote exists).
+
+## Execution status (reconciled 2026-10-14)
+
+The first sessions were manual, and some work happened out of order. This table is the verified state of the repository on 2026-10-14 (audit + owner's manual verification). It supersedes the checkboxes below, which were never ticked.
+
+| Task | Status | Evidence / what remains |
+|---|---|---|
+| 0 Git baseline | DONE | `main`/`dev`; PRs #1–#3 merged |
+| 1 Nest skeleton | PARTIAL | Starter, ESM, Yarn 4, `engines`, `.gitignore` done. **Remains:** `.nvmrc` (Step 1), remove the sample (Step 7). **Step 8 superseded:** port 4000 now comes from config (Task 3) |
+| 2 TS pin / lint boundaries | PARTIAL | TS `6.0.2` pinned exactly. **Remains:** Steps 2–6 |
+| 3 `loadConfig` | PARTIAL | A validated, frozen `loadConfig()` exists (merged in PR #3). **Remains:** `env.schema.ts`, `ConfigError`, the `source` parameter, `.env.test`, `AppConfigModule`, the precedence spike, the full test table |
+| 4 Local Postgres 18 | PARTIAL / REVISED | `docker-compose.yml` with `postgres:18` on 5433 (`xuan_app` is the image's bootstrap role, `xuan_dev` its default database). `xuan_test` was created by hand. **Remains:** a reproducible `xuan_test` (init script) and the `db:*` scripts. **Revised:** keep the existing Compose file and role; see Task 4's note |
+| 5 TypeORM + CLI | PARTIAL / REVISED | Connected through `TypeOrmModule.forRoot`, `synchronize: false`. The CLI runs `typeorm-ts-node-esm` on `src/database/data-source.ts` and generated `CreateServices`. **Remains:** `DatabaseModule` + `APP_CONFIG`, the `migration:*` scripts, `xuan_test` targeting, the §16 record. **Revised:** the CLI keeps the working ts-node ESM approach instead of `dist/` globs; see Task 5's note |
+| 6–12 HTTP contract platform | NOT STARTED | — |
+| 13 Schema checkpoint | DONE / REVISED | Approved 2026-10-09; revised 2026-10-11 (no duration) |
+| 14 Entity + migration | PARTIAL (WIP branch) | Entity, module and migration on `feat/build-services-catalog`. The owner ran the migration on `xuan_dev` and inspected `\d+ services` (manual). **Remains:** Steps 5–9 (round trip, empty second generate, schema e2e, §12 status) |
+| 15 `GET /services` | PARTIAL (WIP branch) | Query and mapping work (manual Postman check). **Remains:** refit onto the Phase C platform (envelope, controller-side mapping D5, `ServiceDto` class, OpenAPI), and the tests |
+| 16 `GET /services/:slug` | PARTIAL (WIP branch) | Lookup + 404 via a **temporary** `AppError`/filter in `modules/services/errors/`. **Remains:** baseline `NOT_FOUND` + envelope (Tasks 6–7), the tests including odd slugs. No slug-format validation is needed (Task 13's D7 deviation) |
+| 17 Seed | NOT STARTED | Needs the owner's seed copy |
+| 18 Close the slice | PARTIAL | `api-contract.md` §11 already recorded |
+
+**Branches as executed:** Tasks 1–5 remainders on `chore/complete-foundation`. The Services WIP is preserved on `feat/build-services-catalog` and is rebased onto `dev` after Phase C.
 
 ## File map
 
@@ -132,7 +156,7 @@ test/
 
 ### Task 1: Nest 12 project skeleton
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -181,13 +205,13 @@ import { Module } from '@nestjs/common';
 export class AppModule {}
 ```
 
-- [ ] **Step 8:** In `src/main.ts`, change the port to `4000` temporarily; Task 11 replaces this file. Then run `yarn build`, then `yarn start:dev`, and open `http://localhost:4000` (expect a Nest 404 JSON). Stop the server.
+- [ ] **Step 8:** *(Superseded 2026-10-14: the port already comes from `loadConfig()`, default 4000. Only the 404 check below remains.)* In `src/main.ts`, change the port to `4000` temporarily; Task 11 replaces this file. Then run `yarn build`, then `yarn start:dev`, and open `http://localhost:4000` (expect a Nest 404 JSON). Stop the server.
 
 ---
 
 ### Task 2: TypeScript pin, format and lint boundaries
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -254,7 +278,7 @@ export default tseslint.config(
 
 ### Task 3: Validated configuration (`loadConfig`)
 
-**`[learn]`** · branch `feat/setup-config-and-database`
+**`[delegate]`** (was `[learn]`) · branch `feat/setup-config-and-database`
 
 | | |
 |---|---|
@@ -435,7 +459,7 @@ DOCS_ENABLED=true
 
 ### Task 4: Local PostgreSQL 18
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -445,6 +469,8 @@ DOCS_ENABLED=true
 | **Verify** | `docker compose exec db psql -U xuan_app xuan_dev -c "SELECT version(), current_user, current_database();"` |
 | **Expected** | `PostgreSQL 18.x`, `xuan_app`, `xuan_dev` |
 | **Common failure** | Editing the init script after the first start: it won't re-run until the volume is removed (`yarn db:down` + `docker compose down -v`) |
+
+> **Reconciliation note (2026-10-14):** the repository already has `docker-compose.yml` with `POSTGRES_USER: xuan_app`, `POSTGRES_DB: xuan_dev` and an initialized volume holding the migrated `services` table. Switching to the Step 1–2 shape (a separate `postgres` superuser) would need a volume reset, a destructive operation. So the remaining work keeps the existing file and role, and adds only `docker/postgres/init/01-create-test-database.sql` (`CREATE DATABASE xuan_test OWNER xuan_app;`), mounted at `/docker-entrypoint-initdb.d`, plus the `db:*` scripts. A fresh volume gets both databases; the existing volume (where `xuan_test` was created by hand) is untouched.
 
 - [ ] **Step 1:** `compose.yaml`:
 
@@ -483,7 +509,7 @@ CREATE DATABASE xuan_test OWNER xuan_app;
 
 ### Task 5: TypeORM root + migration CLI
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -522,6 +548,8 @@ import type { AppConfig } from '../config/load-config.js';
 })
 export class DatabaseModule {}
 ```
+
+> **Reconciliation note (2026-10-14):** Steps 3–4 and 6 are revised. The CLI already works through `typeorm-ts-node-esm` on the TypeScript sources (it generated `CreateServices`), so `data-source.ts` keeps `src/**` globs and the scripts call `typeorm-ts-node-esm -d src/database/data-source.ts` instead of building `dist/` first. The result is recorded in `architecture.md` §16.
 
 - [ ] **Step 3:** `src/database/data-source.ts`:
 
@@ -564,7 +592,7 @@ export default new DataSource({
 
 ### Task 6: Application errors and contract error mapping
 
-**`[learn]`** · branch `feat/build-http-contract-platform`
+**`[delegate]`** (was `[learn]`) · branch `feat/build-http-contract-platform`
 
 | | |
 |---|---|
@@ -756,7 +784,7 @@ function frameworkStatus(exception: unknown): number | undefined {
 
 ### Task 7: E2E harness, global filter and the fixture module
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -979,7 +1007,7 @@ describe('HTTP contract (fixture)', () => {
 
 ### Task 8: Success envelope interceptor (`{ data }`, 204, `undefined` → 500)
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -1050,7 +1078,7 @@ export class SuccessEnvelopeInterceptor implements NestInterceptor {
 
 ### Task 9: Validation pipe + field-error translation
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -1217,7 +1245,7 @@ it('missing required field → REQUIRED', async () => {
 
 ### Task 10: OpenAPI helpers and the document-build test
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -1370,7 +1398,7 @@ describe('OpenAPI document', () => {
 
 ### Task 11: Bootstrap: JSON-only body, helmet, CORS, Swagger, `main.ts`
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -1480,7 +1508,7 @@ await bootstrap();
 
 ### Task 12: Phase C checkpoint review
 
-**`[learn]`**
+**`[delegate]`** (was `[learn]`)
 
 | | |
 |---|---|
@@ -1532,7 +1560,7 @@ await bootstrap();
 
 ### Task 14: `ServiceOffering` entity + first migration
 
-**`[learn]`** · **REQUIRED SUB-SKILL:** `xuan-database-change`
+**`[delegate]` after Task 12** (was `[learn]`) · **REQUIRED SUB-SKILL:** `xuan-database-change`
 
 | | |
 |---|---|
@@ -1671,7 +1699,7 @@ describe('services table invariants', () => {
 
 ### Task 15: `GET /services` (catalog list)
 
-**`[learn]`** · **REQUIRED SUB-SKILL:** `xuan-api-feature`
+**`[delegate]` after Task 12** (was `[learn]`) · **REQUIRED SUB-SKILL:** `xuan-api-feature`
 
 | | |
 |---|---|
@@ -1813,7 +1841,7 @@ export class ServicesController {
 
 ### Task 16: `GET /services/:slug`
 
-**`[learn]`** · **REQUIRED SUB-SKILL:** `xuan-api-feature`
+**`[delegate]` after Task 12** (was `[learn]`) · **REQUIRED SUB-SKILL:** `xuan-api-feature`
 
 | | |
 |---|---|
@@ -1911,7 +1939,7 @@ it('documents the services endpoints', async () => {
 
 ### Task 17: Idempotent catalog seed
 
-**`[learn]`**
+**`[delegate]` after Task 12** (was `[learn]`)
 
 | | |
 |---|---|
@@ -1968,7 +1996,7 @@ await seed();
 
 ### Task 18: Close the slice: contract, docs, review, PR
 
-**`[learn]`**
+**`[delegate]` after Task 12** (was `[learn]`)
 
 | | |
 |---|---|

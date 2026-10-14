@@ -115,7 +115,9 @@ These are **learning targets and signals, not gates.** They help the owner judge
 
 | Task class   | Delegated since | Notes |
 | ------------ | --------------- | ----- |
-| _(none yet)_ |                 |       |
+| Foundation and HTTP contract platform: remaining plan Tasks 1–12 (`2026-10-09-foundation-and-services-catalog.md`) | 2026-10-14 | Claude implements, verifies and reviews. The owner approves each phase PR |
+| Services catalog: remaining plan Tasks 14–18 | 2026-10-14, effective once Task 12 is done | Refits the preserved WIP on `feat/build-services-catalog` onto the platform |
+| Database operations inside delegated tasks | — (not delegated) | Migration run/revert, resets, `TRUNCATE`, volume or database removal and other destructive or state-changing database steps still need the owner's explicit approval each time (`xuan-database-change`) |
 
 ## 4. Local setup
 
