@@ -405,7 +405,7 @@ These are shared with xuan-web. Agents ask instead of guessing.
 - Money: currency, price units, formatting.
 - Locale/i18n of API `message` texts.
 - Concurrency on admin edits: last-write-wins vs optimistic concurrency.
-- The domain questions (which offers exist, booking workflow, course format, content publishing and editor publish permission, newsletter): `data-model.md` §5.
+- The domain questions (final catalog content, the service application/booking details, course format, content publishing and editor publish permission, newsletter): `data-model.md` §5.
 
 ## 15. Deferred architecture
 
@@ -414,6 +414,7 @@ These are shared with xuan-web. Agents ask instead of guessing.
 | Auth: global guard + `@Public()`, users, **role persistence** (one or many roles; column or tables), cookies, refresh lifecycle, CSRF header and Origin enforcement. It must support both **role-based** and **resource-ownership** authorization; the conceptual requirements (admin / editor / customer, author ownership of content) are in `data-model.md` §4 | Auth slice design |
 | Content: post types, rich text, media, draft/publish state, publishing workflow, editor publish permission (open) | Content slice (after auth) |
 | Newsletter subscriptions ("Creator Notes") | Product confirmation |
+| Service applications and appointments: persistence, statuses, slot availability and holds (no double acceptance), Google Calendar / Meet integration, applicant emails. Confirmed concepts in `data-model.md` §3.1 | Application/booking slice design |
 | Rate limiting + `trust proxy` | **Before public launch** (D23) |
 | Pagination implementation (`PageQueryDto`, `PageInfoDto`, paginated decorator) | The first list that needs it (the services list's pagination is settled in its plan) |
 | First request-body validation and first conflict → `AppError` (409) | Admin service management (auth slice) or courses |

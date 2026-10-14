@@ -38,7 +38,7 @@
 These conditions are likely to bite in real use, and no happy-path test covers them. Each line names the task that adds its test.
 
 1. **Drafts leaking.** An unpublished service must be invisible in **both** the list and the slug lookup (404). Tests: Task 15, Task 16.
-2. **`durationMinutes: null` serialization.** A program without a fixed session length must serialize as `null`, not be omitted. Test: Task 15 (exact body).
+2. **Internal fields leaking.** `isPublished`, `sortOrder` and `createdAt` must never appear in a response; the body is exactly `{ id, slug, title, summary }`. Test: Task 15 (exact body).
 3. **Odd slugs** (`/services/Kickstart`, `/services/%20`, a 300-character slug) → `404 NOT_FOUND` envelope, never 500. Test: Task 16.
 4. **A disallowed browser origin** gets no `Access-Control-Allow-Origin`; an allowed one gets it plus `Access-Control-Allow-Credentials: true`. Test: Task 11.
 5. **A non-JSON body** (`text/plain`, form-encoded) reaching a validated endpoint → `400 VALIDATION_FAILED`, never processed as data. Test: Task 11.
@@ -1513,7 +1513,7 @@ await bootstrap();
 
 - [ ] **Step 1:** Read `database.md` §12 → `services`. For each row, say why it exists.
 - [ ] **Step 2:** Decide or confirm the open points:
-  - `duration_minutes` nullable (programs), yes or no;
+  - no duration column (revised 2026-10-11: `services` is a public offer catalog, not an appointment table; offers range from a 90-minute session to a 12-week program, `data-model.md` §3.1);
   - `summary` length 500;
   - `title` 120;
   - `slug` format `^[a-z0-9]+(-[a-z0-9]+)*$`;
@@ -1523,8 +1523,10 @@ await bootstrap();
 
 **Settled in this plan** (record in `api-contract.md` §11 during Task 18):
 - `GET /services` → `{ data: ServiceDto[] }`, published only, ordered by `sort_order`, then `slug`, **not paginated**.
-- `GET /services/:slug` → `{ data: ServiceDto }` for a published service, else `404 NOT_FOUND`. **No slug-format validation:** any string is a lookup key, and an impossible slug simply isn't found. This is a **stated D7 deviation**: the slug is an opaque key, so a format error would add a 400 the client can't act on differently from a 404.
-- `ServiceDto` = `{ id, slug, title, summary, durationMinutes }`. `isPublished`, `sortOrder` and `createdAt` stay internal.
+- `GET /services/:slug` → `{ data: ServiceDto }` for a published service; an unknown, unpublished or malformed slug → `404 NOT_FOUND`. **No slug-format validation:** any string is a lookup key, and an impossible slug simply isn't found. This is a **stated D7 deviation**: the slug is an opaque key, so a format error would add a 400 the client can't act on differently from a 404.
+- `ServiceDto` = `{ id, slug, title, summary }`. `isPublished`, `sortOrder` and `createdAt` stay internal. No duration, price, booking or calendar fields.
+
+**Approved** by the owner on 2026-10-09; revised 2026-10-11 to drop `duration_minutes` / `durationMinutes` (before any migration existed). Applications, appointments and calendar integration are future concepts of the application/booking slice, not of this one.
 
 ---
 
@@ -1541,7 +1543,7 @@ await bootstrap();
 | **Expected** | Names `pk_services`, `uq_services_slug`, `ck_services_*`; `created_at timestamp with time zone`; `id DEFAULT uuidv7()` |
 | **Common failure** | Hashed `PK_…`/`UQ_…` names, or `TIMESTAMP` without a time zone. Fix the **entity** and regenerate |
 
-**Interfaces, produces:** `class ServiceOffering { id: string; slug: string; title: string; summary: string; durationMinutes: number | null; isPublished: boolean; sortOrder: number; createdAt: Date }`; `ServicesModule` (registers `forFeature([ServiceOffering])`).
+**Interfaces, produces:** `class ServiceOffering { id: string; slug: string; title: string; summary: string; isPublished: boolean; sortOrder: number; createdAt: Date }`; `ServicesModule` (registers `forFeature([ServiceOffering])`).
 
 - [ ] **Step 1:** `src/modules/services/service-offering.entity.ts`:
 
@@ -1554,7 +1556,6 @@ import { Check, Column, CreateDateColumn, Entity, PrimaryColumn, Unique } from '
 @Check('ck_services_slug_format', `"slug" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`)
 @Check('ck_services_title_not_blank', `btrim("title") <> ''`)
 @Check('ck_services_summary_not_blank', `btrim("summary") <> ''`)
-@Check('ck_services_duration_minutes_positive', `"duration_minutes" > 0`)
 export class ServiceOffering {
   @PrimaryColumn({ type: 'uuid', default: () => 'uuidv7()', primaryKeyConstraintName: 'pk_services' })
   id!: string;
@@ -1567,9 +1568,6 @@ export class ServiceOffering {
 
   @Column({ type: 'varchar', length: 500 })
   summary!: string;
-
-  @Column({ name: 'duration_minutes', type: 'integer', nullable: true })
-  durationMinutes!: number | null;
 
   @Column({ name: 'is_published', type: 'boolean', default: false })
   isPublished!: boolean;
@@ -1601,10 +1599,9 @@ export class ServicesModule {}
 ```sql
 CREATE TABLE "services" ("id" uuid NOT NULL DEFAULT uuidv7(), "slug" character varying(80) NOT NULL,
   "title" character varying(120) NOT NULL, "summary" character varying(500) NOT NULL,
-  "duration_minutes" integer, "is_published" boolean NOT NULL DEFAULT false,
+  "is_published" boolean NOT NULL DEFAULT false,
   "sort_order" integer NOT NULL DEFAULT 0, "created_at" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
   CONSTRAINT "uq_services_slug" UNIQUE ("slug"),
-  CONSTRAINT "ck_services_duration_minutes_positive" CHECK ("duration_minutes" > 0),
   CONSTRAINT "ck_services_summary_not_blank" CHECK (btrim("summary") <> ''),
   CONSTRAINT "ck_services_title_not_blank" CHECK (btrim("title") <> ''),
   CONSTRAINT "ck_services_slug_format" CHECK ("slug" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
@@ -1626,7 +1623,7 @@ import { ServiceOffering } from '../src/modules/services/service-offering.entity
 import { createTestApp } from './support/create-test-app.js';
 import { resetDatabase } from './support/reset-database.js';
 
-const valid = { slug: 'kickstart-session', title: 'Kickstart', summary: 'One focused session.', durationMinutes: 90 };
+const valid = { slug: 'kickstart-session', title: 'Kickstart', summary: 'One focused session.' };
 
 const constraintOf = async (promise: Promise<unknown>) => {
   try { await promise; } catch (error) {
@@ -1652,18 +1649,12 @@ describe('services table invariants', () => {
     expect(row.sortOrder).toBe(0);
   });
 
-  it('allows a null duration (programs)', async () => {
-    await repo.insert({ ...valid, durationMinutes: null });
-    expect((await repo.findOneByOrFail({ slug: valid.slug })).durationMinutes).toBeNull();
-  });
-
   it.each([
     ['duplicate slug', 'uq_services_slug', async (r: Repository<ServiceOffering>) => { await r.insert(valid); return r.insert(valid); }],
     ['uppercase slug', 'ck_services_slug_format', (r: Repository<ServiceOffering>) => r.insert({ ...valid, slug: 'Kickstart' })],
     ['double-dash slug', 'ck_services_slug_format', (r: Repository<ServiceOffering>) => r.insert({ ...valid, slug: 'a--b' })],
     ['blank title', 'ck_services_title_not_blank', (r: Repository<ServiceOffering>) => r.insert({ ...valid, title: '   ' })],
     ['blank summary', 'ck_services_summary_not_blank', (r: Repository<ServiceOffering>) => r.insert({ ...valid, summary: '' })],
-    ['zero duration', 'ck_services_duration_minutes_positive', (r: Repository<ServiceOffering>) => r.insert({ ...valid, durationMinutes: 0 })],
   ])('rejects %s via %s', async (_name, constraint, act) => {
     expect(await constraintOf(act(repo))).toBe(constraint);
   });
@@ -1688,7 +1679,7 @@ describe('services table invariants', () => {
 | **Why this exists** | The first real payload through the whole stack: repository → service → controller mapping → envelope → OpenAPI |
 | **Concept** | Explicit response DTO + mapping (I10, D5); why `isPublished` and `createdAt` don't leave the module; exact-body tests |
 | **Verify** | `yarn test:e2e` |
-| **Expected** | List tests green, including the draft-hiding and `null`-duration cases (Review Focus 1, 2) |
+| **Expected** | List tests green, including the draft-hiding and exact-body cases (Review Focus 1, 2) |
 | **Common failure** | Returning the entities ("they have no secrets"). The exact-body test fails on the extra fields, and that's what it's for |
 
 **Interfaces, produces:**
@@ -1715,23 +1706,23 @@ describe('Services catalog', () => {
   afterAll(async () => { await app.close(); });
 
   const seed = (rows: Partial<ServiceOffering>[]) =>
-    repo.insert(rows.map((r) => ({ title: 'T', summary: 'S', durationMinutes: 60, isPublished: true, sortOrder: 0, ...r })));
+    repo.insert(rows.map((r) => ({ title: 'T', summary: 'S', isPublished: true, sortOrder: 0, ...r })));
 
   const idOf = async (slug: string) => (await repo.findOneByOrFail({ slug })).id;
 
   describe('GET /services', () => {
     it('returns published services ordered by sort_order then slug, as ServiceDto only', async () => {
       await seed([
-        { slug: 'coaching-3-months', title: '3-Month 1:1 Coaching', summary: 'Three months.', durationMinutes: null, sortOrder: 2 },
-        { slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.', durationMinutes: 90, sortOrder: 1 },
+        { slug: 'coaching-3-months', title: '3-Month 1:1 Coaching', summary: 'Three months.', sortOrder: 2 },
+        { slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.', sortOrder: 1 },
         { slug: 'draft-offer', isPublished: false, sortOrder: 0 },
       ]);
       const res = await request(app.getHttpServer()).get('/services');
       expect(res.status).toBe(200);
       expect(res.body).toEqual({
         data: [
-          { id: await idOf('kickstart-session'), slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.', durationMinutes: 90 },
-          { id: await idOf('coaching-3-months'), slug: 'coaching-3-months', title: '3-Month 1:1 Coaching', summary: 'Three months.', durationMinutes: null },
+          { id: await idOf('kickstart-session'), slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.' },
+          { id: await idOf('coaching-3-months'), slug: 'coaching-3-months', title: '3-Month 1:1 Coaching', summary: 'Three months.' },
         ],
       });
     });
@@ -1758,8 +1749,6 @@ export class ServiceDto {
   @ApiProperty({ example: 'kickstart-session' }) slug!: string;
   @ApiProperty() title!: string;
   @ApiProperty() summary!: string;
-  @ApiProperty({ type: 'integer', nullable: true, description: 'Length of one session in minutes; null when the offer is not a single fixed-length session.' })
-  durationMinutes!: number | null;
 }
 
 /** Whitelist by construction: only these fields reach the wire (I10). */
@@ -1769,7 +1758,6 @@ export function toServiceDto(offering: ServiceOffering): ServiceDto {
     slug: offering.slug,
     title: offering.title,
     summary: offering.summary,
-    durationMinutes: offering.durationMinutes,
   };
 }
 ```
@@ -1845,11 +1833,11 @@ describe('GET /services/:slug', () => {
   const notFound = { data: null, error: { code: 'NOT_FOUND', message: 'The requested resource was not found.', details: {} } };
 
   it('returns one published service', async () => {
-    await seed([{ slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.', durationMinutes: 90 }]);
+    await seed([{ slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.' }]);
     const res = await request(app.getHttpServer()).get('/services/kickstart-session');
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
-      data: { id: await idOf('kickstart-session'), slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.', durationMinutes: 90 },
+      data: { id: await idOf('kickstart-session'), slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.' },
     });
   });
 
@@ -1934,7 +1922,7 @@ it('documents the services endpoints', async () => {
 | **Expected** | Same rows after the second run; an edited title updates in place |
 | **Common failure** | `.orIgnore()`, which emits a target-less `ON CONFLICT DO NOTHING` (verification spike) |
 
-**Owner input required before Step 2:** the real offers and their copy. That's the open product decision "which offers exist" (`data-model.md` §5: homepage design vs live Work With Me page). The rows below are **placeholders**, to be replaced.
+**Owner input required before Step 2:** the final slugs, titles and summaries. The current offers are *Channel Kickstart Session* and *3-Month 1:1 Coaching* (`data-model.md` §3, §5). The rows below are **placeholders**, to be replaced.
 
 - [ ] **Step 1:** `src/modules/services/services.seed.ts` (module code may import `database/`, I2):
 
@@ -1943,8 +1931,9 @@ import dataSource from '../../database/data-source.js';
 import { ServiceOffering } from './service-offering.entity.js';
 
 // Placeholder copy: the owner replaces these rows with the decided offers before running.
-const catalog: Array<Pick<ServiceOffering, 'slug' | 'title' | 'summary' | 'durationMinutes' | 'isPublished' | 'sortOrder'>> = [
-  { slug: 'mot-mot-cung-xuan', title: '1:1 cùng Xuân', summary: 'REPLACE: one-on-one session description.', durationMinutes: 60, isPublished: true, sortOrder: 1 },
+const catalog: Array<Pick<ServiceOffering, 'slug' | 'title' | 'summary' | 'isPublished' | 'sortOrder'>> = [
+  { slug: 'channel-kickstart-session', title: 'Channel Kickstart Session', summary: 'REPLACE: 90-minute 1:1 session description.', isPublished: true, sortOrder: 1 },
+  { slug: 'coaching-3-months', title: '3-Month 1:1 Coaching', summary: 'REPLACE: 12-week coaching program description.', isPublished: true, sortOrder: 2 },
 ];
 
 async function seed(): Promise<void> {
@@ -1956,7 +1945,7 @@ async function seed(): Promise<void> {
       .into(ServiceOffering)
       .values(catalog)
       // Named target (D32): a future unrelated unique constraint must never be silently absorbed.
-      .orUpdate(['title', 'summary', 'duration_minutes', 'is_published', 'sort_order'], 'uq_services_slug')
+      .orUpdate(['title', 'summary', 'is_published', 'sort_order'], 'uq_services_slug')
       .execute();
   } finally {
     await dataSource.destroy();

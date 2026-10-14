@@ -206,8 +206,10 @@ The authoritative list is the OpenAPI document. This table records deliberate be
 
 | Endpoint | Behavior |
 |---|---|
-| `GET /services` | Public. Returns the Services catalog: the offers shown on Work With Me and the homepage "Ways". No price in V1. The exact fields, ordering and whether the list is paginated are settled in the slice's implementation plan, and then documented in OpenAPI. Errors: `500 INTERNAL_ERROR` |
-| `GET /services/:slug` | Public. Returns one service by slug. Errors: `404 NOT_FOUND` for an unknown slug; `500 INTERNAL_ERROR`. Whether the slug's format is validated (and so a `400 VALIDATION_FAILED`) is settled in the slice plan |
+| `GET /services` | Public. Returns the Services catalog, the offers shown on Work With Me and the homepage "Ways", as `{ data: ServiceDto[] }`. **Published services only**, ordered by `sort_order` then `slug`, **not paginated in V1**. Errors: `500 INTERNAL_ERROR` |
+| `GET /services/:slug` | Public. Returns one published service as `{ data: ServiceDto }`. **No slug-format validation** (a stated D7 deviation: the slug is an opaque lookup key). An unknown, unpublished or malformed slug → `404 NOT_FOUND`. Errors: `404 NOT_FOUND`; `500 INTERNAL_ERROR` |
+
+**`ServiceDto`** = `{ id, slug, title, summary }`. It has no price, no duration and no booking or calendar fields. `isPublished`, `sortOrder` and `createdAt` stay internal. A service is a catalog offer, not an appointment (`data-model.md` §3.1). Application, booking and calendar endpoints aren't part of the current contract; they come with the application/booking slice.
 
 No newsletter/subscription endpoint is part of the current contract. That capability needs product confirmation (`data-model.md`).
 
@@ -226,5 +228,5 @@ This file is ahead of `xuan-web/docs/api-contract.md` on the points below. Under
 | 7 | §7 | Mark as "consumer expectation; producer design pending the auth slice" |
 | 8 | §8 | Mark which layers are implemented now and which are pending the auth slice |
 | 9 | §9 | Add the contract-identifier rules (coordinated change; breaking for generated consumers; staging when needed) |
-| 10 | endpoint notes | Public Services catalog: `GET /services`, `GET /services/:slug` (no price in V1) |
+| 10 | endpoint notes | Public Services catalog: `GET /services`, `GET /services/:slug` (no price in V1); `ServiceDto` = `{ id, slug, title, summary }` (no duration); published only, ordered, unpaginated; unknown/unpublished/malformed slug → 404 |
 | — | outside the contract | xuan-web's `architecture.md` lists a planned `subscribers` feature. Newsletter ("Creator Notes") now *needs product confirmation*; if confirmed, rename it to an explicit newsletter capability |
