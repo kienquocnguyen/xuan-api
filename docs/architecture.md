@@ -436,7 +436,7 @@ These are decided by running real code, not by debate. If one disproves an assum
 |---|---|
 | Zod issue vendor narrowing in the pipe's exception factory; detecting `REQUIRED` | Translator unit tests + validation e2e |
 | `.meta({ id })` gives named request components | "Document builds" e2e |
-| How the interceptor detects `@HttpCode(204)` | "204 empty body" fixture e2e |
+| How the interceptor detects `@HttpCode(204)` | "204 empty body" fixture e2e. **Result (2026-10-14):** `Reflector.get(HTTP_CODE_METADATA, handler)`, with the constant imported from `@nestjs/common/constants.js` (exported under ESM; value `__httpCode__`) |
 | `@ApiErrorResponses` adds `VALIDATION_FAILED` automatically or explicitly | Choose while implementing |
 | Helmet CSP vs the Swagger UI | Open `/docs` locally |
 | `process.loadEnvFile()` precedence vs real env vars | `loadConfig` unit test. **Result (2026-10-14, Node 24.21): a variable already set in the real environment wins;** the file never overrides it. `NODE_ENV=test` selects `.env.test`, otherwise `.env` |

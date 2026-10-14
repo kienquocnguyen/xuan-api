@@ -17,6 +17,24 @@ describe('HTTP contract (fixture)', () => {
     await app.close();
   });
 
+  it('payload → { data }', async () => {
+    const res = await request(app.getHttpServer()).get('/__fixture/payload');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ data: { hello: 'world' } });
+  });
+
+  it('@HttpCode(204) → empty body', async () => {
+    const res = await request(app.getHttpServer()).post('/__fixture/no-content');
+    expect(res.status).toBe(204);
+    expect(res.text).toBe('');
+  });
+
+  it('undefined from a payload route → 500 bug, not {}', async () => {
+    const res = await request(app.getHttpServer()).get('/__fixture/undefined');
+    expect(res.status).toBe(500);
+    expect(res.body.error.code).toBe('INTERNAL_ERROR');
+  });
+
   it('AppError → its envelope and status', async () => {
     const res = await request(app.getHttpServer()).get('/__fixture/app-error');
     expect(res.status).toBe(404);
