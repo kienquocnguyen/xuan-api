@@ -63,7 +63,9 @@ describe('loadConfig', () => {
   });
 
   it('defaults the cookie to Secure, sessions to 14 days and no admin emails', () => {
-    const { AUTH_COOKIE_SECURE, AUTH_SESSION_TTL_DAYS, AUTH_ADMIN_EMAILS, ...rest } = valid;
+    const rest: Record<string, string> = { ...valid };
+    for (const name of ['AUTH_COOKIE_SECURE', 'AUTH_SESSION_TTL_DAYS', 'AUTH_ADMIN_EMAILS'])
+      delete rest[name];
     const config = loadConfig(rest);
     expect(config.auth.cookieSecure).toBe(true);
     expect(config.auth.sessionTtlDays).toBe(14);

@@ -11,6 +11,7 @@ export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 export const returnToSchema = z
   .string()
   .max(512)
+  // oxlint-disable-next-line no-control-regex -- rejecting control characters is the point
   .regex(/^\/(?![/\\])[^\s\\\u0000-\u001f\u007f]*$/);
 
 const oauthStateSchema = z.strictObject({
