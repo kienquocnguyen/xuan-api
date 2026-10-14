@@ -34,4 +34,24 @@ describe('OpenAPI document', () => {
     const tooLarge = JSON.stringify(doc.paths['/__fixture/echo'].post?.responses['413']);
     expect(tooLarge).toContain('PAYLOAD_TOO_LARGE');
   });
+
+  it('documents the services endpoints', () => {
+    const doc = createOpenApiDocument(app);
+    const serviceDto = doc.components?.schemas?.ServiceDto as { properties?: object } | undefined;
+    expect(Object.keys(serviceDto?.properties ?? {}).sort()).toEqual([
+      'id',
+      'slug',
+      'summary',
+      'title',
+    ]);
+    expect(Object.keys(doc.paths['/services'].get?.responses ?? {})).toEqual(
+      expect.arrayContaining(['200', '500']),
+    );
+    expect(Object.keys(doc.paths['/services/{slug}'].get?.responses ?? {})).toEqual(
+      expect.arrayContaining(['200', '404', '500']),
+    );
+    expect(JSON.stringify(doc.paths['/services/{slug}'].get?.responses['404'])).toContain(
+      'NOT_FOUND',
+    );
+  });
 });

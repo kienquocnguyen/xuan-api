@@ -80,4 +80,45 @@ describe('Services catalog', () => {
       expect(res.body).toEqual({ data: [] });
     });
   });
+
+  describe('GET /services/:slug', () => {
+    const notFound = {
+      data: null,
+      error: { code: 'NOT_FOUND', message: 'The requested resource was not found.', details: {} },
+    };
+
+    it('returns one published service', async () => {
+      await seed([{ slug: 'kickstart-session', title: 'Kickstart', summary: 'One session.' }]);
+      const res = await request(app.getHttpServer()).get('/services/kickstart-session');
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        data: {
+          id: await idOf('kickstart-session'),
+          slug: 'kickstart-session',
+          title: 'Kickstart',
+          summary: 'One session.',
+        },
+      });
+    });
+
+    it.each([
+      ['unknown slug', 'nope'],
+      ['uppercase slug', 'Kickstart'],
+      ['uppercase kebab slug', 'Kickstart-Session'],
+      ['whitespace slug', '%20'],
+      ['very long slug', 'a'.repeat(300)],
+    ])('%s → 404 NOT_FOUND', async (_n, slug) => {
+      await seed([{ slug: 'kickstart-session' }]);
+      const res = await request(app.getHttpServer()).get(`/services/${slug}`);
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual(notFound);
+    });
+
+    it('a draft is not found', async () => {
+      await seed([{ slug: 'draft-offer', isPublished: false }]);
+      const res = await request(app.getHttpServer()).get('/services/draft-offer');
+      expect(res.status).toBe(404);
+      expect(res.body).toEqual(notFound);
+    });
+  });
 });
