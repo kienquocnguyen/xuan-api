@@ -200,18 +200,18 @@ Follow `xuan-database-change`, with `database.md` as the reference.
 | ------------------------------------------------ | ------------------------------- | --------------------------- |
 | `main`                                           | Release / production-ready      | Release PRs from `dev` only |
 | `dev`                                            | Integration; the default branch | Task PRs only               |
-| Task branch (`feat/`, `fix/`, `chore/`, `docs/`) | One task                        | The task's own commits      |
+| Task branch (`feat/`, `fix/`, `chore/`, `docs/`) | One mergeable outcome           | The outcome's own commits   |
 
 - **No direct commits to `dev` or `main`** after the baseline.
-- **Task:** branch from an up-to-date `dev` → implement → verify (§13) → PR to `dev` → review → merge. When a Superpowers skill asks for the base branch, it's `dev`.
+- **Task:** branch from an up-to-date `dev` (after the previous outcome merged) → implement → verify (§13) → PR to `dev` → review → merge. When a Superpowers skill asks for the base branch, it's `dev`.
 - **Release:** verification on `dev` → PR `dev` → `main` → merge and deploy.
-- One task per branch and per PR. No `release/*` or `hotfix/*` until a real need appears (docs first, §15).
+- **One cohesive, independently mergeable outcome per branch and per PR**, not one file type or tiny task. Implementation, tests, migrations, seeds, OpenAPI, docs and the config/bootstrap/plumbing that outcome needs all live on its branch as scoped commits. No dependent (stacked) branches, cherry-pick or rebase chains: finish → review → merge → branch again from `dev`. Where work goes is decided with `xuan-git-branch-cohesion`. No `release/*` or `hotfix/*` until a real need appears (docs first, §15).
 
 | Unit   | Is                       | Named by                                          |
 | ------ | ------------------------ | ------------------------------------------------- |
-| Branch | One task                 | `<type>/<action>-<scope>[-<detail>]`              |
+| Branch | One mergeable outcome    | `<type>/<action>-<scope>[-<detail>]`              |
 | Commit | One logical change in it | `<type>(<scope>): <imperative description>`       |
-| PR     | The task as a whole      | Title `<type>: <task description>` + the §9.3 body |
+| PR     | The outcome as a whole   | Title `<type>: <outcome description>` + the §9.3 body |
 
 ### 9.1 Branches
 
