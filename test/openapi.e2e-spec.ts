@@ -78,6 +78,65 @@ describe('OpenAPI document', () => {
     expect(doc.paths['/auth/google'].get).toBeDefined();
   });
 
+  it('declares query and path parameters from the named request schemas', () => {
+    const doc = createOpenApiDocument(app);
+    const schemas = (doc.components?.schemas ?? {}) as Record<
+      string,
+      { properties?: Record<string, object> }
+    >;
+    const propertyOf = (component: string, property: string) =>
+      schemas[component]?.properties?.[property];
+
+    expect(doc.paths['/admin/users'].get?.parameters).toEqual([
+      {
+        name: 'role',
+        in: 'query',
+        required: false,
+        schema: { type: 'string', enum: ['user', 'editor', 'admin'] },
+      },
+    ]);
+    expect(doc.paths['/auth/google'].get?.parameters).toEqual([
+      {
+        name: 'returnTo',
+        in: 'query',
+        required: false,
+        schema: propertyOf('GoogleSignInQuery', 'returnTo'),
+      },
+    ]);
+    const userId = {
+      name: 'userId',
+      in: 'path',
+      required: true,
+      schema: propertyOf('EditorTarget', 'userId'),
+    };
+    expect(propertyOf('EditorTarget', 'userId')).toMatchObject({ type: 'string', format: 'uuid' });
+    expect(doc.paths['/admin/editors/{userId}'].put?.parameters).toEqual([userId]);
+    expect(doc.paths['/admin/editors/{userId}'].delete?.parameters).toEqual([userId]);
+  });
+
+  it('declares every templated path segment as a required path parameter', () => {
+    const doc = createOpenApiDocument(app);
+    const methods = ['get', 'post', 'put', 'patch', 'delete'] as const;
+    const missing: string[] = [];
+    for (const [path, item] of Object.entries(doc.paths)) {
+      const segments = [...path.matchAll(/\{([^}]+)\}/g)].map(([, name]) => name);
+      for (const method of methods) {
+        const operation = item[method];
+        if (!operation) continue;
+        const declared = (operation.parameters ?? []) as {
+          name: string;
+          in: string;
+          required?: boolean;
+        }[];
+        for (const name of segments) {
+          const param = declared.find((p) => p.in === 'path' && p.name === name);
+          if (param?.required !== true) missing.push(`${method} ${path}: ${name}`);
+        }
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
   it('documents 404 and 409 ADMIN_ROLE_LOCKED on editor management', () => {
     const doc = createOpenApiDocument(app);
     for (const op of [
