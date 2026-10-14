@@ -281,6 +281,19 @@ describe('Google sign-in', () => {
       failedWith(res, 'GOOGLE_SIGN_IN_FAILED');
     });
 
+    it('an unexpected server failure still redirects (GOOGLE_SIGN_IN_FAILED), never a JSON page', async () => {
+      // 330 chars overflows users.email varchar(320): an unanticipated database error mid-sign-in.
+      const { res } = await signIn(identity({ email: `${'a'.repeat(318)}@example.com` }));
+      failedWith(res, 'GOOGLE_SIGN_IN_FAILED');
+      expect(await counts()).toEqual({ users: 0, identities: 0 });
+    });
+
+    it('two concurrent first sign-ins of one identity both succeed onto one account', async () => {
+      const [a, b] = await Promise.all([signIn(identity()), signIn(identity())]);
+      for (const { res } of [a, b]) expect(res.headers.location).toBe(`${WEB}/`);
+      expect(await counts()).toEqual({ users: 1, identities: 1 });
+    });
+
     it('failing code exchange → GOOGLE_SIGN_IN_FAILED', async () => {
       const { res } = await signIn('fail');
       failedWith(res, 'GOOGLE_SIGN_IN_FAILED');

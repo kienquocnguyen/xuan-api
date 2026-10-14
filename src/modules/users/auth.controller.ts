@@ -111,16 +111,17 @@ export class AuthController {
       return fail('GOOGLE_SIGN_IN_FAILED');
     }
 
-    let userId: string;
+    // A browser navigation must always land back in the web app: unexpected failures redirect too.
+    let token: string;
     try {
-      userId = (await this.users.signInWithGoogle(identity)).id;
+      const user = await this.users.signInWithGoogle(identity);
+      await this.sessions.revoke(request.cookies?.[SESSION_COOKIE]); // no session fixation
+      token = await this.sessions.create(user.id);
     } catch (signInError) {
       if (signInError instanceof SignInError) return fail(signInError.code);
-      throw signInError;
+      this.logger.error(`Google sign-in failed unexpectedly: ${(signInError as Error).name}`);
+      return fail('GOOGLE_SIGN_IN_FAILED');
     }
-
-    await this.sessions.revoke(request.cookies?.[SESSION_COOKIE]); // no session fixation
-    const token = await this.sessions.create(userId);
     response.cookie(SESSION_COOKIE, token, sessionCookieOptions(this.config));
     response.redirect(302, webRedirectUrl(this.config.auth.webUrl, oauth.returnTo));
   }
