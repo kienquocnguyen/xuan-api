@@ -312,6 +312,7 @@ Applied by a global `APP_INTERCEPTOR` (I11):
 | `@ApiPaginatedEnvelopeResponse(Dto)` | `{ data: { items: [$ref Dto], pageInfo: $ref PageInfoDto } }`. Arrives with courses |
 | `@ApiErrorResponses(...definitions)` | Each definition grouped by its `kind`'s status, with `error.code` narrowed to exactly those codes; always `500 INTERNAL_ERROR`; `400 VALIDATION_FAILED` on validated input |
 | `@ApiNoContentResponse()` | 204 (Nest built-in) |
+| `@ApiSchemaParameters('query' \| 'path', schema)` | One parameter per property of the Zod object schema given to `@Query({ schema })` / `@Param({ schema })` (path parameters always required). Needed because `@nestjs/swagger` registers a `.meta({ id })` schema as a component but doesn't expand it into operation parameters |
 
 **Two sources, one document:** request schemas come from Zod, response DTOs from classes (D17). Neither is forced into the other's shape.
 
