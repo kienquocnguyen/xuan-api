@@ -86,6 +86,10 @@ describe('OpenAPI document', () => {
     >;
     const propertyOf = (component: string, property: string) =>
       schemas[component]?.properties?.[property];
+    // The request component ids stay registered: they're consumer contract identifiers (I19).
+    expect(Object.keys(schemas)).toEqual(
+      expect.arrayContaining(['AdminUsersQuery', 'GoogleSignInQuery', 'EditorTarget']),
+    );
 
     expect(doc.paths['/admin/users'].get?.parameters).toEqual([
       {

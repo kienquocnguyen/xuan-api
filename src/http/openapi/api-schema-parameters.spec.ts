@@ -16,6 +16,12 @@ describe('ApiSchemaParameters', () => {
     );
   });
 
+  it('refuses an optional path property, since a path segment is always present', () => {
+    expect(() => ApiSchemaParameters('path', z.strictObject({ id: z.uuid().optional() }))).toThrow(
+      'path parameters must be required',
+    );
+  });
+
   it('refuses a named schema nested in a parameter, whose $ref would dangle', () => {
     const nested = z.strictObject({ code: z.string() }).meta({ id: 'ProbeNested' });
     expect(() => ApiSchemaParameters('query', z.strictObject({ filter: nested }))).toThrow(

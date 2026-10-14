@@ -31,6 +31,9 @@ export function ApiSchemaParameters(location: 'query' | 'path', schema: z.ZodObj
     throw new Error('ApiSchemaParameters does not support named schemas nested in parameters.');
   }
   const required = new Set(root.required ?? []);
+  if (location === 'path' && Object.keys(root.properties).some((name) => !required.has(name))) {
+    throw new Error('ApiSchemaParameters: path parameters must be required.');
+  }
   return applyDecorators(
     ...Object.entries(root.properties).map(([name, propertySchema]) =>
       location === 'path'
