@@ -9,6 +9,7 @@ import {
   Unique,
   UpdateDateColumn,
 } from 'typeorm';
+import type { PostBodyDocument } from './body/post-body.schema.js';
 
 export const POST_STATUSES = ['draft', 'published'] as const;
 export type PostStatus = (typeof POST_STATUSES)[number];
@@ -73,7 +74,7 @@ export class Post {
   excerpt!: string | null;
 
   @Column({ type: 'jsonb' })
-  body!: Record<string, unknown>;
+  body!: PostBodyDocument;
 
   @Column({ name: 'body_version', type: 'smallint', default: 1 })
   bodyVersion!: number;
