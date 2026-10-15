@@ -79,3 +79,20 @@ describe('toFieldErrors', () => {
     expect(toFieldErrors([issue])).toEqual(expected);
   });
 });
+
+describe('toFieldErrors limits', () => {
+  it('reports at most 50 field errors', () => {
+    const issues = Array.from({ length: 80 }, (_, i) => ({
+      code: 'custom',
+      message: 'x',
+      path: ['items', i],
+    }));
+    const fields = toFieldErrors(issues);
+    expect(fields).toHaveLength(50);
+    expect(fields[49]).toEqual({
+      field: 'items.49',
+      code: 'INVALID',
+      message: 'This value is invalid.',
+    });
+  });
+});
