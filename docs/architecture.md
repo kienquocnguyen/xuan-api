@@ -71,7 +71,7 @@ Each needs a concrete problem (C1, C4).
 |---|---|
 | Runtime | Node 24 LTS · Yarn 4 · NestJS 12 (ESM) · TypeScript 6.x |
 | Persistence | PostgreSQL 18 · TypeORM 1.x |
-| Validation | Zod 4 via `StandardSchemaValidationPipe` |
+| Validation | Zod 4 via `StandardSchemaValidationPipe` (subclassed as `ContractValidationPipe`, AD4) |
 | API docs | `@nestjs/swagger` |
 | Tests | Vitest 4 + supertest |
 
@@ -215,7 +215,7 @@ These are **two different problems**, solved separately on purpose.
 | | Requests | Responses |
 |---|---|---|
 | Problem | Untrusted input must be parsed and rejected or shaped | Trusted data must leave in exactly the contract shape, and nothing more |
-| Tool | Zod 4 schema via Nest's first-party `StandardSchemaValidationPipe` (D7) | Response DTO class + explicit mapping (I10, D5) |
+| Tool | Zod 4 schema via Nest's first-party `StandardSchemaValidationPipe` (D7; registered as `ContractValidationPipe`, AD4) | Response DTO class + explicit mapping (I10, D5) |
 | Unknown fields | Rejected (`z.strictObject`, D8); stripping only with a reason (C7) | Can't exist: the mapping builds the object field by field |
 | Docs | From the schema, named with `.meta({ id })` (D17) | From the DTO class, with hand-written `@ApiProperty` (D17) |
 
