@@ -197,7 +197,7 @@ TypeORM's `Repository<Entity>` already *is* the repository pattern. Wrapping it 
 request
   │ helmet · CORS ─► JSON parser (JSON only, size limit; over-limit → 413) ─► cookie-parser ─► CsrfGuard ─► AccessGuard (§17)
   ▼
-APP_PIPE   StandardSchemaValidationPipe + Zod ── invalid ──► AppError(validation) ──────────────┐
+APP_PIPE   ContractValidationPipe + Zod ── invalid ──► AppError(validation) ────────────────────┐
   ▼                                                                                             │
 Controller ─► Service ─► Repository<Entity> ─► PostgreSQL                                       │
   │              ├─ expected conflict → ON CONFLICT result (C6)                                 │
@@ -394,7 +394,7 @@ Each entry ends with *revisit when*. The full reasoning and the rejected alterna
 - **AD1. PostgreSQL + TypeORM 1.x.** The documented Nest-native path, stable while the owner learns Nest by hand, with mature references. Mongoose-like habits are countered by guardrails (`database.md`). *Revisit when* TypeORM blocks a needed capability, or a deliberate comparison (e.g. Drizzle 1.0 stable) is scheduled.
 - **AD2. Services use `Repository<Entity>` directly; `forFeature` only in the owning module.** *Revisit when* a C1/C4 signal appears in a specific module.
 - **AD3. Layout B:** `config/`, `errors/`, `database/`, `http/`, `modules/` with an allow-list. *Revisit when* never by default; a new platform folder needs a stated responsibility.
-- **AD4. Zod requests via `StandardSchemaValidationPipe`; explicit response DTOs + mapping.** *Revisit when* Standard Schema support in Nest proves insufficient (a verification spike fails).
+- **AD4. Zod requests via `StandardSchemaValidationPipe`; explicit response DTOs + mapping.** *Revisit when* Standard Schema support in Nest proves insufficient (a verification spike fails). *2026-10-15:* Nest's pipe strips prototype keys recursively **before** the schema runs, so deeply nested JSON overflowed the stack (500). `src/http/contract-validation.pipe.ts` subclasses it with an iterative `stripProtoKeys` (same rules); the rest of the pipe is unchanged.
 - **AD5. `AppError` + `kind`; translation at the call site; untranslated database errors → 500.** *Revisit when* never by default.
 - **AD6. Global success interceptor; OpenAPI helpers fed by runtime error definitions.** *Revisit when* the first non-JSON response (file/stream) needs an opt-out.
 - **AD7. One `loadConfig()` path shared by app, CLI and tests.** *Revisit when* config grows enough that namespacing earns `@nestjs/config`.

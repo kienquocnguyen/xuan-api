@@ -1,10 +1,11 @@
-import { Module, StandardSchemaValidationPipe } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, APP_PIPE } from '@nestjs/core';
 import { AppConfigModule } from '../config/app-config.module.js';
 import { AppError } from '../errors/app-error.js';
 import { baselineErrors } from '../errors/baseline-errors.js';
 import { CsrfGuard } from './auth/csrf.guard.js';
 import { ContractExceptionFilter } from './contract-exception.filter.js';
+import { ContractValidationPipe } from './contract-validation.pipe.js';
 import { SuccessEnvelopeInterceptor } from './success-envelope.interceptor.js';
 import { toFieldErrors, type SchemaIssue } from './to-field-errors.js';
 
@@ -17,7 +18,7 @@ import { toFieldErrors, type SchemaIssue } from './to-field-errors.js';
     {
       provide: APP_PIPE,
       useFactory: () =>
-        new StandardSchemaValidationPipe({
+        new ContractValidationPipe({
           exceptionFactory: (issues) =>
             new AppError(baselineErrors.VALIDATION_FAILED, {
               fields: toFieldErrors(issues as readonly SchemaIssue[]),

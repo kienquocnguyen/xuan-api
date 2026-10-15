@@ -158,9 +158,15 @@ describe('Authoring posts (/admin/posts)', () => {
     });
 
     it('rejects a 10 000-level document with 400, never 500', async () => {
-      let node: object = { type: 'paragraph' };
-      for (let i = 0; i < 10_000; i++) node = { type: 'blockquote', content: [node] };
-      const res = await create(save({ body: doc(node) }));
+      // Raw JSON: supertest's recursive serializer overflows on a 10 000-level object before sending
+      let deep = '{"type":"paragraph"}';
+      for (let i = 0; i < 10_000; i++) deep = `{"type":"blockquote","content":[${deep}]}`;
+      const res = await server()
+        .post('/admin/posts')
+        .set(XHR)
+        .set('Cookie', editor.cookie)
+        .set('Content-Type', 'application/json')
+        .send(`{"slug":"bai-viet","title":"Bài viết","body":{"type":"doc","content":[${deep}]}}`);
       expect(res.status).toBe(400);
       expect(res.body).toEqual(invalid('body', 'INVALID', 'This value is invalid.'));
     });
