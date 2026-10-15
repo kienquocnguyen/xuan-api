@@ -59,4 +59,56 @@ describe('checkPostBodyLimits', () => {
       { message: 'The document is nested too deeply.' },
     ]);
   });
+
+  // Deep nesting that never goes through a node's `content` (final review, Critical 1).
+  const deepArray = (levels: number) => {
+    let value: unknown = [];
+    for (let i = 0; i < levels; i++) value = [value];
+    return value;
+  };
+  const deepObject = (levels: number) => {
+    let value: unknown = {};
+    for (let i = 0; i < levels; i++) value = { a: value };
+    return value;
+  };
+
+  it.each([
+    ['arrays inside content', () => ({ type: 'doc', content: [deepArray(20_000)] })],
+    ['a foreign key holding arrays', () => ({ type: 'doc', content: [], x: deepArray(20_000) })],
+    [
+      'objects inside attrs',
+      () => ({ type: 'doc', content: [{ type: 'heading', attrs: { y: deepObject(20_000) } }] }),
+    ],
+    [
+      'arrays inside marks',
+      () => ({
+        type: 'doc',
+        content: [
+          { type: 'paragraph', content: [{ type: 'text', text: 'a', marks: deepArray(20_000) }] },
+        ],
+      }),
+    ],
+  ])('rejects deep nesting through %s without throwing', (_name, build) => {
+    const value = build();
+    expect(() => checkPostBodyLimits(value)).not.toThrow();
+    expect(checkPostBodyLimits(value)).toEqual([{ message: 'The document is nested too deeply.' }]);
+  });
+
+  it('still accepts the deepest legitimate document (a link mark on the deepest text)', () => {
+    let node: object = {
+      type: 'paragraph',
+      content: [
+        {
+          type: 'text',
+          text: 'a',
+          marks: [{ type: 'link', attrs: { href: 'https://x.vn' } }],
+        },
+      ],
+    };
+    // paragraph at depth maxDepth - 1, its text at maxDepth
+    for (let level = POST_BODY_LIMITS.maxDepth - 1; level > 1; level--) {
+      node = { type: 'blockquote', content: [node] };
+    }
+    expect(checkPostBodyLimits({ type: 'doc', content: [node] })).toEqual([]);
+  });
 });

@@ -99,6 +99,9 @@ describe('postBodyInputSchema: version-1 allow-list (spec §4.1)', () => {
     ['a duplicated mark', doc(p(text('a', [{ type: 'bold' }, { type: 'bold' }])))],
     ['an empty text node', doc(p(text('')))],
     ['a NUL in text', doc(p(text('a\u0000b')))],
+    ['a lone high surrogate in text', doc(p(text('a\ud800b')))],
+    ['a lone low surrogate in text', doc(p(text('\udc00')))],
+    ['a lone surrogate in a link', withMark(link({ href: 'https://x.vn/\ud800' }))],
     ['a 10 001-char text node', doc(p(text('a'.repeat(10_001))))],
     [
       'a list item starting with a heading',

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { checkPostBodyLimits } from './post-body-limits.js';
 import { isSafeLinkHref } from './post-body-links.js';
+import { isStorableText, STORABLE_TEXT_MESSAGE } from './storable-text.js';
 
 // Body version 1 (blog spec §4.1): a text-first TipTap 3 / ProseMirror document. Explicit types keep
 // TypeScript's inference finite across the recursive schemas below.
@@ -29,8 +30,6 @@ export type PostBodyNode =
   | { type: 'blockquote'; content: PostBodyNode[] };
 export type PostBodyDocument = { type: 'doc'; content: PostBodyNode[] };
 
-const NUL_FREE = (value: string) => !value.includes('\u0000');
-
 const markSchema = z
   .discriminatedUnion('type', [
     z.strictObject({ type: z.literal('bold') }),
@@ -41,7 +40,8 @@ const markSchema = z
         href: z
           .string()
           .max(2048)
-          .refine(isSafeLinkHref, 'Links must be absolute https, http or mailto URLs.'),
+          .refine(isSafeLinkHref, 'Links must be absolute https, http or mailto URLs.')
+          .refine(isStorableText, STORABLE_TEXT_MESSAGE),
         // TipTap 3.28's defaults are accepted only with their default values, then stripped on save.
         target: z.literal('_blank').nullable().optional(),
         rel: z.literal('noopener noreferrer nofollow').nullable().optional(),
@@ -63,7 +63,7 @@ const marksSchema = z
 const inlineSchema = z.discriminatedUnion('type', [
   z.strictObject({
     type: z.literal('text'),
-    text: z.string().min(1).max(10_000).refine(NUL_FREE, 'Text must not contain NUL characters.'),
+    text: z.string().min(1).max(10_000).refine(isStorableText, STORABLE_TEXT_MESSAGE),
     marks: marksSchema.optional(),
   }),
   z.strictObject({ type: z.literal('hardBreak'), marks: marksSchema.optional() }),
