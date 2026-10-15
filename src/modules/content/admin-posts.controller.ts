@@ -1,0 +1,118 @@
+import { Body, Controller, Get, HttpCode, Param, Post, Put, Query } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
+import type { z } from 'zod';
+import { baselineErrors } from '../../errors/baseline-errors.js';
+import { CurrentUser, Roles } from '../../http/auth/auth.decorators.js';
+import type { AuthenticatedUser } from '../../http/auth/role.js';
+import { ApiEnvelopeResponse } from '../../http/openapi/api-envelope-response.js';
+import { ApiErrorResponses } from '../../http/openapi/api-error-responses.js';
+import { ApiPaginatedEnvelopeResponse } from '../../http/openapi/api-paginated-envelope-response.js';
+import { ApiSchemaParameters } from '../../http/openapi/api-schema-parameters.js';
+import { type Page, toPageInfo } from '../../http/pagination/page.js';
+import { contentErrors } from './content.errors.js';
+import {
+  AdminPostDto,
+  AdminPostSummaryDto,
+  toAdminPostDto,
+  toAdminPostSummaryDto,
+} from './dto/admin-post.dto.js';
+import { adminPostsQuerySchema, postIdParamSchema } from './dto/post-queries.dto.js';
+import { type SavePostInput, savePostSchema } from './dto/save-post.dto.js';
+import { type AuthoredPost, PostsService } from './posts.service.js';
+
+const { VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND } = baselineErrors;
+const { POST_SLUG_TAKEN, POST_SLUG_LOCKED, POST_BODY_EMPTY } = contentErrors;
+
+type PostIdParam = z.infer<typeof postIdParamSchema>;
+const toDto = ({ post, author }: AuthoredPost) => toAdminPostDto(post, author);
+
+/**
+ * Authoring for editors and admins (blog spec §5.2). Ownership is checked by the service after loading the
+ * post: an editor manages and reads only their own posts; an admin any.
+ */
+@Roles('editor', 'admin')
+@ApiTags('admin')
+@Controller('admin/posts')
+export class AdminPostsController {
+  constructor(private readonly posts: PostsService) {}
+
+  @Get()
+  @ApiSchemaParameters('query', adminPostsQuerySchema)
+  @ApiPaginatedEnvelopeResponse(AdminPostSummaryDto)
+  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN)
+  async list(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Query({ schema: adminPostsQuerySchema }) query: z.infer<typeof adminPostsQuerySchema>,
+  ): Promise<Page<AdminPostSummaryDto>> {
+    const { items, totalItems } = await this.posts.listForActor(actor, query.status, query);
+    return {
+      items: items.map(({ post, author }) => toAdminPostSummaryDto(post, author)),
+      pageInfo: toPageInfo(query.page, query.pageSize, totalItems),
+    };
+  }
+
+  @Get(':id')
+  @ApiSchemaParameters('path', postIdParamSchema)
+  @ApiEnvelopeResponse(AdminPostDto)
+  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND)
+  async get(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param({ schema: postIdParamSchema }) params: PostIdParam,
+  ): Promise<AdminPostDto> {
+    return toDto(await this.posts.getForActor(actor, params.id));
+  }
+
+  @Post()
+  @ApiEnvelopeResponse(AdminPostDto, { status: 201 })
+  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, POST_SLUG_TAKEN)
+  async create(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Body({ schema: savePostSchema }) input: SavePostInput,
+  ): Promise<AdminPostDto> {
+    return toDto(await this.posts.create(actor, input));
+  }
+
+  @Put(':id')
+  @ApiSchemaParameters('path', postIdParamSchema)
+  @ApiEnvelopeResponse(AdminPostDto)
+  @ApiErrorResponses(
+    VALIDATION_FAILED,
+    UNAUTHENTICATED,
+    FORBIDDEN,
+    NOT_FOUND,
+    POST_SLUG_TAKEN,
+    POST_SLUG_LOCKED,
+    POST_BODY_EMPTY,
+  )
+  async update(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param({ schema: postIdParamSchema }) params: PostIdParam,
+    @Body({ schema: savePostSchema }) input: SavePostInput,
+  ): Promise<AdminPostDto> {
+    return toDto(await this.posts.update(actor, params.id, input));
+  }
+
+  @Post(':id/publish')
+  @HttpCode(200)
+  @ApiSchemaParameters('path', postIdParamSchema)
+  @ApiEnvelopeResponse(AdminPostDto)
+  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, POST_BODY_EMPTY)
+  async publish(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param({ schema: postIdParamSchema }) params: PostIdParam,
+  ): Promise<AdminPostDto> {
+    return toDto(await this.posts.publish(actor, params.id));
+  }
+
+  @Post(':id/unpublish')
+  @HttpCode(200)
+  @ApiSchemaParameters('path', postIdParamSchema)
+  @ApiEnvelopeResponse(AdminPostDto)
+  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND)
+  async unpublish(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param({ schema: postIdParamSchema }) params: PostIdParam,
+  ): Promise<AdminPostDto> {
+    return toDto(await this.posts.unpublish(actor, params.id));
+  }
+}

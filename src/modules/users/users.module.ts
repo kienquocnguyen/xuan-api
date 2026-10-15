@@ -12,6 +12,7 @@ import { GoogleOAuthGateway } from './google/google-oauth.gateway.js';
 import { Session } from './session.entity.js';
 import { SessionsService } from './sessions.service.js';
 import { User } from './user.entity.js';
+import { UserProfilesReader } from './user-profiles.reader.js';
 import { UsersService } from './users.service.js';
 
 @Module({
@@ -19,6 +20,7 @@ import { UsersService } from './users.service.js';
   controllers: [AuthController, AdminUsersController],
   providers: [
     UsersService,
+    UserProfilesReader,
     SessionsService,
     { provide: APP_GUARD, useClass: AccessGuard },
     {
@@ -27,5 +29,6 @@ import { UsersService } from './users.service.js';
       useFactory: (config: AppConfig) => new GoogleOAuthGateway(config.auth.google),
     },
   ],
+  exports: [UserProfilesReader], // the module's only public API for other modules (AD14)
 })
 export class UsersModule {}
