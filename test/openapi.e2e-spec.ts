@@ -161,6 +161,8 @@ describe('OpenAPI document', () => {
       'get /services/{slug}',
       'get /auth/google',
       'post /auth/logout',
+      'get /posts',
+      'get /posts/{slug}',
     ]);
     const methods = ['get', 'post', 'put', 'patch', 'delete'] as const;
     const missing: string[] = [];
@@ -175,5 +177,83 @@ describe('OpenAPI document', () => {
       }
     }
     expect(missing).toEqual([]);
+  });
+
+  it('documents the blog components and parameters', () => {
+    const doc = createOpenApiDocument(app);
+    const schemas = doc.components?.schemas ?? {};
+    expect(Object.keys(schemas)).toEqual(
+      expect.arrayContaining([
+        'SavePostDto',
+        'PostsPageQuery',
+        'AdminPostsQuery',
+        'PostIdParam',
+        'PostBodyDocument',
+        'PostBodyNode',
+        'PostBodyMark',
+        'PostAuthorDto',
+        'PostSummaryDto',
+        'PostDto',
+        'AdminPostAuthorDto',
+        'AdminPostSummaryDto',
+        'AdminPostDto',
+        'PageInfoDto',
+      ]),
+    );
+    const params = (path: string, method: 'get' | 'put' | 'post') =>
+      (
+        (doc.paths[path][method]?.parameters ?? []) as {
+          name: string;
+          in: string;
+          required?: boolean;
+        }[]
+      )
+        .map((p) => `${p.in}:${p.name}:${p.required === true}`)
+        .sort();
+    expect(params('/posts', 'get')).toEqual(['query:page:false', 'query:pageSize:false']);
+    expect(params('/admin/posts', 'get')).toEqual([
+      'query:page:false',
+      'query:pageSize:false',
+      'query:status:false',
+    ]);
+    for (const [path, method] of [
+      ['/admin/posts/{id}', 'get'],
+      ['/admin/posts/{id}', 'put'],
+      ['/admin/posts/{id}/publish', 'post'],
+      ['/admin/posts/{id}/unpublish', 'post'],
+    ] as const) {
+      expect(params(path, method)).toEqual(['path:id:true']);
+    }
+    const pageSize = (
+      doc.paths['/posts'].get?.parameters as { name: string; schema: object }[]
+    ).find((p) => p.name === 'pageSize');
+    expect(pageSize?.schema).toMatchObject({
+      type: 'integer',
+      minimum: 1,
+      maximum: 50,
+      default: 12,
+    });
+    expect(JSON.stringify(doc.paths['/admin/posts'].post?.requestBody)).toContain(
+      '#/components/schemas/SavePostDto',
+    );
+    expect(JSON.stringify(schemas.PostDto)).toContain('#/components/schemas/PostBodyDocument');
+    expect(JSON.stringify(schemas.AdminPostDto)).toContain('#/components/schemas/PostBodyDocument');
+    expect(JSON.stringify(schemas.PostBodyNode)).toContain('#/components/schemas/PostBodyNode'); // recursion by $ref
+    expect(JSON.stringify(doc.paths['/posts'].get?.responses['200'])).toContain(
+      '#/components/schemas/PageInfoDto',
+    );
+  });
+
+  it('documents every post error code (I18)', () => {
+    const doc = createOpenApiDocument(app);
+    const codes = (path: string, method: 'get' | 'put' | 'post') =>
+      JSON.stringify(doc.paths[path][method]?.responses);
+    expect(codes('/admin/posts', 'post')).toContain('POST_SLUG_TAKEN');
+    for (const code of ['POST_SLUG_TAKEN', 'POST_SLUG_LOCKED', 'POST_BODY_EMPTY', 'NOT_FOUND']) {
+      expect(codes('/admin/posts/{id}', 'put')).toContain(code);
+    }
+    expect(codes('/admin/posts/{id}/publish', 'post')).toContain('POST_BODY_EMPTY');
+    expect(codes('/admin/posts/{id}/unpublish', 'post')).not.toContain('POST_BODY_EMPTY');
+    expect(codes('/posts/{slug}', 'get')).toContain('NOT_FOUND');
   });
 });
