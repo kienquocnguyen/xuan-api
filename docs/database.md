@@ -238,6 +238,7 @@ The **actual, decided schema**, so the current database can be understood at a g
 | ---------- | --------------------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------- |
 | `services` | **implemented** 2026-10-14 by migration `CreateServices1791710155502` (owner-approved 2026-10-09; revised 2026-10-11: `duration_minutes` removed). `\d+ services` matches this map on `xuan_dev` and `xuan_test`; revert/run round trip and an empty second `migration:generate` observed on `xuan_test`; invariants proven by `test/services-schema.e2e-spec.ts` | `services` (entity `ServiceOffering`) | `docs/superpowers/plans/2026-10-09-foundation-and-services-catalog.md`, Task 13 |
 | `users`, `auth_identities`, `sessions` | **implemented** 2026-10-14 by migration `CreateUsersAndAuth1791980708763` (auth design spec §3). Owner-approved runs: `xuan_test` (guarded run, revert/run round trip, empty second generate) and `xuan_dev`; `\d` matches this map on both; invariants proven by `test/users-schema.e2e-spec.ts` | `users` | `docs/superpowers/plans/2026-10-14-user-auth-and-rbac.md`, Task 2 |
+| `content_posts` | **implemented** 2026-10-15 by migration `CreateContentPosts1792001598048` (owner-approved blog design spec §3.2). Owner-approved runs: `xuan_test` (guarded run, revert/run round trip, empty second generate) and `xuan_dev` (empty second generate); `\d+` matches this map on both, cross-module FK included; invariants proven by `test/content-posts-schema.e2e-spec.ts` | `content` (entity `Post`) | `docs/superpowers/plans/2026-10-15-blog-posts.md`, Task 1 |
 
 #### `services`
 
@@ -352,3 +353,55 @@ erDiagram
 | `uq_auth_identities_user_id_provider` | UNIQUE | `(user_id, provider)` | At most one identity per provider per account; its leading `user_id` also indexes the FK |
 | `ix_sessions_user_id` | INDEX | `(user_id)` | FK index for the cascade |
 | `uq_sessions_token_hash` | UNIQUE | `(token_hash)` | The per-request session lookup |
+
+#### `content_posts`
+
+Blog posts (blog design spec, `docs/superpowers/specs/2026-10-15-blog-posts-design.md`). Owned by the `content` module. **The first foreign key across modules** (C12, architecture AD14): `author_id` references `users`, declared on the `Post` entity with `@ForeignKey('User', …)` (an entity-name string), so generated migrations keep the constraint while the content module never imports the users module's entity.
+
+```mermaid
+erDiagram
+    users ||--o{ content_posts : "authors"
+    content_posts {
+        uuid id PK "pk_content_posts · DEFAULT uuidv7()"
+        uuid author_id FK "fk_content_posts_author_id → users · ON DELETE RESTRICT"
+        varchar_16 language "required · DEFAULT 'vi' · CK ck_content_posts_language"
+        varchar_160 slug "required · UQ (language, slug) · CK ck_content_posts_slug_format"
+        varchar_200 title "required · CK ck_content_posts_title_not_blank"
+        varchar_400 excerpt "nullable · CK not blank"
+        jsonb body "required · CK ck_content_posts_body_is_doc"
+        smallint body_version "required · DEFAULT 1 · CK ck_content_posts_body_version"
+        varchar_16 status "required · DEFAULT 'draft' · CK ck_content_posts_status"
+        timestamptz published_at "nullable · CK ck_content_posts_published_has_date"
+        varchar_200 seo_title "nullable · CK not blank"
+        varchar_400 seo_description "nullable · CK not blank"
+        timestamptz created_at "required · DEFAULT now()"
+        timestamptz updated_at "required · DEFAULT now()"
+    }
+```
+
+| Column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_content_posts` | D26 |
+| `author_id` | `uuid` | yes | — | **FK** `fk_content_posts_author_id` → `users(id)` `ON DELETE RESTRICT` | Every post has an author (data-model §4). `RESTRICT`: an account with posts can't be deleted by accident (accounts are never deleted today) |
+| `language` | `varchar(16)` | yes | `'vi'` | **CK** `ck_content_posts_language`: `language IN ('vi')` | Vietnamese only in V1, i18n-ready (spec B3): adding a language widens the CHECK |
+| `slug` | `varchar(160)` | yes | — | **CK** `ck_content_posts_slug_format`: `slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`; part of `uq_content_posts_language_slug` | The public URL key, lowercase kebab-case (D30), unique per language. Immutable once the post was ever published (spec B17, enforced by the content service) |
+| `title` | `varchar(200)` | yes | — | **CK** `ck_content_posts_title_not_blank` | The page's `<h1>` |
+| `excerpt` | `varchar(400)` | no | — | **CK** `ck_content_posts_excerpt_not_blank` | Optional summary; blank input is stored as `NULL`, never `''` |
+| `body` | `jsonb` | yes | — | **CK** `ck_content_posts_body_is_doc`: `jsonb_typeof(body) = 'object' AND body->>'type' = 'doc'` | The TipTap/ProseMirror document, validated against the version-1 allow-list by the API (spec §4); the CHECK guards the outer shape |
+| `body_version` | `smallint` | yes | `1` | **CK** `ck_content_posts_body_version`: `body_version IN (1)` | Which allow-list the body follows; a new version widens the CHECK |
+| `status` | `varchar(16)` | yes | `'draft'` | **CK** `ck_content_posts_status`: `status IN ('draft','published')` | Only published posts are public |
+| `published_at` | `timestamptz` | no | — | **CK** `ck_content_posts_published_has_date`: `status <> 'published' OR published_at IS NOT NULL` | The original first-publish instant (spec B16): set once, kept across unpublish/republish |
+| `seo_title` | `varchar(200)` | no | — | **CK** `ck_content_posts_seo_title_not_blank` | Optional; the web falls back to the title |
+| `seo_description` | `varchar(400)` | no | — | **CK** `ck_content_posts_seo_description_not_blank` | Optional; the web falls back to the excerpt |
+| `created_at` | `timestamptz` | yes | `now()` | — | D27 |
+| `updated_at` | `timestamptz` | yes | `now()` | — | Posts change (D27); `@UpdateDateColumn`. Idempotent publish/unpublish don't write |
+
+**Table-level constraints and indexes:**
+
+| Name | Kind | Definition | Note |
+|---|---|---|---|
+| `uq_content_posts_language_slug` | UNIQUE | `(language, slug)` | One post per URL per language; the public lookup. Its violation becomes `409 POST_SLUG_TAKEN` |
+| `ix_content_posts_language_status_published_at_id` | INDEX | `(language, status, published_at, id)` | The public list (`WHERE language AND status ORDER BY published_at DESC, id DESC`, scanned backwards) |
+| `ix_content_posts_author_id_updated_at_id` | INDEX | `(author_id, updated_at, id)` | The editor's own list (`ORDER BY updated_at DESC, id DESC`) and the FK |
+
+**Not in this table (deferred decisions):** cover/OG images, categories, tags, archive, scheduled publishing, slug redirects, deletion mechanism, preview links (spec §9).

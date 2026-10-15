@@ -64,6 +64,24 @@ describe('HTTP contract (fixture)', () => {
     );
   });
 
+  it('deeply nested body → 400, never a stack overflow (500)', async () => {
+    // ~80 kB of raw JSON, under the global 100 kB limit; raw because supertest's serializer recurses
+    const deep = '['.repeat(40_000) + ']'.repeat(40_000);
+    const res = await request(app.getHttpServer())
+      .post('/__fixture/echo')
+      .set('X-Requested-With', 'XMLHttpRequest')
+      .set('Content-Type', 'application/json')
+      .send(`{"name":"Xuan","address":{"city":${deep}}}`);
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual(
+      envelope('VALIDATION_FAILED', 'The request is invalid.', {
+        fields: [
+          { field: 'address.city', code: 'INVALID_TYPE', message: 'This value has the wrong type.' },
+        ],
+      }),
+    );
+  });
+
   it('missing required field → REQUIRED', async () => {
     const res = await request(app.getHttpServer())
       .post('/__fixture/echo')

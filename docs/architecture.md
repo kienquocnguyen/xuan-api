@@ -71,7 +71,7 @@ Each needs a concrete problem (C1, C4).
 |---|---|
 | Runtime | Node 24 LTS · Yarn 4 · NestJS 12 (ESM) · TypeScript 6.x |
 | Persistence | PostgreSQL 18 · TypeORM 1.x |
-| Validation | Zod 4 via `StandardSchemaValidationPipe` |
+| Validation | Zod 4 via `StandardSchemaValidationPipe` (subclassed as `ContractValidationPipe`, AD4) |
 | API docs | `@nestjs/swagger` |
 | Tests | Vitest 4 + supertest |
 
@@ -90,7 +90,9 @@ src/
                      validation translator, OpenAPI helpers, error schemas, auth/ (decorators, roles, ownership)
   modules/
     services/        services.module.ts · .controller.ts · .service.ts · service-offering.entity.ts · dto/   (first slice)
-    users/           users, auth_identities, sessions · auth + admin controllers · AccessGuard · google/ gateway (§17)
+    users/           users, auth_identities, sessions · auth + admin controllers · AccessGuard · google/ gateway (§17) ·
+                     exports UserProfilesReader (its first export, AD14)
+    content/         content_posts · public + authoring post controllers · body/ (TipTap v1 schema, limits, content rules)
 test/                e2e specs, test-only fixture controller, test support (development-workflow.md: Testing)
 ```
 
@@ -195,7 +197,7 @@ TypeORM's `Repository<Entity>` already *is* the repository pattern. Wrapping it 
 request
   │ helmet · CORS ─► JSON parser (JSON only, size limit; over-limit → 413) ─► cookie-parser ─► CsrfGuard ─► AccessGuard (§17)
   ▼
-APP_PIPE   StandardSchemaValidationPipe + Zod ── invalid ──► AppError(validation) ──────────────┐
+APP_PIPE   ContractValidationPipe + Zod ── invalid ──► AppError(validation) ────────────────────┐
   ▼                                                                                             │
 Controller ─► Service ─► Repository<Entity> ─► PostgreSQL                                       │
   │              ├─ expected conflict → ON CONFLICT result (C6)                                 │
@@ -213,7 +215,7 @@ These are **two different problems**, solved separately on purpose.
 | | Requests | Responses |
 |---|---|---|
 | Problem | Untrusted input must be parsed and rejected or shaped | Trusted data must leave in exactly the contract shape, and nothing more |
-| Tool | Zod 4 schema via Nest's first-party `StandardSchemaValidationPipe` (D7) | Response DTO class + explicit mapping (I10, D5) |
+| Tool | Zod 4 schema via Nest's first-party `StandardSchemaValidationPipe` (D7; registered as `ContractValidationPipe`, AD4) | Response DTO class + explicit mapping (I10, D5) |
 | Unknown fields | Rejected (`z.strictObject`, D8); stripping only with a reason (C7) | Can't exist: the mapping builds the object field by field |
 | Docs | From the schema, named with `.meta({ id })` (D17) | From the DTO class, with hand-written `@ApiProperty` (D17) |
 
@@ -309,7 +311,7 @@ Applied by a global `APP_INTERCEPTOR` (I11):
 | Helper | Documents |
 |---|---|
 | `@ApiEnvelopeResponse(Dto, { status })` | `{ data: $ref Dto }`; `Dto` registered as a named component |
-| `@ApiPaginatedEnvelopeResponse(Dto)` | `{ data: { items: [$ref Dto], pageInfo: $ref PageInfoDto } }`. Arrives with courses |
+| `@ApiPaginatedEnvelopeResponse(Dto)` | `{ data: { items: [$ref Dto], pageInfo: $ref PageInfoDto } }`. Arrived with blog posts (2026-10-15) |
 | `@ApiErrorResponses(...definitions)` | Each definition grouped by its `kind`'s status, with `error.code` narrowed to exactly those codes; always `500 INTERNAL_ERROR`; `400 VALIDATION_FAILED` on validated input |
 | `@ApiNoContentResponse()` | 204 (Nest built-in) |
 | `@ApiSchemaParameters('query' \| 'path', schema)` | One parameter per property of the Zod object schema given to `@Query({ schema })` / `@Param({ schema })` (path parameters always required). Needed because `@nestjs/swagger` registers a `.meta({ id })` schema as a component but doesn't expand it into operation parameters |
@@ -392,7 +394,7 @@ Each entry ends with *revisit when*. The full reasoning and the rejected alterna
 - **AD1. PostgreSQL + TypeORM 1.x.** The documented Nest-native path, stable while the owner learns Nest by hand, with mature references. Mongoose-like habits are countered by guardrails (`database.md`). *Revisit when* TypeORM blocks a needed capability, or a deliberate comparison (e.g. Drizzle 1.0 stable) is scheduled.
 - **AD2. Services use `Repository<Entity>` directly; `forFeature` only in the owning module.** *Revisit when* a C1/C4 signal appears in a specific module.
 - **AD3. Layout B:** `config/`, `errors/`, `database/`, `http/`, `modules/` with an allow-list. *Revisit when* never by default; a new platform folder needs a stated responsibility.
-- **AD4. Zod requests via `StandardSchemaValidationPipe`; explicit response DTOs + mapping.** *Revisit when* Standard Schema support in Nest proves insufficient (a verification spike fails).
+- **AD4. Zod requests via `StandardSchemaValidationPipe`; explicit response DTOs + mapping.** *Revisit when* Standard Schema support in Nest proves insufficient (a verification spike fails). *2026-10-15:* Nest's pipe strips prototype keys recursively **before** the schema runs, so deeply nested JSON overflowed the stack (500). `src/http/contract-validation.pipe.ts` subclasses it with an iterative `stripProtoKeys` (same rules); the rest of the pipe is unchanged.
 - **AD5. `AppError` + `kind`; translation at the call site; untranslated database errors → 500.** *Revisit when* never by default.
 - **AD6. Global success interceptor; OpenAPI helpers fed by runtime error definitions.** *Revisit when* the first non-JSON response (file/stream) needs an opt-out.
 - **AD7. One `loadConfig()` path shared by app, CLI and tests.** *Revisit when* config grows enough that namespacing earns `@nestjs/config`.
@@ -407,6 +409,7 @@ Each entry ends with *revisit when*. The full reasoning and the rejected alterna
   - **Supersedes** the frozen spec's D12 (a `Subscribers` newsletter slice). Later product clarification showed newsletter subscription wasn't a confirmed capability, and a learning slice must be a real one. Newsletter ("Creator Notes") now *needs product confirmation* (`data-model.md`). If confirmed, it's introduced explicitly as a newsletter/email-subscription capability.
   - *Revisit when* never: the next slices build on it.
 - **AD13. Auth: Google-only sign-in, opaque server-side sessions, one role column, default-deny guard, ownership policy in `http/auth/`.** Spec A1–A14. *Revisit when* a second identity provider, a non-browser API client (tokens), or a permission need beyond three roles appears.
+- **AD14. First cross-module foreign key: FK metadata without ORM relations; one narrow exported reader.** `content_posts.author_id` → `users(id)` (`ON DELETE RESTRICT`) is declared with TypeORM's `@ForeignKey('User', { name, onDelete })`, an entity-name string: generated migrations keep the constraint (D31) while `content/` never imports the users entity (I2), and there is no relation property or join (C12 stays deferred for relations). Author display data comes from `UserProfilesReader.findPublicProfiles(ids)`, `UsersModule`'s first export (no email, no role). Post write routes parse JSON up to 512 kB through a path-scoped parser before the global 100 kB one (D21). Blog spec B7, B8, B15. *Revisit when* a cross-module query genuinely needs a join, or another module needs more than public profiles.
 
 ## 14. Open product questions
 
@@ -414,20 +417,20 @@ These are shared with xuan-web. Agents ask instead of guessing.
 
 - Money: currency, price units, formatting.
 - Locale/i18n of API `message` texts.
-- Concurrency on admin edits: last-write-wins vs optimistic concurrency.
+- Concurrency on admin edits: last-write-wins vs optimistic concurrency. **Posts (2026-10-15): last write wins in V1**; a later precondition (e.g. `If-Match` on `updatedAt`) stays optional, so adding it isn't a contract break (blog spec B14).
 - The domain questions (final catalog content, the service application/booking details, course format, content publishing workflow, newsletter): `data-model.md` §5.
 
 ## 15. Deferred architecture
 
 | Deferred | Trigger |
 |---|---|
-| Content: post types, rich text, media, draft/publish state, publishing workflow (editors publish their **own** posts, §17) | Content slice |
+| Content beyond V1 blog posts: media/images, cover/OG images, taxonomy, archive, scheduled publishing, slug redirects, deletion mechanism, previews (blog spec §9) | Each owner decision |
 | Newsletter subscriptions ("Creator Notes") | Product confirmation |
 | Service applications and appointments: persistence, statuses, slot availability and holds (no double acceptance), Google Calendar / Meet integration, applicant emails. Confirmed concepts in `data-model.md` §3.1 | Application/booking slice design |
 | Rate limiting + `trust proxy` | **Before public launch** (D23) |
-| Pagination implementation (`PageQueryDto`, `PageInfoDto`, paginated decorator) | The first list that needs it (the services list's pagination is settled in its plan) |
-| First request-body validation (first 409 arrived with `ADMIN_ROLE_LOCKED`) | Admin service management or courses |
-| Cross-module ORM relation metadata (C12) | First real database relation between modules |
+| ~~Pagination implementation~~ | **Done 2026-10-15** with blog posts: `pageQueryFields`, `PageInfoDto`, `toPageInfo` in `http/pagination/page.ts`; `@ApiPaginatedEnvelopeResponse` in `http/openapi/` |
+| ~~First request-body validation~~ | **Done 2026-10-15** with blog posts (`SavePostDto` via `@Body({ schema })`) |
+| Cross-module ORM **relation** metadata (C12) | Resolved for foreign keys by AD14 (FK metadata without relations); relation metadata itself stays deferred until a real need |
 | Module-to-module details; cross-module transactions | First real consumer (orders/entitlements) |
 | Query classes, dedicated mappers, local layering | C1, C2, C4 signals |
 | Integration gateways (external providers) | The first external provider |
@@ -454,6 +457,8 @@ These are decided by running real code, not by debate. If one disproves an assum
 | Generated migrations stable with `uuidv7()` and named constraints | Generate twice; the second is empty. **Result (2026-10-14, TypeORM 1.1):** stable. With `CreateServices1791710155502` applied, a second `migration:generate` reports "No changes in database schema" on both `xuan_dev` and `xuan_test`; `uuidv7()` defaults and `pk_`/`uq_`/`ck_` names declared in the entity round-trip unchanged |
 | Any `ON CONFLICT` insert names its target (D32). TypeORM's `.orIgnore()` is target-less, so find the mechanism that names it, for the first slice that uses `ON CONFLICT` | Read the logged SQL. **Result (2026-10-14, TypeORM 1.1):** `.orUpdate(columns, 'uq_services_slug')` with a **string** target emits `ON CONFLICT ON CONSTRAINT "uq_services_slug" DO UPDATE SET …` (an array target would emit a column list). Used by `yarn seed:services` |
 | Malformed JSON and over-limit bodies reach the filter as `VALIDATION_FAILED` / `PAYLOAD_TOO_LARGE` | Fixture e2e. **Result (2026-10-14, Nest 12):** the over-limit error reaches the filter raw (`status 413`, `entity.too.large`). Invalid JSON does **not**: `ExpressAdapter.mapException` rethrows every `SyntaxError` as `new BadRequestException(message)`, dropping `type`. `configureApp()` therefore adds an Express error middleware after the JSON parser that re-raises the parse failure as `InvalidJsonBodyError` (status 400, `type: 'entity.parse.failed'`), which Nest passes through unchanged |
+| Cross-module FK metadata survives `migration:generate` (blog AD14) | **Partly proven (2026-10-15, TypeORM 1.1.2):** `@ForeignKey('User', { name: 'fk_content_posts_author_id', onDelete: 'RESTRICT' })` generates the named FK with `ON DELETE RESTRICT`, and the built metadata holds that FK with no relation, so `dropOldForeignKeys` keeps it. **Pending:** the empirical empty second generate after the owner-approved migration run |
+| A path-scoped 512 kB JSON parser for post writes (blog B15) | **Result (2026-10-15):** `express.json({ limit: '512kb' })` mounted before `useBodyParser` parses 400 kB on `POST /admin/posts` and `PUT /admin/posts/:id`; 600 kB there and 200 kB on every other route still give 413; invalid JSON keeps its message. Also: a plain recursive Zod parse of a 20 000-level document throws `RangeError`, so the body schema runs an iterative limits pass in `z.preprocess` first (Zod skips the inner schema when it adds issues) |
 
 ## 17. Authentication and authorization
 
@@ -485,4 +490,4 @@ Browser ─GET /auth/me (credentials)──► AccessGuard: xc_session → SHA-2
 
 **Future providers (Facebook):** widen `ck_auth_identities_provider`, add a gateway and two routes. A new identity whose email belongs to another account is refused (`ACCOUNT_CONFLICT`), as for Google; linking is an explicit action by a signed-in user, never an email match.
 
-**Future references to `users.id`:** `content_posts.author_id` (ownership via the policy above), `service_applications.user_id` (nullable: guests apply; the application snapshots the submitted name/email for history while `users` stays the live profile used for prefill), appointments through their application, `orders.user_id`, `enrollments.user_id` / course access.
+**References to `users.id`:** `content_posts.author_id` (**implemented**: FK `fk_content_posts_author_id`, ownership via the policy above, AD14); future: `service_applications.user_id` (nullable: guests apply; the application snapshots the submitted name/email for history while `users` stays the live profile used for prefill), appointments through their application, `orders.user_id`, `enrollments.user_id` / course access.

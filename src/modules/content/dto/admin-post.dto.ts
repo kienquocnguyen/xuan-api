@@ -1,0 +1,67 @@
+import { ApiProperty, getSchemaPath } from '@nestjs/swagger';
+import type { PublicProfile } from '../../users/user-profiles.reader.js';
+import type { PostBodyDocument } from '../body/post-body.schema.js';
+import { POST_STATUSES, type Post, type PostStatus } from '../post.entity.js';
+
+/** The author as the dashboard sees them (contract identifier, I19). No email. */
+export class AdminPostAuthorDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty() displayName!: string;
+  @ApiProperty({ type: String, nullable: true, format: 'uri' }) avatarUrl!: string | null;
+}
+
+/** A post in the authoring list. */
+export class AdminPostSummaryDto {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ example: 'bai-viet-dau-tien' }) slug!: string;
+  @ApiProperty() title!: string;
+  @ApiProperty({ enum: POST_STATUSES }) status!: PostStatus;
+  @ApiProperty({ type: String, nullable: true, format: 'date-time' }) publishedAt!: string | null;
+  @ApiProperty({ format: 'date-time' }) updatedAt!: string;
+  @ApiProperty({ type: AdminPostAuthorDto }) author!: AdminPostAuthorDto;
+}
+
+/** A post as its author (or an admin) edits it. */
+export class AdminPostDto extends AdminPostSummaryDto {
+  @ApiProperty({ example: 'vi' }) language!: string;
+  @ApiProperty({ type: String, nullable: true }) excerpt!: string | null;
+  // A recursive document can't be a hand-written class: reference the Zod-generated component (D17 note).
+  @ApiProperty({ allOf: [{ $ref: getSchemaPath('PostBodyDocument') }] }) body!: PostBodyDocument;
+  @ApiProperty({ example: 1 }) bodyVersion!: number;
+  @ApiProperty({ type: String, nullable: true }) seoTitle!: string | null;
+  @ApiProperty({ type: String, nullable: true }) seoDescription!: string | null;
+  @ApiProperty({ format: 'date-time' }) createdAt!: string;
+}
+
+/** Whitelist by construction: only these fields reach the wire (I10). */
+export function toAdminPostSummaryDto(post: Post, author: PublicProfile): AdminPostSummaryDto {
+  return {
+    id: post.id,
+    slug: post.slug,
+    title: post.title,
+    status: post.status,
+    publishedAt: post.publishedAt ? post.publishedAt.toISOString() : null,
+    updatedAt: post.updatedAt.toISOString(),
+    author: { id: author.id, displayName: author.displayName, avatarUrl: author.avatarUrl },
+  };
+}
+
+export function toAdminPostDto(post: Post, author: PublicProfile): AdminPostDto {
+  const summary = toAdminPostSummaryDto(post, author);
+  return {
+    id: summary.id,
+    slug: summary.slug,
+    title: summary.title,
+    status: summary.status,
+    publishedAt: summary.publishedAt,
+    updatedAt: summary.updatedAt,
+    author: summary.author,
+    language: post.language,
+    excerpt: post.excerpt,
+    body: post.body,
+    bodyVersion: post.bodyVersion,
+    seoTitle: post.seoTitle,
+    seoDescription: post.seoDescription,
+    createdAt: post.createdAt.toISOString(),
+  };
+}

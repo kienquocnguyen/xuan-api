@@ -31,14 +31,19 @@ const messages: Record<FieldCode, string> = {
   INVALID: 'This value is invalid.',
 };
 
+/** A huge invalid document can't produce thousands of entries (api-contract.md §4). */
+const MAX_FIELD_ERRORS = 50;
+
 export function toFieldErrors(issues: readonly SchemaIssue[]): FieldError[] {
-  return issues.flatMap((issue) => {
-    const base = toDotPath(issue.path ?? []);
-    if (issue.code === 'unrecognized_keys' && Array.isArray(issue.keys)) {
-      return issue.keys.map((key) => field(joinPath(base, String(key)), 'UNKNOWN_FIELD'));
-    }
-    return [field(base, codeFor(issue))];
-  });
+  return issues
+    .flatMap((issue) => {
+      const base = toDotPath(issue.path ?? []);
+      if (issue.code === 'unrecognized_keys' && Array.isArray(issue.keys)) {
+        return issue.keys.map((key) => field(joinPath(base, String(key)), 'UNKNOWN_FIELD'));
+      }
+      return [field(base, codeFor(issue))];
+    })
+    .slice(0, MAX_FIELD_ERRORS);
 }
 
 function codeFor(issue: SchemaIssue): FieldCode {

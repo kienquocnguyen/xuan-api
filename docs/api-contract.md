@@ -47,6 +47,7 @@ This document says what `xuan-api` promises to `xuan-web`, seen from the **produ
 - Query params: `page` (1-based), `pageSize`.
 - Offset pagination is the default. Cursor pagination is a per-endpoint decision for feeds, if one ever needs it.
 - Keeping pagination inside `data` means the envelope stays the same for every endpoint (D14).
+- **Implemented 2026-10-15** (`GET /posts`, `GET /admin/posts`): `page` ≥ 1 (default 1), `pageSize` 1–50 (default 12); a page beyond `totalPages` returns `200` with empty `items`; `PageInfoDto` = `{ page, pageSize, totalItems, totalPages }`.
 
 ## 4. Error envelope
 
@@ -86,6 +87,7 @@ This document says what `xuan-api` promises to `xuan-web`, seen from the **produ
 
 - `field` is the dot path of the request property (`items.0.name` for arrays), so it maps directly onto React Hook Form field names.
 - A body that isn't valid JSON returns `VALIDATION_FAILED` with `fields: []`.
+- At most **50** `fields` entries are reported (a huge invalid document can't produce thousands).
 
 **Field codes** (stable):
 
@@ -217,6 +219,17 @@ The authoritative list is the OpenAPI document. This table records deliberate be
 
 Both are implemented (`src/modules/services/`, 2026-10-14) and proven by exact-body e2e (`test/services.e2e-spec.ts`) and the OpenAPI e2e.
 
+| `GET /posts?page&pageSize` | Public. `{ data: { items: PostSummaryDto[], pageInfo } }`: published Vietnamese posts, newest `publishedAt` first (tie: `id`). Errors: `400`, `413`, `500` |
+| `GET /posts/:slug` | Public. `{ data: PostDto }`. Opaque slug key (D7 deviation, as services): unknown, malformed or **draft** → `404 NOT_FOUND`. Errors: `404`, `500` |
+| `GET /admin/posts?status&page&pageSize` | Editor/admin. `{ data: { items: AdminPostSummaryDto[], pageInfo } }`, newest `updatedAt` first. **Editors see only their own posts**, admins all. Errors: `400`, `401`, `403`, `413`, `500` |
+| `GET /admin/posts/:id` | Editor/admin. `{ data: AdminPostDto }`. Another author's post → `403` for editors (reads included). Errors: `400`, `401`, `403`, `404`, `413`, `500` |
+| `POST /admin/posts` | Editor/admin, CSRF. Body `SavePostDto`; creates a **draft** authored by the caller → `201 { data: AdminPostDto }`. Errors: `400`, `401`, `403`, `409 POST_SLUG_TAKEN`, `413` (body > 512 kB), `500` |
+| `PUT /admin/posts/:id` | Editor/admin owner, CSRF. Full replacement (omitted optional fields → `null`). Slug immutable once ever published → `409 POST_SLUG_LOCKED`; a published post can't become empty → `409 POST_BODY_EMPTY`. Errors: `400`, `401`, `403`, `404`, `409` (`POST_SLUG_TAKEN`, `POST_SLUG_LOCKED`, `POST_BODY_EMPTY`), `413`, `500` |
+| `POST /admin/posts/:id/publish` | Editor/admin owner, CSRF. Idempotent. Sets `publishedAt` on the first publication only (kept across unpublish/republish). A body without a visible character → `409 POST_BODY_EMPTY`. Errors: `400`, `401`, `403`, `404`, `409`, `413`, `500` |
+| `POST /admin/posts/:id/unpublish` | Editor/admin owner, CSRF. Back to draft, idempotent; `publishedAt` and the slug lock stay. Errors: `400`, `401`, `403`, `404`, `413`, `500` |
+
+**Post DTOs:** `PostAuthorDto` = `{ displayName, avatarUrl }` (no id, no email); `PostSummaryDto` = `{ id, slug, title, excerpt, publishedAt, author }`; `PostDto` = summary + `{ language, body, bodyVersion, seoTitle, seoDescription, updatedAt }`; `AdminPostAuthorDto` = `{ id, displayName, avatarUrl }`; `AdminPostSummaryDto` = `{ id, slug, title, status, publishedAt, updatedAt, author }`; `AdminPostDto` = summary + `{ language, excerpt, body, bodyVersion, seoTitle, seoDescription, createdAt }`. Request components: `SavePostDto`, `PostsPageQuery`, `AdminPostsQuery`, `PostIdParam`, `PostBodyDocument`, `PostBodyNode`, `PostBodyMark`. **`body`** is a TipTap 3 / ProseMirror JSON document, version 1 (blog spec §4): `paragraph`, `heading` (levels 2–3), `bulletList`, `orderedList`, `listItem`, `blockquote`, `text`, `hardBreak`; marks `bold`, `italic`, `link` (absolute `https`/`http`/`mailto` only). Unknown nodes, attributes or unsafe links → `400`; TipTap's default link attributes (`target`, `rel`, `class`, `title`) are accepted and stripped, so the stored/returned link is `{ href }`. Limits: 256 KiB serialized, 5 000 nodes, depth 12, 10 000 chars per text node.
+
 **`ServiceDto`** = `{ id, slug, title, summary }`. It has no price, no duration and no booking or calendar fields. `isPublished`, `sortOrder` and `createdAt` stay internal. A service is a catalog offer, not an appointment (`data-model.md` §3.1). Application, booking and calendar endpoints aren't part of the current contract; they come with the application/booking slice.
 
 **`CurrentUserDto`** = `{ id, email, displayName, avatarUrl: string | null, role: 'user' | 'editor' | 'admin' }`. **`AdminUserDto`** = the same + `createdAt` (ISO 8601). No provider ids, session data, tokens or timestamps beyond `createdAt`.
@@ -242,4 +255,5 @@ This file is ahead of `xuan-web/docs/api-contract.md` on the points below. Under
 | 9 | §9 | Add the contract-identifier rules (coordinated change; breaking for generated consumers; staging when needed) |
 | 10 | endpoint notes | Public Services catalog: `GET /services`, `GET /services/:slug` (no price in V1); `ServiceDto` = `{ id, slug, title, summary }` (no duration); published only, ordered, unpaginated; unknown/unpublished/malformed slug → 404 |
 | 11 | endpoint notes | Auth + admin: `CurrentUserDto`, `AdminUserDto`, `/admin/users`, `PUT`/`DELETE /admin/editors/:userId`, `ADMIN_ROLE_LOCKED` (409); role routing (user → home, editor/admin → dashboard) |
+| 12 | endpoint notes | Blog posts: `/posts`, `/admin/posts` routes, the post DTOs and request components, `POST_SLUG_TAKEN` / `POST_SLUG_LOCKED` / `POST_BODY_EMPTY` (409), pagination §3 implemented, the 50-field cap. xuan-web renders `body` with a React renderer for the version-1 allow-list (never as HTML) and renders the post title as the page's `<h1>` |
 | — | outside the contract | xuan-web's `architecture.md` lists a planned `subscribers` feature. Newsletter ("Creator Notes") now *needs product confirmation*; if confirmed, rename it to an explicit newsletter capability |

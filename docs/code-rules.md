@@ -122,7 +122,7 @@ This is the **canonical rule registry** for `xuan-api`. For every rule it answer
 | D14 | A paginated endpoint returns `{ items, pageInfo }` as its payload; the global interceptor wraps it like any other payload | e2e | api-contract.md: Pagination · architecture.md: Envelope and OpenAPI |
 | D15 | Endpoints are documented with the `http/` helpers: `@ApiEnvelopeResponse` (later `@ApiPaginatedEnvelopeResponse`), `@ApiErrorResponses`, `@ApiNoContentResponse` and, for whole-schema `@Query`/`@Param` input, `@ApiSchemaParameters`. `VALIDATION_FAILED` is documented on endpoints with validated input. Auth and rate-limit errors are documented only once those concerns exist | e2e (document builds), review | architecture.md: Envelope and OpenAPI |
 | D16 | The response DTO named in the Swagger decorator is the same class as the controller method's return type | review | architecture.md: Envelope and OpenAPI |
-| D17 | Request documentation comes from the Zod schema, named with `.meta({ id })`. Response documentation comes from response DTO classes with hand-written `@ApiProperty` (no Swagger CLI plugin) | e2e (document builds), review | architecture.md: Envelope and OpenAPI |
+| D17 | Request documentation comes from the Zod schema, named with `.meta({ id })`. Response documentation comes from response DTO classes with hand-written `@ApiProperty` (no Swagger CLI plugin). A recursive structure a class can't express (the post body document) is referenced from the DTO by `$ref` to its Zod-generated component | e2e (document builds), review | architecture.md: Envelope and OpenAPI |
 
 ### Configuration and HTTP bootstrap
 
@@ -131,7 +131,7 @@ This is the **canonical rule registry** for `xuan-api`. For every rule it answer
 | D18 | Configuration is read only through `loadConfig()`, the single path shared by the app (as a custom provider), the TypeORM migration CLI and tests (with `.env.test`) | review | architecture.md: Configuration |
 | D19 | Environment differences flow only through validated `AppConfig` values, not through scattered `NODE_ENV` checks | review | architecture.md: Configuration |
 | D20 | `/docs` and `/docs-json` are served only when validated config enables them; the default is disabled | config, review | architecture.md: HTTP bootstrap |
-| D21 | Only JSON request bodies are parsed, with a conservative size limit. Another body parser is added only for the feature that needs it. A body over the limit is answered with `413 PAYLOAD_TOO_LARGE` (I13) | e2e, review | architecture.md: HTTP bootstrap |
+| D21 | Only JSON request bodies are parsed, with a conservative size limit (100 kB; post writes 512 kB, AD14). Another body parser is added only for the feature that needs it. A body over the limit is answered with `413 PAYLOAD_TOO_LARGE` (I13) | e2e, review | architecture.md: HTTP bootstrap |
 | D22 | Helmet's default headers are applied and shutdown hooks are enabled (so the database pool closes). No global route prefix and no API versioning | review | architecture.md: HTTP bootstrap |
 | D23 | Public write endpoints are rate-limited before public production launch | review (launch checklist) | architecture.md: HTTP bootstrap |
 
@@ -179,7 +179,7 @@ This is the **canonical rule registry** for `xuan-api`. For every rule it answer
 | C9 | An irreversible or data-destructive migration | No misleading `down()`. The migration and plan document the recovery or roll-forward strategy | database.md: Migrations |
 | C10 | Expand → migrate → contract for a schema change | When the change would break existing data or running code (renames, type changes, new `NOT NULL` on populated tables, drops) | database.md: Migrations |
 | C11 | A new stable error code for a framework-level status that isn't part of the current runtime contract (e.g. 415) | When the behavior is deliberately exposed to clients. Added to the contract as an additive change | api-contract.md: Error envelope |
-| C12 | ORM relation metadata between entities owned by different business modules | Deferred: decided explicitly when the first real database relation across modules appears. The decision must keep entity/table ownership clear, keep repositories private to the owning module, keep business behavior flowing through exported providers, and limit the dependency to ORM relation metadata, never general cross-module persistence access | architecture.md: Deferred architecture |
+| C12 | ORM relation metadata between entities owned by different business modules | Cross-module **foreign keys** are declared as FK metadata without relations (`@ForeignKey('<EntityName>', …)`, AD14, 2026-10-15). Relation metadata itself stays deferred: decided explicitly when a real need appears. The decision must keep entity/table ownership clear, keep repositories private to the owning module, keep business behavior flowing through exported providers, and limit the dependency to ORM relation metadata, never general cross-module persistence access | architecture.md: Deferred architecture |
 
 ---
 

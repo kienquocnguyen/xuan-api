@@ -4749,6 +4749,7 @@ __metadata:
     "@types/supertest": "npm:^7.0.0"
     "@vitest/coverage-v8": "npm:^4.1.2"
     cookie-parser: "npm:^1.4.7"
+    express: "npm:5.2.1"
     google-auth-library: "npm:^11.3.0"
     helmet: "npm:^8.3.0"
     oxlint: "npm:^1.58.0"
