@@ -355,6 +355,36 @@ describe('Authoring posts (/admin/posts)', () => {
     });
   });
 
+  describe('concurrent update and publish (final review, Important 3)', () => {
+    // Each outcome must match some serial order of the two requests (row lock, spec B17/B18).
+    it('never changes the slug of a post after its publication', async () => {
+      for (let trial = 0; trial < 15; trial++) {
+        const id = await createdId(save({ slug: `goc-${trial}` }));
+        const [updated, published] = await Promise.all([
+          update(id, save({ slug: `moi-${trial}` })),
+          action(id, 'publish'),
+        ]);
+        expect([200, 409]).toContain(updated.status);
+        expect(published.status).toBe(200);
+        const finalSlug = (await get(id)).body.data.slug as string;
+        // Publish saw the old slug, so it ran first; then the slug change must have been refused.
+        if (published.body.data.slug === `goc-${trial}`) expect(finalSlug).toBe(`goc-${trial}`);
+      }
+    });
+
+    it('never ends with an empty published post', async () => {
+      for (let trial = 0; trial < 15; trial++) {
+        const id = await createdId(save({ slug: `rong-${trial}` }));
+        await Promise.all([
+          update(id, save({ slug: `rong-${trial}`, body: doc() })),
+          action(id, 'publish'),
+        ]);
+        const final = (await get(id)).body.data as { status: string; body: unknown };
+        if (final.status === 'published') expect(final.body).not.toEqual(doc());
+      }
+    });
+  });
+
   describe('publish / unpublish', () => {
     it('sets publishedAt once and keeps it across unpublish and republish', async () => {
       const id = await createdId();

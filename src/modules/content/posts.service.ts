@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import type { Repository } from 'typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import type { DataSource, EntityManager, Repository } from 'typeorm';
 import { isUniqueViolation } from '../../database/postgres-errors.js';
 import { AppError } from '../../errors/app-error.js';
 import { baselineErrors } from '../../errors/baseline-errors.js';
@@ -21,6 +21,7 @@ type Paging = Readonly<{ page: number; pageSize: number }>;
 export class PostsService {
   constructor(
     @InjectRepository(Post) private readonly posts: Repository<Post>,
+    @InjectDataSource() private readonly dataSource: DataSource,
     private readonly profiles: UserProfilesReader,
   ) {}
 
@@ -85,27 +86,31 @@ export class PostsService {
   }
 
   async update(actor: AuthenticatedUser, id: string, input: SavePostInput): Promise<AuthoredPost> {
-    const post = await this.loadManageable(actor, id);
-    // B17: once ever published, the slug is the post's permanent URL.
-    if (post.publishedAt !== null && input.slug !== post.slug) {
-      throw new AppError(contentErrors.POST_SLUG_LOCKED);
-    }
-    // B18: a published post can't be emptied.
-    if (post.status === 'published' && !hasMeaningfulText(input.body)) {
-      throw new AppError(contentErrors.POST_BODY_EMPTY);
-    }
     try {
-      await this.posts.update(
-        { id },
-        {
-          slug: input.slug,
-          title: input.title,
-          excerpt: input.excerpt,
-          body: canonicalizePostBody(input.body),
-          seoTitle: input.seoTitle,
-          seoDescription: input.seoDescription,
-        },
-      );
+      // Row lock: a concurrent publish can't slip between these checks and the write (B17, B18).
+      await this.dataSource.transaction(async (manager) => {
+        const post = await this.lockManageable(manager, actor, id);
+        // B17: once ever published, the slug is the post's permanent URL.
+        if (post.publishedAt !== null && input.slug !== post.slug) {
+          throw new AppError(contentErrors.POST_SLUG_LOCKED);
+        }
+        // B18: a published post can't be emptied.
+        if (post.status === 'published' && !hasMeaningfulText(input.body)) {
+          throw new AppError(contentErrors.POST_BODY_EMPTY);
+        }
+        await manager.update(
+          Post,
+          { id },
+          {
+            slug: input.slug,
+            title: input.title,
+            excerpt: input.excerpt,
+            body: canonicalizePostBody(input.body),
+            seoTitle: input.seoTitle,
+            seoDescription: input.seoDescription,
+          },
+        );
+      });
     } catch (error) {
       throw this.translate(error);
     }
@@ -113,16 +118,19 @@ export class PostsService {
   }
 
   async publish(actor: AuthenticatedUser, id: string): Promise<AuthoredPost> {
-    const post = await this.loadManageable(actor, id);
-    if (post.status === 'published') return this.withAuthor(post); // idempotent: no write
-    if (!hasMeaningfulText(post.body)) throw new AppError(contentErrors.POST_BODY_EMPTY); // B18
-    await this.posts
-      .createQueryBuilder()
-      .update(Post)
-      // B16: the first publication's instant is kept forever.
-      .set({ status: 'published', publishedAt: () => 'COALESCE("published_at", now())' })
-      .where('id = :id AND status = :draft', { id, draft: 'draft' })
-      .execute();
+    // Row lock: a concurrent update can't empty the body between the check and the publish (B18).
+    await this.dataSource.transaction(async (manager) => {
+      const post = await this.lockManageable(manager, actor, id);
+      if (post.status === 'published') return; // idempotent: no write
+      if (!hasMeaningfulText(post.body)) throw new AppError(contentErrors.POST_BODY_EMPTY); // B18
+      await manager
+        .createQueryBuilder()
+        .update(Post)
+        // B16: the first publication's instant is kept forever.
+        .set({ status: 'published', publishedAt: () => 'COALESCE("published_at", now())' })
+        .where('id = :id', { id })
+        .execute();
+    });
     return this.getForActor(actor, id);
   }
 
@@ -141,6 +149,21 @@ export class PostsService {
   /** 404 if missing, then the ownership rule: editors only their own, reads included (B11, B12). */
   private async loadManageable(actor: AuthenticatedUser, id: string): Promise<Post> {
     const post = await this.posts.findOneBy({ id });
+    if (!post) throw new AppError(baselineErrors.NOT_FOUND);
+    assertCanManageOwnedResource(actor, post.authorId);
+    return post;
+  }
+
+  /** loadManageable inside a transaction: the row stays locked until it commits (only `manager`, I8). */
+  private async lockManageable(
+    manager: EntityManager,
+    actor: AuthenticatedUser,
+    id: string,
+  ): Promise<Post> {
+    const post = await manager.findOne(Post, {
+      where: { id },
+      lock: { mode: 'pessimistic_write' },
+    });
     if (!post) throw new AppError(baselineErrors.NOT_FOUND);
     assertCanManageOwnedResource(actor, post.authorId);
     return post;
