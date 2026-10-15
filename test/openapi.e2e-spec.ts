@@ -224,9 +224,11 @@ describe('OpenAPI document', () => {
     ] as const) {
       expect(params(path, method)).toEqual(['path:id:true']);
     }
-    const pageSize = (
-      doc.paths['/posts'].get?.parameters as { name: string; schema: object }[]
-    ).find((p) => p.name === 'pageSize');
+    const listParameters = (doc.paths['/posts'].get?.parameters ?? []) as {
+      name: string;
+      schema: object;
+    }[];
+    const pageSize = listParameters.find((p) => p.name === 'pageSize');
     expect(pageSize?.schema).toMatchObject({
       type: 'integer',
       minimum: 1,
