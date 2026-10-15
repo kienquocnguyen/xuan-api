@@ -1,12 +1,17 @@
 const ALLOWED_PROTOCOLS = new Set(['https:', 'http:', 'mailto:']);
 const WHITESPACE = /\s/u;
 
-/** C0 controls, DEL or any whitespace: the URL parser would silently strip or encode them. */
-const hasUnsafeCharacter = (href: string) =>
-  [...href].some((char) => {
-    const code = char.codePointAt(0)!;
-    return code <= 0x1f || code === 0x7f || WHITESPACE.test(char);
-  });
+/**
+ * C0 controls, DEL or any whitespace: the URL parser would silently strip or encode them. All of these are
+ * single UTF-16 code units, so a code-unit loop is exact.
+ */
+function hasUnsafeCharacter(href: string): boolean {
+  for (let i = 0; i < href.length; i++) {
+    const code = href.charCodeAt(i);
+    if (code <= 0x1f || code === 0x7f || WHITESPACE.test(href[i])) return true;
+  }
+  return false;
+}
 
 /** An absolute https/http/mailto URL without credentials (blog spec §4.1, link rule). */
 export function isSafeLinkHref(href: string): boolean {
