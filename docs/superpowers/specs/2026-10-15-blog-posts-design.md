@@ -74,7 +74,7 @@ The author is set from the session at creation and **never changes through the A
 | `created_at` | `timestamptz` | no | `now()` | D27 |
 | `updated_at` | `timestamptz` | no | `now()` | Set by every real change (D27); idempotent publish/unpublish don't write |
 
-**Indexes:** `ix_content_posts_public_list (language, status, published_at DESC, id DESC)` for the public list; `ix_content_posts_author_id_updated_at (author_id, updated_at DESC, id DESC)` for the editor list and the FK; the admin list orders by `updated_at DESC, id DESC`.
+**Indexes:** `ix_content_posts_language_status_published_at_id (language, status, published_at, id)` for the public list and `ix_content_posts_author_id_updated_at_id (author_id, updated_at, id)` for the editor list and the FK (D25 names). Both are ascending: PostgreSQL scans them backwards for the `published_at DESC, id DESC` / `updated_at DESC, id DESC` orders. The admin list orders by `updated_at DESC, id DESC`.
 
 Lengths follow D29. The migration is generated, read, reverted and re-run, and a second generate is empty (`xuan-database-change`); `database.md` §12 is updated in the same branch.
 
