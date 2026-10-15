@@ -64,7 +64,7 @@ erDiagram
 | **Course** | A structured learning product a user can register for | CONFIRMED | receives enrollments; contains sections (likely) | — |
 | **Course section / lesson** | The ordered parts of a course a learner works through | LIKELY: depends on the course format (self-paced vs live/cohort) | course | — |
 | **Enrollment** | A user's registration in a course | CONFIRMED | user; course | — |
-| **Content post** | An article/post published on the site. **Every post has an author user** | CONFIRMED as a future capability. Content types, rich-text representation, media, draft/publish state and publishing workflow are **designed in the content slice** | author user | — |
+| **Content post** | An article/post published on the site. **Every post has an author user** | CONFIRMED. **V1 designed 2026-10-15** (blog design spec): text-first blog posts in Vietnamese (i18n-ready), a TipTap/ProseMirror JSON body (H2/H3, lists, quotes, bold, italic, links; no images yet), draft/published, SEO title/description; slug locked after first publication; publishing needs real content. Media, taxonomy, archive/scheduling, redirects, deletion mechanism and previews are deferred (§5) | author user | `content` (table `content_posts`) |
 | **Newsletter subscription** ("Creator Notes") | An email-only list membership that may exist without an account | **NEEDS PRODUCT CONFIRMATION**: design intent only. If confirmed, it's introduced explicitly as a newsletter/email-subscription capability, never as a generic "subscribers" | optionally a user | — |
 | **Building project** ("Đang xây") | Something Xuân is building, with a status | NEEDS PRODUCT DESIGN, and only if it ever becomes database-managed (it's static copy today) | — | — |
 | **Order** | A record of a purchase | DEFERRED | user; entitlements | — |
@@ -148,7 +148,7 @@ Content therefore conceptually has an **author user**. The Nest mechanism (guard
 - **Final catalog content:** *settled 2026-10-14.* The seed (`src/modules/services/services.seed.ts`) holds the owner-approved slugs, titles and summaries for *Channel Kickstart Session* (`channel-kickstart`) and *3-Month 1:1 Coaching* (`3-month-1-1-coaching`). Still open: whether the UI needs structured display metadata (e.g. "90 minutes", "12 weeks") instead of copy in the summary.
 - **Application/booking details** (§3.1): the final form fields, where available slots come from and how they're held, email content, and whether and when payment is involved.
 - **Course format:** decides sections/lessons.
-- **Content publishing workflow** beyond the settled rule (editors publish and delete their own posts; admins any): drafts, scheduling, review.
+- **Content publishing workflow** beyond the settled rule (editors publish and delete their own posts; admins any). V1 settled 2026-10-15: draft/published, `publishedAt` = first publication, slug locked after it, publishing needs real content (blog design spec B16–B19). **Still open:** images and media storage, cover/OG images, categories and tags, archive, scheduled publishing, slug redirects, the deletion mechanism (hard vs soft; the permission itself stays settled), draft preview links, public filtering/search, featured/reading time, multilingual UI and translation groups.
 - **Newsletter (Creator Notes):** real capability or not.
 - **Enrollment vs entitlement:** one concept or two (decided with orders).
 - **Money:** currency, price units, formatting. That's why services carry **no price** in V1.
