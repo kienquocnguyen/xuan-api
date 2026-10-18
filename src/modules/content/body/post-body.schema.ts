@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { checkPostBodyLimits } from './post-body-limits.js';
 import { isSafeLinkHref } from './post-body-links.js';
-import { isStorableText, STORABLE_TEXT_MESSAGE } from './storable-text.js';
+import { isStorableText, STORABLE_TEXT_MESSAGE } from '../../../http/validation/storable-text.js';
 
 // Body version 1 (blog spec §4.1): a text-first TipTap 3 / ProseMirror document. Explicit types keep
 // TypeScript's inference finite across the recursive schemas below.

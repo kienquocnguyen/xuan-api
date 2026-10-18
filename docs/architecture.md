@@ -87,7 +87,8 @@ src/
   errors/            AppError, ErrorKind, baseline error codes
   database/          TypeORM root config, CLI DataSource, migrations/, Postgres error facts
   http/              HttpContractModule (global pipe/filter/interceptor/CSRF guard), configureApp(),
-                     validation translator, OpenAPI helpers, error schemas, auth/ (decorators, roles, ownership)
+                     validation translator, validation/ (the storable-text rule), OpenAPI helpers, error schemas,
+                     auth/ (decorators, roles, ownership)
   modules/
     services/        services.module.ts · .controller.ts · .service.ts · service-offering.entity.ts · dto/   (first slice)
     users/           users, auth_identities, sessions · auth + admin controllers · AccessGuard · google/ gateway (§17) ·

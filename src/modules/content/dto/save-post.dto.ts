@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { postBodyInputSchema } from '../body/post-body.schema.js';
-import { isStorableText, STORABLE_TEXT_MESSAGE } from '../body/storable-text.js';
+import { isStorableText, STORABLE_TEXT_MESSAGE } from '../../../http/validation/storable-text.js';
 
 /** Same rule as ck_content_posts_slug_format (database.md §12). */
 export const POST_SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
