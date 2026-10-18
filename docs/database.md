@@ -239,6 +239,7 @@ The **actual, decided schema**, so the current database can be understood at a g
 | `services` | **implemented** 2026-10-14 by migration `CreateServices1791710155502` (owner-approved 2026-10-09; revised 2026-10-11: `duration_minutes` removed). `\d+ services` matches this map on `xuan_dev` and `xuan_test`; revert/run round trip and an empty second `migration:generate` observed on `xuan_test`; invariants proven by `test/services-schema.e2e-spec.ts` | `services` (entity `ServiceOffering`) | `docs/superpowers/plans/2026-10-09-foundation-and-services-catalog.md`, Task 13 |
 | `users`, `auth_identities`, `sessions` | **implemented** 2026-10-14 by migration `CreateUsersAndAuth1791980708763` (auth design spec §3). Owner-approved runs: `xuan_test` (guarded run, revert/run round trip, empty second generate) and `xuan_dev`; `\d` matches this map on both; invariants proven by `test/users-schema.e2e-spec.ts` | `users` | `docs/superpowers/plans/2026-10-14-user-auth-and-rbac.md`, Task 2 |
 | `content_posts` | **implemented** 2026-10-15 by migration `CreateContentPosts1792001598048` (owner-approved blog design spec §3.2). Owner-approved runs: `xuan_test` (guarded run, revert/run round trip, empty second generate) and `xuan_dev` (empty second generate); `\d+` matches this map on both, cross-module FK included; invariants proven by `test/content-posts-schema.e2e-spec.ts` | `content` (entity `Post`) | `docs/superpowers/plans/2026-10-15-blog-posts.md`, Task 1 |
+| `courses`, `course_sections`, `course_lessons` | **decided** 2026-10-18; map owner-approved with the plan (Checkpoint M, 2026-10-19). Not migrated yet | `courses` (entities `Course`, `CourseSection`, `CourseLesson`) | `docs/superpowers/plans/2026-10-18-course-catalog.md`, Task 2 |
 
 #### `services`
 
@@ -405,3 +406,98 @@ erDiagram
 | `ix_content_posts_author_id_updated_at_id` | INDEX | `(author_id, updated_at, id)` | The editor's own list (`ORDER BY updated_at DESC, id DESC`) and the FK |
 
 **Not in this table (deferred decisions):** cover/OG images, categories, tags, archive, scheduled publishing, slug redirects, deletion mechanism, preview links (spec §9).
+
+#### `courses`, `course_sections`, `course_lessons`
+
+Self-paced video courses (course platform design spec, `docs/superpowers/specs/2026-10-17-course-platform-design.md` §4). One module (`courses`) owns all three, so both foreign keys stay inside it; there's no cross-module FK in this outcome. An admin authors a course as ordered sections holding ordered lessons; each lesson points to a Vimeo video. Access grants (outcome 2) and progress (outcome 3) arrive with their own outcomes.
+
+```mermaid
+erDiagram
+    courses ||--o{ course_sections : "contains"
+    course_sections ||--o{ course_lessons : "contains"
+    courses {
+        uuid id PK "pk_courses · DEFAULT uuidv7()"
+        varchar_160 slug UK "uq_courses_slug · CK ck_courses_slug_format"
+        varchar_200 title "required · CK ck_courses_title_not_blank"
+        varchar_500 summary "required · CK ck_courses_summary_not_blank"
+        varchar_16 status "required · DEFAULT 'draft' · CK ck_courses_status"
+        timestamptz published_at "nullable · CK ck_courses_published_has_date"
+        timestamptz created_at "required · DEFAULT now()"
+        timestamptz updated_at "required · DEFAULT now()"
+    }
+    course_sections {
+        uuid id PK "pk_course_sections · DEFAULT uuidv7()"
+        uuid course_id FK "fk_course_sections_course_id → courses · ON DELETE RESTRICT"
+        varchar_200 title "required · CK ck_course_sections_title_not_blank"
+        integer position "required · UQ (course_id, position) DEFERRABLE"
+        timestamptz created_at "required · DEFAULT now()"
+        timestamptz updated_at "required · DEFAULT now()"
+    }
+    course_lessons {
+        uuid id PK "pk_course_lessons · DEFAULT uuidv7()"
+        uuid section_id FK "fk_course_lessons_section_id → course_sections · ON DELETE RESTRICT"
+        varchar_200 title "required · CK ck_course_lessons_title_not_blank"
+        integer position "required · UQ (section_id, position) DEFERRABLE"
+        varchar_16 status "required · DEFAULT 'draft' · CK ck_course_lessons_status"
+        varchar_20 vimeo_video_id "nullable · CK digits"
+        varchar_64 vimeo_hash "nullable · CK alphanumeric · needs a video id"
+        integer duration_seconds "nullable · CK > 0"
+        timestamptz created_at "required · DEFAULT now()"
+        timestamptz updated_at "required · DEFAULT now()"
+    }
+```
+
+**`courses`**
+
+| Column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_courses` | D26. Grants (outcome 2) reference it |
+| `slug` | `varchar(160)` | yes | — | **UQ** `uq_courses_slug`; **CK** `ck_courses_slug_format`: `slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'` | The public URL key, lowercase kebab-case (D30). Locked once the course was ever published (spec §10.1, enforced by the courses service). Its violation becomes `409 COURSE_SLUG_TAKEN` |
+| `title` | `varchar(200)` | yes | — | **CK** `ck_courses_title_not_blank`: `btrim(title) <> ''` | The course name. The API trims input and rejects blank values first (400); the CHECK is the backstop |
+| `summary` | `varchar(500)` | yes | — | **CK** `ck_courses_summary_not_blank`: `btrim(summary) <> ''` | The catalog card text |
+| `status` | `varchar(16)` | yes | `'draft'` | **CK** `ck_courses_status`: `status IN ('draft','published')` | Only published courses are public. "Published" means visible, not for sale (spec §10.5). A published course always has ≥ 1 published lesson: no single-row constraint can say that, so the course lock rule L1 holds it (AD15) |
+| `published_at` | `timestamptz` | no | — | **CK** `ck_courses_published_has_date`: `status <> 'published' OR published_at IS NOT NULL` | The first-publication instant, kept across unpublish/republish (as posts, B16) |
+| `created_at` | `timestamptz` | yes | `now()` | — | D27 |
+| `updated_at` | `timestamptz` | yes | `now()` | — | D27; `@UpdateDateColumn`. Orders the admin list. Idempotent publish/unpublish don't write |
+
+**`course_sections`**
+
+| Column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_course_sections` | D26 |
+| `course_id` | `uuid` | yes | — | **FK** `fk_course_sections_course_id` → `courses(id)` `ON DELETE RESTRICT` | **Immutable**: no endpoint moves a section to another course, so a lesson's course is always its section's. There's no course deletion in V1; `RESTRICT` makes an accidental one fail |
+| `title` | `varchar(200)` | yes | — | **CK** `ck_course_sections_title_not_blank`: `btrim(title) <> ''` | — |
+| `position` | `integer` | yes | — | **CK** `ck_course_sections_position_not_negative`: `position >= 0`; part of `uq_course_sections_course_id_position` | Curriculum order within the course, `0..n-1` |
+| `created_at` | `timestamptz` | yes | `now()` | — | D27 |
+| `updated_at` | `timestamptz` | yes | `now()` | — | D27 |
+
+Sections have **no status**: a section is shown publicly only while it holds a published lesson.
+
+**`course_lessons`**
+
+| Column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_course_lessons` | The stable identity progress (outcome 3) points to. Reorders and moves never change it |
+| `section_id` | `uuid` | yes | — | **FK** `fk_course_lessons_section_id` → `course_sections(id)` `ON DELETE RESTRICT` | Changes only to another section of the **same** course (curriculum order, under the course lock). `RESTRICT` backs the "only empty sections are deleted" rule |
+| `title` | `varchar(200)` | yes | — | **CK** `ck_course_lessons_title_not_blank`: `btrim(title) <> ''` | — |
+| `position` | `integer` | yes | — | **CK** `ck_course_lessons_position_not_negative`: `position >= 0`; part of `uq_course_lessons_section_id_position` | Order within the section, `0..n-1` |
+| `status` | `varchar(16)` | yes | `'draft'` | **CK** `ck_course_lessons_status`: `status IN ('draft','published')` | Draft lessons are invisible outside admin routes |
+| `vimeo_video_id` | `varchar(20)` | no | — | **CK** `ck_course_lessons_vimeo_video_id_format`: `vimeo_video_id ~ '^[0-9]{1,20}$'` | The Vimeo video id (spec §8.2). **Never in a public response, never logged** |
+| `vimeo_hash` | `varchar(64)` | no | — | **CK** `ck_course_lessons_vimeo_hash_format`: `vimeo_hash ~ '^[A-Za-z0-9]{1,64}$'`; **CK** `ck_course_lessons_hash_needs_video`: `vimeo_hash IS NULL OR vimeo_video_id IS NOT NULL` | The optional privacy hash (`h`), treated like the id |
+| `duration_seconds` | `integer` | no | — | **CK** `ck_course_lessons_duration_positive`: `duration_seconds > 0` | Admin-entered and optional (spec §8.3); shown in the outline. The API caps it at 86 400 |
+| `created_at` | `timestamptz` | yes | `now()` | — | D27 |
+| `updated_at` | `timestamptz` | yes | `now()` | — | D27 |
+
+**Table-level constraints and indexes:**
+
+| Name | Kind | Definition | Note |
+|---|---|---|---|
+| `uq_courses_slug` | UNIQUE | `(slug)` | One course per URL; the public lookup |
+| `uq_course_sections_course_id_position` | UNIQUE **DEFERRABLE INITIALLY DEFERRED** | `(course_id, position)` | Positions are unique per course, checked **at commit**, so a reorder is a run of plain updates in one transaction (spike S7). Its leading `course_id` is also the FK index |
+| `uq_course_lessons_section_id_position` | UNIQUE **DEFERRABLE INITIALLY DEFERRED** | `(section_id, position)` | Same for lessons within a section; also the FK index |
+| `ck_course_lessons_published_has_video` | CHECK | `status <> 'published' OR vimeo_video_id IS NOT NULL` | A published lesson always has a video (P2). The service refuses first with `409 LESSON_VIDEO_MISSING` |
+| _(no other index)_ | — | — | The public list (`WHERE status = 'published' ORDER BY published_at DESC, id DESC`) runs over a handful of rows, as with services. Add an index only when `EXPLAIN` on real data says so |
+
+**TypeORM caveat:** `migration:generate` compares unique constraints **by name only** and doesn't read `condeferrable`. A later change of deferrability on either position unique is invisible to generate and needs a hand-written migration.
+
+**Not in these tables:** price, availability or a "for sale" flag (orders slice, spec §10.5); a language column (additive later); access grants (`course_access_grants`, outcome 2) and progress (`lesson_progress`, outcome 3).
