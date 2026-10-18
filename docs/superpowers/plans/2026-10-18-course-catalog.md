@@ -49,6 +49,7 @@
 - **Validation and normalization:**
   - Slugs: `^[a-z0-9]+(-[a-z0-9]+)*$`, ≤ 160, never lowercased for the client (D30: reject, don't normalize).
   - Titles (course, section, lesson): `.trim().min(1).max(200)`; summary `.trim().min(1).max(500)`; both must pass `isStorableText`. The limits match the `varchar` sizes, so an over-long value is 400 `TOO_LONG`, never a Postgres `22001` (500).
+  - Whitespace-only titles and summaries: `.trim()` (the posts precedent, no new rule) makes them empty, so they fail `min(1)` with 400 `TOO_SHORT`. JavaScript's `trim` removes every Unicode whitespace character, while the `ck_*_not_blank` checks (`btrim`) remove only spaces, so any value the request accepts also satisfies the database check. Tests: Task 4 schema unit tests (`"   "`, `"\t\n"`, `" 　"`) and Task 8 schema tests (a spaces-only value hits each `ck_*_not_blank`).
   - Field-error messages on the wire are the fixed per-code texts from `src/http/to-field-errors.ts` (e.g. `INVALID` → "This value is invalid."). Custom Zod messages are internal only, and exact-body tests expect the fixed text.
   - `videoId` `^[0-9]{1,20}$`; `privacyHash` `^[A-Za-z0-9]{1,64}$` and only together with `videoId`; `durationSeconds` an integer 1–86 400.
 - **Pagination:** none on course lists (spec §21, services precedent). State this DEFAULT deviation in the PR Notes.
@@ -57,8 +58,8 @@
   - `yarn test:e2e`, and any e2e file that calls `resetDatabase` or writes rows;
   - anything that writes to `xuan_dev`.
 
-  Allowed without approval:
-  - `migration:generate` (reads the schema only);
+  Allowed under the delegation (`development-workflow.md` §3.2 right column, §3.5 course row), because they change no database state:
+  - `migration:generate`: it reads the configured database's schema (`xuan_dev` by default) and writes a migration **source file**; it applies nothing to any database (TypeORM runs the schema diff in SQL-memory mode). The owner still reviews the SQL at Checkpoint A;
   - lint, typecheck, unit tests, build;
   - the non-writing e2e file `test/openapi.e2e-spec.ts`, after `NODE_ENV=test yarn test:db-guard`.
 - Never delete branches; no force-push; the PR targets `dev`; the merge waits for Task 11.
@@ -185,7 +186,7 @@ Write it in the existing §12 style: a Mermaid block, then a per-table column ta
   - Every constraint and the PK are named in decorators: `primaryKeyConstraintName`, `@Unique(name, cols, { deferrable: 'INITIALLY DEFERRED' })`, `@Check(name, expr)`.
   - In-module FKs: `@ForeignKey(() => Course, { name: 'fk_course_sections_course_id', onDelete: 'RESTRICT' })` and `@ForeignKey(() => CourseSection, { name: 'fk_course_lessons_section_id', onDelete: 'RESTRICT' })`. Use FK metadata with **no relation properties**: queries join explicitly (D37, D38).
 - [ ] **Step 2: Register the entities** in a minimal `CoursesModule` (`TypeOrmModule.forFeature([Course, CourseSection, CourseLesson])`, no controllers yet) and in `AppModule`.
-- [ ] **Step 3: Generate (reads `xuan_dev`'s schema; no writes).** Run `yarn migration:generate src/database/migrations/CreateCourseCatalog`. Expected: one new file.
+- [ ] **Step 3: Generate.** Run `yarn migration:generate src/database/migrations/CreateCourseCatalog`. It compares the entities with `xuan_dev`'s current schema and writes the difference as a new migration source file; it doesn't apply the migration or write to the database. Expected: one new file.
 - [ ] **Step 4: Read the SQL against the Task 2 map. Spike S7 check:**
   - every name above, with no `PK_`/`UQ_`/`FK_` hashes;
   - `TIMESTAMP WITH TIME ZONE`, `DEFAULT uuidv7()`;
@@ -244,7 +245,8 @@ Write it in the existing §12 style: a Mermaid block, then a per-table column ta
 - [ ] **Step 2:** Run `npx vitest run src/modules/courses/curriculum-order.spec.ts`. Expected: FAIL (module missing).
 - [ ] **Step 3: Implement `isCompleteCurriculumOrder`.** Approach: build sets, reject on any duplicate, then require set equality for sections and lessons.
 - [ ] **Step 4:** Run the spec. Expected: PASS.
-- [ ] **Step 5: Write the schemas, errors, tree types, DTO classes and mappers.**
+- [ ] **Step 4b: Write `dto/save-course.dto.spec.ts`** (unit, through `toFieldErrors`): whitespace-only `title`/`summary` (`"   "`, `"\t\n"`, `" 　"`) and whitespace-only section and lesson titles → `TOO_SHORT` at that field; surrounding spaces are trimmed on success; `privacyHash` without `videoId` → `INVALID` at `privacyHash`; omitted optionals → `null`. Run it: FAIL (module missing).
+- [ ] **Step 5: Write the schemas, errors, tree types, DTO classes and mappers.** Re-run the Step 4b spec: PASS.
   - Each DTO property gets `@ApiProperty` with `format: 'uuid'`/`'date-time'` and `nullable` where the type allows `null` (D17).
   - Lists use `type: [X]`.
 - [ ] **Step 6:** Run `yarn typecheck && yarn lint`. Expected: clean.
@@ -382,6 +384,7 @@ Write it in the existing §12 style: a Mermaid block, then a per-table column ta
 
 - [ ] **Step 1: Schema tests,** in the `content-posts-schema.e2e-spec.ts` style (raw SQL, `constraintOf`). Each statement must fail on exactly:
   - `uq_courses_slug`, `ck_courses_slug_format`, `ck_courses_published_has_date`;
+  - `ck_courses_title_not_blank`, `ck_courses_summary_not_blank`, `ck_course_sections_title_not_blank`, `ck_course_lessons_title_not_blank` (a spaces-only value);
   - `ck_course_lessons_published_has_video`, `ck_course_lessons_hash_needs_video`, `ck_course_lessons_vimeo_video_id_format`, `ck_course_lessons_duration_positive`;
   - `fk_course_lessons_section_id` (delete a section with a lesson);
   - `uq_course_lessons_section_id_position` **at COMMIT**: a transaction inserting two lessons with the same position fails on commit, not on insert. This is the runtime proof of S7.
