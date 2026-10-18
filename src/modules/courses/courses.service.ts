@@ -9,9 +9,22 @@ import { CourseSection } from './course-section.entity.js';
 import type { AdminCourseListItem, CourseTree } from './course-tree.js';
 import { Course } from './course.entity.js';
 import { coursesErrors } from './courses.errors.js';
-import { COURSE_SLUG_PATTERN, type SaveCourseInput } from './dto/save-course.dto.js';
+import { isCompleteCurriculumOrder } from './curriculum-order.js';
+import {
+  COURSE_SLUG_PATTERN,
+  type CurriculumOrderInput,
+  type SaveCourseInput,
+  type SaveCourseLessonInput,
+  type SaveCourseSectionInput,
+} from './dto/save-course.dto.js';
 
 type TreeScope = 'all' | 'published';
+
+/** Fixed identifiers only: never built from input. */
+const POSITION_LEVELS = {
+  sections: { table: 'course_sections', parent: 'course_id' },
+  lessons: { table: 'course_lessons', parent: 'section_id' },
+} as const;
 
 /** Course catalog, curriculum and publication use cases (course spec §10, §11.1, §11.3). */
 @Injectable()
@@ -125,6 +138,158 @@ export class CoursesService {
     return this.getForAdmin(courseId);
   }
 
+  async addSection(courseId: string, input: SaveCourseSectionInput): Promise<CourseTree> {
+    await this.withCourseLock(courseId, async (manager) => {
+      await manager.insert(CourseSection, {
+        courseId,
+        title: input.title,
+        position: await this.nextPosition(manager, 'sections', courseId),
+      });
+    });
+    return this.getForAdmin(courseId);
+  }
+
+  async renameSection(sectionId: string, input: SaveCourseSectionInput): Promise<CourseTree> {
+    const courseId = await this.courseIdOfSection(sectionId);
+    await this.withCourseLock(courseId, async (manager) => {
+      await this.lockedSection(manager, courseId, sectionId);
+      await manager.update(CourseSection, { id: sectionId }, { title: input.title });
+    });
+    return this.getForAdmin(courseId);
+  }
+
+  async deleteSection(sectionId: string): Promise<void> {
+    const courseId = await this.courseIdOfSection(sectionId);
+    await this.withCourseLock(courseId, async (manager) => {
+      const section = await this.lockedSection(manager, courseId, sectionId);
+      // fk_course_lessons_section_id (RESTRICT) is the backstop; this check gives the meaningful 409.
+      if ((await manager.countBy(CourseLesson, { sectionId })) > 0) {
+        throw new AppError(coursesErrors.SECTION_NOT_EMPTY);
+      }
+      await manager.delete(CourseSection, { id: sectionId });
+      await this.closeGap(manager, 'sections', courseId, section.position);
+    });
+  }
+
+  async addLesson(sectionId: string, input: SaveCourseLessonInput): Promise<CourseTree> {
+    const courseId = await this.courseIdOfSection(sectionId);
+    await this.withCourseLock(courseId, async (manager) => {
+      await this.lockedSection(manager, courseId, sectionId);
+      await manager.insert(CourseLesson, {
+        sectionId,
+        title: input.title,
+        position: await this.nextPosition(manager, 'lessons', sectionId),
+        vimeoVideoId: input.videoId,
+        vimeoHash: input.privacyHash,
+        durationSeconds: input.durationSeconds,
+      });
+    });
+    return this.getForAdmin(courseId);
+  }
+
+  /** Full replacement of the title and Vimeo reference; references stay editable when published (spec §8.2). */
+  async updateLesson(lessonId: string, input: SaveCourseLessonInput): Promise<CourseTree> {
+    const courseId = await this.courseIdOfLesson(lessonId);
+    await this.withCourseLock(courseId, async (manager) => {
+      const lesson = await this.lockedLesson(manager, courseId, lessonId);
+      // P2 (ck_course_lessons_published_has_video is the backstop).
+      if (lesson.status === 'published' && input.videoId === null) {
+        throw new AppError(coursesErrors.LESSON_VIDEO_MISSING);
+      }
+      await manager.update(
+        CourseLesson,
+        { id: lessonId },
+        {
+          title: input.title,
+          vimeoVideoId: input.videoId,
+          vimeoHash: input.privacyHash,
+          durationSeconds: input.durationSeconds,
+        },
+      );
+    });
+    return this.getForAdmin(courseId);
+  }
+
+  async publishLesson(lessonId: string): Promise<CourseTree> {
+    const courseId = await this.courseIdOfLesson(lessonId);
+    await this.withCourseLock(courseId, async (manager) => {
+      const lesson = await this.lockedLesson(manager, courseId, lessonId);
+      if (lesson.status === 'published') return; // idempotent: no write
+      if (lesson.vimeoVideoId === null) throw new AppError(coursesErrors.LESSON_VIDEO_MISSING);
+      await manager.update(CourseLesson, { id: lessonId }, { status: 'published' });
+    });
+    return this.getForAdmin(courseId);
+  }
+
+  async unpublishLesson(lessonId: string): Promise<CourseTree> {
+    const courseId = await this.courseIdOfLesson(lessonId);
+    await this.withCourseLock(courseId, async (manager, course) => {
+      const lesson = await this.lockedLesson(manager, courseId, lessonId);
+      if (lesson.status === 'draft') return; // idempotent: no write
+      // P1: the only operation that lowers the published-lesson count, counted under the lock (spec §10.6).
+      if (
+        course.status === 'published' &&
+        (await this.countPublishedLessons(manager, courseId)) <= 1
+      ) {
+        throw new AppError(coursesErrors.COURSE_NEEDS_PUBLISHED_LESSON);
+      }
+      await manager.update(CourseLesson, { id: lessonId }, { status: 'draft' });
+    });
+    return this.getForAdmin(courseId);
+  }
+
+  async deleteLesson(lessonId: string): Promise<void> {
+    const courseId = await this.courseIdOfLesson(lessonId);
+    await this.withCourseLock(courseId, async (manager) => {
+      const lesson = await this.lockedLesson(manager, courseId, lessonId);
+      if (lesson.status === 'published') throw new AppError(coursesErrors.LESSON_IS_PUBLISHED);
+      await manager.delete(CourseLesson, { id: lessonId });
+      await this.closeGap(manager, 'lessons', lesson.sectionId, lesson.position);
+    });
+  }
+
+  /**
+   * Applies a complete order (course spec §10.3): section positions, then each lesson's section and position.
+   * The position uniques are checked at commit (S7), so the plain updates in between may collide. Only rows
+   * that actually change are written; lesson ids never change.
+   */
+  async reorder(courseId: string, input: CurriculumOrderInput): Promise<CourseTree> {
+    await this.withCourseLock(courseId, async (manager) => {
+      const sections = await manager.findBy(CourseSection, { courseId });
+      const lessons =
+        sections.length === 0
+          ? []
+          : await manager.findBy(CourseLesson, {
+              sectionId: In(sections.map((section) => section.id)),
+            });
+      const current = {
+        sectionIds: sections.map((section) => section.id),
+        lessonIds: lessons.map((lesson) => lesson.id),
+      };
+      if (!isCompleteCurriculumOrder(current, input)) {
+        throw new AppError(coursesErrors.CURRICULUM_ORDER_MISMATCH);
+      }
+      const sectionsById = new Map(sections.map((section) => [section.id, section]));
+      const lessonsById = new Map(lessons.map((lesson) => [lesson.id, lesson]));
+      for (const [position, entry] of input.sections.entries()) {
+        if (sectionsById.get(entry.id)?.position !== position) {
+          await manager.update(CourseSection, { id: entry.id }, { position });
+        }
+        for (const [lessonPosition, lessonId] of entry.lessonIds.entries()) {
+          const lesson = lessonsById.get(lessonId);
+          if (lesson?.sectionId !== entry.id || lesson.position !== lessonPosition) {
+            await manager.update(
+              CourseLesson,
+              { id: lessonId },
+              { sectionId: entry.id, position: lessonPosition },
+            );
+          }
+        }
+      }
+    });
+    return this.getForAdmin(courseId);
+  }
+
   /**
    * Lock rule L1 (AD15, course spec §10.6): one transaction whose first statement locks the course row
    * `FOR NO KEY UPDATE`; it serializes every curriculum change of that course without blocking FK `KEY SHARE`
@@ -142,6 +307,81 @@ export class CoursesService {
       if (!course) throw new AppError(baselineErrors.NOT_FOUND);
       return work(manager, course);
     });
+  }
+
+  /** Plain read before the lock: `course_id` never changes, so the id stays valid (spec §10.6). */
+  private async courseIdOfSection(sectionId: string): Promise<string> {
+    const section = await this.dataSource.manager.findOneBy(CourseSection, { id: sectionId });
+    if (!section) throw new AppError(baselineErrors.NOT_FOUND);
+    return section.courseId;
+  }
+
+  /** Lessons move only within their course, so the course id read here stays valid under the lock. */
+  private async courseIdOfLesson(lessonId: string): Promise<string> {
+    const row = await this.dataSource.manager
+      .createQueryBuilder(CourseLesson, 'l')
+      .innerJoin(CourseSection, 's', 's.id = l.section_id')
+      .select('s.course_id', 'courseId')
+      .where('l.id = :lessonId', { lessonId })
+      .getRawOne<{ courseId: string }>();
+    if (!row) throw new AppError(baselineErrors.NOT_FOUND);
+    return row.courseId;
+  }
+
+  /** Re-read under the lock: a concurrent delete gives 404. */
+  private async lockedSection(
+    manager: EntityManager,
+    courseId: string,
+    sectionId: string,
+  ): Promise<CourseSection> {
+    const section = await manager.findOneBy(CourseSection, { id: sectionId, courseId });
+    if (!section) throw new AppError(baselineErrors.NOT_FOUND);
+    return section;
+  }
+
+  /** Re-read under the lock, joined to the locked course: a concurrent delete gives 404. */
+  private async lockedLesson(
+    manager: EntityManager,
+    courseId: string,
+    lessonId: string,
+  ): Promise<CourseLesson> {
+    const lesson = await manager
+      .createQueryBuilder(CourseLesson, 'l')
+      .innerJoin(CourseSection, 's', 's.id = l.section_id')
+      .where('l.id = :lessonId', { lessonId })
+      .andWhere('s.course_id = :courseId', { courseId })
+      .getOne();
+    if (!lesson) throw new AppError(baselineErrors.NOT_FOUND);
+    return lesson;
+  }
+
+  /** New sections and lessons append at the end of their parent (spec §10.3). */
+  private async nextPosition(
+    manager: EntityManager,
+    level: 'sections' | 'lessons',
+    parentId: string,
+  ): Promise<number> {
+    const { table, parent } = POSITION_LEVELS[level];
+    const [row] = await manager.query<{ next: number }[]>(
+      `SELECT COALESCE(MAX("position"), -1) + 1 AS "next" FROM "${table}" WHERE "${parent}" = $1`,
+      [parentId],
+    );
+    return row.next;
+  }
+
+  /** Keeps positions `0..n-1` after a delete (database.md §12). */
+  private async closeGap(
+    manager: EntityManager,
+    level: 'sections' | 'lessons',
+    parentId: string,
+    position: number,
+  ): Promise<void> {
+    const { table, parent } = POSITION_LEVELS[level];
+    await manager.query(
+      `UPDATE "${table}" SET "position" = "position" - 1, "updated_at" = now()
+       WHERE "${parent}" = $1 AND "position" > $2`,
+      [parentId, position],
+    );
   }
 
   private async countPublishedLessons(manager: EntityManager, courseId: string): Promise<number> {
