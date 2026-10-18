@@ -163,6 +163,8 @@ describe('OpenAPI document', () => {
       'post /auth/logout',
       'get /posts',
       'get /posts/{slug}',
+      'get /courses',
+      'get /courses/{slug}',
     ]);
     const methods = ['get', 'post', 'put', 'patch', 'delete'] as const;
     const missing: string[] = [];
