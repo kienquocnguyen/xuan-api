@@ -163,6 +163,8 @@ describe('OpenAPI document', () => {
       'post /auth/logout',
       'get /posts',
       'get /posts/{slug}',
+      'get /courses',
+      'get /courses/{slug}',
     ]);
     const methods = ['get', 'post', 'put', 'patch', 'delete'] as const;
     const missing: string[] = [];
@@ -257,5 +259,210 @@ describe('OpenAPI document', () => {
     expect(codes('/admin/posts/{id}/publish', 'post')).toContain('POST_BODY_EMPTY');
     expect(codes('/admin/posts/{id}/unpublish', 'post')).not.toContain('POST_BODY_EMPTY');
     expect(codes('/posts/{slug}', 'get')).toContain('NOT_FOUND');
+  });
+
+  describe('course catalog contract (course spec §11)', () => {
+    const PUBLIC_COURSE_DTOS = [
+      'CourseSummaryDto',
+      'CourseDto',
+      'CourseOutlineSectionDto',
+      'CourseOutlineLessonDto',
+    ];
+    const schemaOf = (name: string) =>
+      createOpenApiDocument(app).components?.schemas?.[name] as
+        { properties?: Record<string, Record<string, unknown>>; required?: string[] } | undefined;
+    const propsOf = (name: string) => Object.keys(schemaOf(name)?.properties ?? {}).sort();
+
+    it('names every course request and response component (I19)', () => {
+      const schemas = createOpenApiDocument(app).components?.schemas ?? {};
+      expect(Object.keys(schemas)).toEqual(
+        expect.arrayContaining([
+          ...PUBLIC_COURSE_DTOS,
+          'AdminCourseSummaryDto',
+          'AdminCourseDto',
+          'AdminCourseSectionDto',
+          'AdminCourseLessonDto',
+          'SaveCourseDto',
+          'SaveCourseSectionDto',
+          'SaveCourseLessonDto',
+          'CurriculumOrderDto',
+          'CourseIdParam',
+          'CourseSectionIdParam',
+          'CourseLessonIdParam',
+        ]),
+      );
+    });
+
+    it('documents the DTO fields exactly', () => {
+      expect(propsOf('CourseSummaryDto')).toEqual([
+        'id',
+        'publishedAt',
+        'slug',
+        'summary',
+        'title',
+      ]);
+      expect(propsOf('CourseDto')).toEqual([
+        'id',
+        'publishedAt',
+        'sections',
+        'slug',
+        'summary',
+        'title',
+      ]);
+      expect(propsOf('CourseOutlineSectionDto')).toEqual(['id', 'lessons', 'title']);
+      expect(propsOf('CourseOutlineLessonDto')).toEqual(['durationSeconds', 'id', 'title']);
+      expect(propsOf('AdminCourseSummaryDto')).toEqual([
+        'id',
+        'lessonCount',
+        'publishedAt',
+        'publishedLessonCount',
+        'slug',
+        'status',
+        'summary',
+        'title',
+        'updatedAt',
+      ]);
+      expect(propsOf('AdminCourseDto')).toEqual(
+        [...propsOf('AdminCourseSummaryDto'), 'createdAt', 'sections'].sort(),
+      );
+      expect(propsOf('AdminCourseSectionDto')).toEqual(['id', 'lessons', 'position', 'title']);
+      expect(propsOf('AdminCourseLessonDto')).toEqual([
+        'durationSeconds',
+        'id',
+        'position',
+        'privacyHash',
+        'status',
+        'title',
+        'updatedAt',
+        'videoId',
+      ]);
+    });
+
+    it('puts no video field on any public component (spec §7, §14)', () => {
+      for (const name of PUBLIC_COURSE_DTOS) {
+        expect({ name, props: propsOf(name).filter((p) => /video|vimeo|hash/i.test(p)) }).toEqual({
+          name,
+          props: [],
+        });
+      }
+    });
+
+    it('documents SaveCourseLessonDto as the validation behaves: optional, never null', () => {
+      const lesson = schemaOf('SaveCourseLessonDto');
+      expect(lesson?.required).toEqual(['title']);
+      for (const field of ['videoId', 'privacyHash', 'durationSeconds']) {
+        const schema = JSON.stringify(lesson?.properties?.[field]);
+        expect(schema).not.toContain('nullable');
+        expect(schema).not.toContain('"null"');
+      }
+      expect(lesson?.properties?.durationSeconds).toMatchObject({
+        type: 'integer',
+        minimum: 1,
+        maximum: 86400,
+      });
+    });
+
+    it('documents exactly the codes each course route can return (I18)', () => {
+      const doc = createOpenApiDocument(app);
+      const codes = (path: string, method: 'get' | 'put' | 'post' | 'delete') =>
+        Object.entries(doc.paths[path]?.[method]?.responses ?? {})
+          .filter(([status]) => Number(status) >= 400)
+          .flatMap(([, response]) =>
+            String((response as { description?: string }).description).split(' | '),
+          )
+          .sort();
+      const input = [
+        'FORBIDDEN',
+        'INTERNAL_ERROR',
+        'PAYLOAD_TOO_LARGE',
+        'UNAUTHENTICATED',
+        'VALIDATION_FAILED',
+      ];
+      const expected: Array<[string, 'get' | 'put' | 'post' | 'delete', string[]]> = [
+        ['/courses', 'get', ['INTERNAL_ERROR']],
+        ['/courses/{slug}', 'get', ['INTERNAL_ERROR', 'NOT_FOUND']],
+        ['/admin/courses', 'get', ['FORBIDDEN', 'INTERNAL_ERROR', 'UNAUTHENTICATED']],
+        ['/admin/courses', 'post', [...input, 'COURSE_SLUG_TAKEN']],
+        ['/admin/courses/{courseId}', 'get', [...input, 'NOT_FOUND']],
+        [
+          '/admin/courses/{courseId}',
+          'put',
+          [...input, 'NOT_FOUND', 'COURSE_SLUG_TAKEN', 'COURSE_SLUG_LOCKED'],
+        ],
+        [
+          '/admin/courses/{courseId}/publish',
+          'post',
+          [...input, 'NOT_FOUND', 'COURSE_NEEDS_PUBLISHED_LESSON'],
+        ],
+        ['/admin/courses/{courseId}/unpublish', 'post', [...input, 'NOT_FOUND']],
+        ['/admin/courses/{courseId}/sections', 'post', [...input, 'NOT_FOUND']],
+        ['/admin/course-sections/{sectionId}', 'put', [...input, 'NOT_FOUND']],
+        [
+          '/admin/course-sections/{sectionId}',
+          'delete',
+          [...input, 'NOT_FOUND', 'SECTION_NOT_EMPTY'],
+        ],
+        [
+          '/admin/courses/{courseId}/curriculum-order',
+          'put',
+          [...input, 'NOT_FOUND', 'CURRICULUM_ORDER_MISMATCH'],
+        ],
+        ['/admin/course-sections/{sectionId}/lessons', 'post', [...input, 'NOT_FOUND']],
+        [
+          '/admin/course-lessons/{lessonId}',
+          'put',
+          [...input, 'NOT_FOUND', 'LESSON_VIDEO_MISSING'],
+        ],
+        [
+          '/admin/course-lessons/{lessonId}/publish',
+          'post',
+          [...input, 'NOT_FOUND', 'LESSON_VIDEO_MISSING'],
+        ],
+        [
+          '/admin/course-lessons/{lessonId}/unpublish',
+          'post',
+          [...input, 'NOT_FOUND', 'COURSE_NEEDS_PUBLISHED_LESSON'],
+        ],
+        [
+          '/admin/course-lessons/{lessonId}',
+          'delete',
+          [...input, 'NOT_FOUND', 'LESSON_IS_PUBLISHED'],
+        ],
+      ];
+      for (const [path, method, routeCodes] of expected) {
+        expect({ route: `${method} ${path}`, codes: codes(path, method) }).toEqual({
+          route: `${method} ${path}`,
+          codes: [...routeCodes].sort(),
+        });
+      }
+      expect(codes('/admin/course-lessons/{lessonId}', 'delete')).not.toContain(
+        'LESSON_HAS_PROGRESS',
+      );
+    });
+
+    it('documents the path ids as uuids, the 204 deletes and the order body', () => {
+      const doc = createOpenApiDocument(app);
+      type Parameter = { name: string; in: string; schema?: { format?: string } };
+      const params = (path: string, method: 'put' | 'delete') =>
+        (doc.paths[path]?.[method]?.parameters ?? []) as Parameter[];
+      const uuidPath = (name: string) =>
+        expect.objectContaining({
+          name,
+          in: 'path',
+          schema: expect.objectContaining({ format: 'uuid' }),
+        });
+      expect(params('/admin/courses/{courseId}', 'put')).toEqual([uuidPath('courseId')]);
+      expect(params('/admin/course-sections/{sectionId}', 'put')).toEqual([uuidPath('sectionId')]);
+      expect(params('/admin/course-lessons/{lessonId}', 'delete')).toEqual([uuidPath('lessonId')]);
+      for (const path of [
+        '/admin/course-sections/{sectionId}',
+        '/admin/course-lessons/{lessonId}',
+      ]) {
+        expect(Object.keys(doc.paths[path]?.delete?.responses ?? {})).toContain('204');
+      }
+      expect(
+        JSON.stringify(doc.paths['/admin/courses/{courseId}/curriculum-order']?.put?.requestBody),
+      ).toContain('#/components/schemas/CurriculumOrderDto');
+    });
   });
 });

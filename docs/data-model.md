@@ -37,8 +37,8 @@ erDiagram
     SERVICE_APPLICATION ||--o| APPOINTMENT : "creates, once accepted"
     USER ||--o{ ENROLLMENT : "registers"
     COURSE ||--o{ ENROLLMENT : "receives"
-    COURSE ||--o{ COURSE_SECTION : "contains (likely: depends on course format)"
-    COURSE_SECTION ||--o{ LESSON : "contains (likely)"
+    COURSE ||--o{ COURSE_SECTION : "contains"
+    COURSE_SECTION ||--o{ LESSON : "contains (ordered)"
     USER ||--o{ ORDER : "places (deferred)"
     ORDER ||--o{ ENTITLEMENT : "grants (deferred)"
     ENTITLEMENT }o--|| COURSE : "gives access to (deferred; may merge with ENROLLMENT)"
@@ -61,8 +61,8 @@ erDiagram
 | **Service offering** | An offer Xuân provides publicly, as shown on Work With Me and the homepage "Ways". Current examples: *Channel Kickstart Session* (a 90-minute 1:1 session) and *3-Month 1:1 Coaching* (a 12-week program). **A catalog entry, not an appointment** (§3.1) | CONFIRMED. **The first slice:** a public, read-only catalog | is applied for through service applications | `services` (first slice) |
 | **Service application** | A person asking to work with Xuân on a specific offering. Reviewed before Xuân accepts the client (§3.1) | CONFIRMED future concept. **Persistence DEFERRED** to the application/booking slice | service offering; optionally a user; zero or one appointment (0..1) | — |
 | **Appointment** | An actual, scheduled meeting, created only from an accepted application (§3.1) | CONFIRMED future concept. **Persistence and calendar integration DEFERRED** to the application/booking slice | service application | — |
-| **Course** | A structured learning product a user can register for | CONFIRMED | receives enrollments; contains sections (likely) | — |
-| **Course section / lesson** | The ordered parts of a course a learner works through | LIKELY: depends on the course format (self-paced vs live/cohort) | course | — |
+| **Course** | A structured learning product a user can register for | CONFIRMED | receives enrollments; contains sections | Designed 2026-10-17 (course platform spec): `courses` module |
+| **Course section / lesson** | The ordered parts of a course a learner works through: sections contain ordered lessons, and a lesson points to a Vimeo video | CONFIRMED | course | Designed 2026-10-17 (course platform spec): `courses` module |
 | **Enrollment** | A user's registration in a course | CONFIRMED | user; course | — |
 | **Content post** | An article/post published on the site. **Every post has an author user** | CONFIRMED. **V1 designed 2026-10-15** (blog design spec): text-first blog posts in Vietnamese (i18n-ready), a TipTap/ProseMirror JSON body (H2/H3, lists, quotes, bold, italic, links; no images yet), draft/published, SEO title/description; slug locked after first publication; publishing needs real content. Media, taxonomy, archive/scheduling, redirects, deletion mechanism and previews are deferred (§5) | author user | `content` (table `content_posts`) |
 | **Newsletter subscription** ("Creator Notes") | An email-only list membership that may exist without an account | **NEEDS PRODUCT CONFIRMATION**: design intent only. If confirmed, it's introduced explicitly as a newsletter/email-subscription capability, never as a generic "subscribers" | optionally a user | — |
@@ -147,7 +147,7 @@ Content therefore conceptually has an **author user**. The Nest mechanism (guard
 
 - **Final catalog content:** *settled 2026-10-14.* The seed (`src/modules/services/services.seed.ts`) holds the owner-approved slugs, titles and summaries for *Channel Kickstart Session* (`channel-kickstart`) and *3-Month 1:1 Coaching* (`3-month-1-1-coaching`). Still open: whether the UI needs structured display metadata (e.g. "90 minutes", "12 weeks") instead of copy in the summary.
 - **Application/booking details** (§3.1): the final form fields, where available slots come from and how they're held, email content, and whether and when payment is involved.
-- **Course format:** decides sections/lessons.
+- **Course format:** *settled 2026-10-17.* Self-paced video: a course holds ordered sections, each holding ordered lessons that point to Vimeo videos (course platform spec §4).
 - **Content publishing workflow** beyond the settled rule (editors publish and delete their own posts; admins any). V1 settled 2026-10-15: draft/published, `publishedAt` = first publication, slug locked after it, publishing needs real content (blog design spec B16–B19). **Still open:** images and media storage, cover/OG images, categories and tags, archive, scheduled publishing, slug redirects, the deletion mechanism (hard vs soft; the permission itself stays settled), draft preview links, public filtering/search, featured/reading time, multilingual UI and translation groups.
 - **Newsletter (Creator Notes):** real capability or not.
 - **Enrollment vs entitlement:** one concept or two (decided with orders).
