@@ -21,8 +21,14 @@ import { type SavePostInput, savePostSchema } from './dto/save-post.dto.js';
 import { type AuthoredPost, PostsService } from './posts.service.js';
 
 const { VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND } = baselineErrors;
-const { POST_SLUG_TAKEN, POST_SLUG_LOCKED, POST_BODY_EMPTY, POST_ARCHIVED, POST_WAS_PUBLISHED } =
-  contentErrors;
+const {
+  POST_SLUG_TAKEN,
+  POST_SLUG_LOCKED,
+  POST_BODY_EMPTY,
+  POST_ARCHIVED,
+  POST_WAS_PUBLISHED,
+  POST_FIELDS_OMITTED,
+} = contentErrors;
 
 type PostIdParam = z.infer<typeof postIdParamSchema>;
 const toDto = ({ post, author }: AuthoredPost) => toAdminPostDto(post, author);
@@ -84,6 +90,7 @@ export class AdminPostsController {
     POST_SLUG_TAKEN,
     POST_SLUG_LOCKED,
     POST_BODY_EMPTY,
+    POST_FIELDS_OMITTED,
   )
   async update(
     @CurrentUser() actor: AuthenticatedUser,

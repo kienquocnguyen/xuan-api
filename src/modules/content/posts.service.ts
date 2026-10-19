@@ -10,6 +10,7 @@ import { type PublicProfile, UserProfilesReader } from '../users/user-profiles.r
 import { canonicalizePostBody, hasMeaningfulText } from './body/post-body-content.js';
 import { contentErrors } from './content.errors.js';
 import { POST_SLUG_PATTERN, type SavePostInput } from './dto/save-post.dto.js';
+import { omittedFieldsWithData } from './post-compatibility.js';
 import { POST_LANGUAGE, Post, type PostStatus } from './post.entity.js';
 
 export type AuthoredPost = Readonly<{ post: Post; author: PublicProfile }>;
@@ -77,6 +78,7 @@ export class PostsService {
         body: canonicalizePostBody(input.body),
         seoTitle: input.seoTitle,
         seoDescription: input.seoDescription,
+        tags: input.tags ?? [],
       });
       id = (result.identifiers[0] as { id: string }).id;
     } catch (error) {
@@ -90,6 +92,9 @@ export class PostsService {
       // Row lock: a concurrent publish can't slip between these checks and the write (B17, B18).
       await this.dataSource.transaction(async (manager) => {
         const post = await this.lockManageable(manager, actor, id);
+        // Q3: an old client omits newer fields; never let its full replacement erase them (spec §3.4).
+        const fields = omittedFieldsWithData(input, post);
+        if (fields.length > 0) throw new AppError(contentErrors.POST_FIELDS_OMITTED, { fields });
         // B17: once ever published, the slug is the post's permanent URL.
         if (post.publishedAt !== null && input.slug !== post.slug) {
           throw new AppError(contentErrors.POST_SLUG_LOCKED);
@@ -108,6 +113,7 @@ export class PostsService {
             body: canonicalizePostBody(input.body),
             seoTitle: input.seoTitle,
             seoDescription: input.seoDescription,
+            tags: input.tags ?? [],
           },
         );
       });

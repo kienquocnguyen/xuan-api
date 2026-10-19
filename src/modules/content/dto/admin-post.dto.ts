@@ -19,6 +19,7 @@ export class AdminPostSummaryDto {
   @ApiProperty({ type: String, nullable: true, format: 'date-time' }) publishedAt!: string | null;
   @ApiProperty({ format: 'date-time' }) updatedAt!: string;
   @ApiProperty({ type: AdminPostAuthorDto }) author!: AdminPostAuthorDto;
+  @ApiProperty({ type: [String], example: ['GoPro', 'Đà Lạt'] }) tags!: string[];
 }
 
 /** A post as its author (or an admin) edits it. */
@@ -43,6 +44,7 @@ export function toAdminPostSummaryDto(post: Post, author: PublicProfile): AdminP
     publishedAt: post.publishedAt ? post.publishedAt.toISOString() : null,
     updatedAt: post.updatedAt.toISOString(),
     author: { id: author.id, displayName: author.displayName, avatarUrl: author.avatarUrl },
+    tags: [...post.tags],
   };
 }
 
@@ -56,6 +58,7 @@ export function toAdminPostDto(post: Post, author: PublicProfile): AdminPostDto 
     publishedAt: summary.publishedAt,
     updatedAt: summary.updatedAt,
     author: summary.author,
+    tags: summary.tags,
     language: post.language,
     excerpt: post.excerpt,
     body: post.body,

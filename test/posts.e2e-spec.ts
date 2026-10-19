@@ -95,6 +95,7 @@ describe('Public posts (/posts)', () => {
               title: 'Tiêu đề moi',
               excerpt: null,
               publishedAt: expect.stringMatching(ISO),
+              updatedAt: expect.stringMatching(ISO),
               author: { displayName: 'Xuân', avatarUrl: 'https://lh3.googleusercontent.com/a/x' },
             },
             {
@@ -103,6 +104,7 @@ describe('Public posts (/posts)', () => {
               title: 'Tiêu đề cu',
               excerpt: 'Tóm tắt',
               publishedAt: expect.stringMatching(ISO),
+              updatedAt: expect.stringMatching(ISO),
               author: { displayName: 'Xuân', avatarUrl: 'https://lh3.googleusercontent.com/a/x' },
             },
           ],
@@ -161,6 +163,7 @@ describe('Public posts (/posts)', () => {
           seoTitle: 'SEO bai-viet',
           seoDescription: null,
           updatedAt: expect.stringMatching(ISO),
+          tags: [],
         },
       });
     });

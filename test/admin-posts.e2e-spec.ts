@@ -103,6 +103,7 @@ describe('Authoring posts (/admin/posts)', () => {
           bodyVersion: 1,
           seoTitle: 'SEO',
           seoDescription: null,
+          tags: [],
           createdAt: expect.stringMatching(ISO),
         },
       });
@@ -278,6 +279,7 @@ describe('Authoring posts (/admin/posts)', () => {
         publishedAt: null,
         updatedAt: expect.stringMatching(ISO),
         author: { id: editor.user.id, displayName: 'Biên tập', avatarUrl: null },
+        tags: [],
       });
       expect(own.body.data.pageInfo).toEqual({
         page: 1,
@@ -613,6 +615,71 @@ describe('Authoring posts (/admin/posts)', () => {
           expect(await statusOf(id)).toBeUndefined();
         }
       }
+    });
+  });
+
+  describe('tags and the omitted-field guard (blog completion B1, spec §3.4)', () => {
+    const omitted = (fields: string[]) =>
+      envelope(
+        'POST_FIELDS_OMITTED',
+        'Send every field: the request leaves out fields that hold data.',
+        { fields },
+      );
+    /** Exactly what xuan-web's toSavePostInput() sends today (read-only check, 2026-10-19). */
+    const currentWebShape = (title = 'Bài viết') => ({
+      slug: 'bai-viet',
+      title,
+      excerpt: '',
+      seoTitle: '',
+      seoDescription: '',
+      body: body(),
+    });
+    const rowOf = async (id: string) =>
+      (
+        await db.query<{ title: string; tags: string[]; updated_at: Date }[]>(
+          'SELECT title, tags, updated_at FROM content_posts WHERE id = $1',
+          [id],
+        )
+      )[0];
+
+    it('creates with tags in order, and with none when omitted', async () => {
+      const tagged = await create(save({ tags: [' GoPro ', 'Đà Lạt'] }));
+      expect(tagged.status).toBe(201);
+      expect(tagged.body.data.tags).toEqual(['GoPro', 'Đà Lạt']);
+      const plain = await create(save({ slug: 'khong-the' }));
+      expect(plain.body.data.tags).toEqual([]);
+    });
+
+    it('replaces tags, and clears them with null or []', async () => {
+      const id = await createdId(save({ tags: ['a'] }));
+      expect((await update(id, save({ tags: ['b', 'c'] }))).body.data.tags).toEqual(['b', 'c']);
+      expect((await update(id, save({ tags: null }))).body.data.tags).toEqual([]);
+      await update(id, save({ tags: ['d'] }));
+      expect((await update(id, save({ tags: [] }))).body.data.tags).toEqual([]);
+    });
+
+    it('refuses the current xuan-web save shape on a tagged post, writing nothing', async () => {
+      const id = await createdId(save({ tags: ['giữ'] }));
+      const before = await rowOf(id);
+      const res = await update(id, currentWebShape('Tiêu đề mới'));
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual(omitted(['tags']));
+      expect(await rowOf(id)).toEqual(before);
+    });
+
+    it('keeps the current xuan-web save shape working on an untagged post', async () => {
+      const id = await createdId();
+      const res = await update(id, currentWebShape('Tiêu đề mới'));
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ title: 'Tiêu đề mới', tags: [] });
+    });
+
+    it('rejects duplicate tags with 400 at the later position', async () => {
+      const res = await create(save({ tags: ['Đà Lạt', 'đà lạt'] }));
+      expect(res.status).toBe(400);
+      expect(res.body.error.details.fields).toEqual([
+        { field: 'tags.1', code: 'INVALID', message: 'This value is invalid.' },
+      ]);
     });
   });
 });
