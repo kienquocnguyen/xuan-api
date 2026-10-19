@@ -13,6 +13,7 @@ dist/
 .env
 .env.*
 !.env.example
+local-docs
 
 # Test coverage
 coverage/
