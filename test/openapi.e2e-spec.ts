@@ -465,4 +465,135 @@ describe('OpenAPI document', () => {
       ).toContain('#/components/schemas/CurriculumOrderDto');
     });
   });
+
+  describe('course access contract (course spec §11.2, §11.4)', () => {
+    const LEARNER_DTOS = [
+      'LearnerCourseSummaryDto',
+      'LearnerCourseDto',
+      'LearnerCourseSectionDto',
+      'LearnerCourseLessonDto',
+    ];
+    const schemaOf = (name: string) =>
+      createOpenApiDocument(app).components?.schemas?.[name] as
+        { properties?: Record<string, Record<string, unknown>> } | undefined;
+    const propsOf = (name: string) => Object.keys(schemaOf(name)?.properties ?? {}).sort();
+    const codes = (path: string, method: 'get' | 'put' | 'delete') =>
+      Object.entries(createOpenApiDocument(app).paths[path]?.[method]?.responses ?? {})
+        .filter(([status]) => Number(status) >= 400)
+        .flatMap(([, response]) =>
+          String((response as { description?: string }).description).split(' | '),
+        )
+        .sort();
+
+    it('names every new request and response component (I19)', () => {
+      expect(Object.keys(createOpenApiDocument(app).components?.schemas ?? {})).toEqual(
+        expect.arrayContaining([
+          ...LEARNER_DTOS,
+          'CourseAccessGrantDto',
+          'CourseAccessUserDto',
+          'LessonPlaybackDto',
+          'VimeoVideoDto',
+          'CourseAccessParams',
+          'LessonPathParams',
+        ]),
+      );
+    });
+
+    it('documents the DTO fields exactly', () => {
+      expect(propsOf('CourseAccessUserDto')).toEqual(['avatarUrl', 'displayName', 'id']);
+      expect(propsOf('CourseAccessGrantDto')).toEqual([
+        'grantedAt',
+        'grantedBy',
+        'id',
+        'revokedAt',
+        'revokedBy',
+        'source',
+        'user',
+      ]);
+      expect(propsOf('LearnerCourseSummaryDto')).toEqual(['course', 'totalLessons']);
+      expect(propsOf('LearnerCourseDto')).toEqual(['course', 'sections']);
+      expect(propsOf('LearnerCourseSectionDto')).toEqual(['id', 'lessons', 'title']);
+      expect(propsOf('LearnerCourseLessonDto')).toEqual(['durationSeconds', 'id', 'title']);
+      expect(propsOf('LessonPlaybackDto')).toEqual([
+        'durationSeconds',
+        'id',
+        'nextLessonId',
+        'previousLessonId',
+        'sectionTitle',
+        'title',
+        'video',
+      ]);
+      expect(propsOf('VimeoVideoDto')).toEqual(['privacyHash', 'provider', 'videoId']);
+      expect(schemaOf('VimeoVideoDto')?.properties?.provider).toMatchObject({ enum: ['vimeo'] });
+      expect(schemaOf('CourseAccessGrantDto')?.properties?.source).toMatchObject({
+        enum: ['admin'],
+      });
+    });
+
+    it('puts video fields only on LessonPlaybackDto and VimeoVideoDto (spec §7, §14)', () => {
+      for (const name of [...LEARNER_DTOS, 'CourseAccessGrantDto', 'CourseAccessUserDto']) {
+        expect({ name, props: propsOf(name).filter((p) => /video|vimeo|hash/i.test(p)) }).toEqual({
+          name,
+          props: [],
+        });
+      }
+    });
+
+    it('documents exactly the codes each access and learner route can return (I18)', () => {
+      const input = ['INTERNAL_ERROR', 'PAYLOAD_TOO_LARGE', 'UNAUTHENTICATED', 'VALIDATION_FAILED'];
+      const admin = [...input, 'FORBIDDEN', 'NOT_FOUND'];
+      const expected: Array<[string, 'get' | 'put' | 'delete', string[]]> = [
+        ['/admin/courses/{courseId}/access-grants', 'get', admin],
+        ['/admin/courses/{courseId}/access/{userId}', 'put', admin],
+        ['/admin/courses/{courseId}/access/{userId}', 'delete', admin],
+        ['/learn/courses', 'get', ['INTERNAL_ERROR', 'UNAUTHENTICATED']],
+        [
+          '/learn/courses/{slug}',
+          'get',
+          ['COURSE_ACCESS_REQUIRED', 'INTERNAL_ERROR', 'NOT_FOUND', 'UNAUTHENTICATED'],
+        ],
+        [
+          '/learn/courses/{slug}/lessons/{lessonId}',
+          'get',
+          [...input, 'COURSE_ACCESS_REQUIRED', 'NOT_FOUND'],
+        ],
+      ];
+      for (const [path, method, routeCodes] of expected) {
+        expect({ route: `${method} ${path}`, codes: codes(path, method) }).toEqual({
+          route: `${method} ${path}`,
+          codes: [...routeCodes].sort(),
+        });
+      }
+      const responses = createOpenApiDocument(app).paths['/learn/courses/{slug}']?.get?.responses;
+      expect(String((responses?.['403'] as { description?: string }).description)).toBe(
+        'COURSE_ACCESS_REQUIRED',
+      );
+    });
+
+    it('documents the path ids as uuids and the revoke as 204', () => {
+      const doc = createOpenApiDocument(app);
+      type Parameter = { name: string; in: string; schema?: { format?: string } };
+      const params = (path: string, method: 'get' | 'put') =>
+        (doc.paths[path]?.[method]?.parameters ?? []) as Parameter[];
+      const uuidPath = (name: string) =>
+        expect.objectContaining({
+          name,
+          in: 'path',
+          schema: expect.objectContaining({ format: 'uuid' }),
+        });
+      expect(params('/admin/courses/{courseId}/access/{userId}', 'put')).toEqual([
+        uuidPath('courseId'),
+        uuidPath('userId'),
+      ]);
+      expect(params('/learn/courses/{slug}/lessons/{lessonId}', 'get')).toEqual([
+        expect.objectContaining({ name: 'slug', in: 'path' }),
+        uuidPath('lessonId'),
+      ]);
+      expect(
+        Object.keys(
+          doc.paths['/admin/courses/{courseId}/access/{userId}']?.delete?.responses ?? {},
+        ),
+      ).toContain('204');
+    });
+  });
 });
