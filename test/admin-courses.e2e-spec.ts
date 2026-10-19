@@ -852,6 +852,11 @@ describe('Admin course authoring (/admin/courses…)', () => {
         act: (f) => updateLesson(f.draftId, draftLesson({ durationSeconds: 90 })),
         status: 200,
       },
+      {
+        name: 'lesson privacy hash change',
+        act: (f) => updateLesson(f.draftId, draftLesson({ privacyHash: 'abc123' })),
+        status: 200,
+      },
       { name: 'lesson publish', act: (f) => lessonAction(f.draftId, 'publish'), status: 200 },
       {
         name: 'lesson unpublish',
@@ -863,6 +868,28 @@ describe('Admin course authoring (/admin/courses…)', () => {
       {
         name: 'curriculum order change',
         act: (f) => reorder(f.courseId, order(f, [f.publishedId, f.draftId])),
+        status: 200,
+      },
+      {
+        name: 'section-only reorder',
+        act: (f) =>
+          reorder(f.courseId, {
+            sections: [
+              { id: f.emptyId, lessonIds: [] },
+              { id: f.sectionId, lessonIds: [f.draftId, f.publishedId] },
+            ],
+          }),
+        status: 200,
+      },
+      {
+        name: 'lesson move to another section',
+        act: (f) =>
+          reorder(f.courseId, {
+            sections: [
+              { id: f.sectionId, lessonIds: [f.publishedId] },
+              { id: f.emptyId, lessonIds: [f.draftId] },
+            ],
+          }),
         status: 200,
       },
     ];
@@ -905,6 +932,11 @@ describe('Admin course authoring (/admin/courses…)', () => {
         status: 200,
       },
       { name: 'refused change (409)', act: (f) => deleteLesson(f.publishedId), status: 409 },
+      {
+        name: 'refused video removal from a published lesson (409)',
+        act: (f) => updateLesson(f.publishedId, { title: 'p' }),
+        status: 409,
+      },
     ];
 
     it.each(moving)('moves on a $name', async ({ prepare, act, status }) => {
