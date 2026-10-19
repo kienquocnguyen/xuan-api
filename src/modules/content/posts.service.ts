@@ -7,11 +7,18 @@ import { baselineErrors } from '../../errors/baseline-errors.js';
 import { assertCanManageOwnedResource } from '../../http/auth/ownership.js';
 import type { AuthenticatedUser } from '../../http/auth/role.js';
 import { type PublicProfile, UserProfilesReader } from '../users/user-profiles.reader.js';
-import { canonicalizePostBody, hasMeaningfulText } from './body/post-body-content.js';
+import {
+  canonicalizePostBody,
+  collectMediaSources,
+  fitsBodyVersion1,
+  hasIncompleteMedia,
+  hasMeaningfulText,
+} from './body/post-body-content.js';
 import { CategoriesService, type CategoryRef } from './categories.service.js';
 import { contentErrors } from './content.errors.js';
 import { POST_SLUG_PATTERN, type SavePostInput } from './dto/save-post.dto.js';
-import { omittedFieldsWithData } from './post-compatibility.js';
+import { MediaService } from './media/media.service.js';
+import { declaresOlderBody, omittedFieldsWithData } from './post-compatibility.js';
 import { POST_LANGUAGE, Post, type PostStatus } from './post.entity.js';
 
 export type AuthoredPost = Readonly<{
@@ -32,6 +39,7 @@ export class PostsService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly profiles: UserProfilesReader,
     private readonly categories: CategoriesService,
+    private readonly media: MediaService,
   ) {}
 
   async listPublished({
@@ -120,12 +128,14 @@ export class PostsService {
     try {
       const categoryId = input.categoryId ?? null;
       await this.assertAssignable(this.dataSource.manager, categoryId, null);
+      await this.media.assertLibrarySources(collectMediaSources(input.body));
       const result = await this.posts.insert({
         authorId: actor.id,
         slug: input.slug,
         title: input.title,
         excerpt: input.excerpt,
         body: canonicalizePostBody(input.body),
+        bodyVersion: fitsBodyVersion1(input.body) ? 1 : 2,
         seoTitle: input.seoTitle,
         seoDescription: input.seoDescription,
         tags: input.tags ?? [],
@@ -146,6 +156,10 @@ export class PostsService {
         // Q3: an old client omits newer fields; never let its full replacement erase them (spec §3.4).
         const fields = omittedFieldsWithData(input, post);
         if (fields.length > 0) throw new AppError(contentErrors.POST_FIELDS_OMITTED, { fields });
+        // ...nor let an editor that can't load version 2 nodes overwrite them (spec §3.4).
+        if (declaresOlderBody(input, post)) {
+          throw new AppError(contentErrors.POST_BODY_VERSION_UNSUPPORTED);
+        }
         // B17: once ever published, the slug is the post's permanent URL.
         if (post.publishedAt !== null && input.slug !== post.slug) {
           throw new AppError(contentErrors.POST_SLUG_LOCKED);
@@ -154,6 +168,11 @@ export class PostsService {
         if (post.status === 'published' && !hasMeaningfulText(input.body)) {
           throw new AppError(contentErrors.POST_BODY_EMPTY);
         }
+        // Spec §5.5: a published post never shows an unfinished before/after block.
+        if (post.status === 'published' && hasIncompleteMedia(input.body)) {
+          throw new AppError(contentErrors.POST_MEDIA_INCOMPLETE);
+        }
+        await this.media.assertLibrarySources(collectMediaSources(input.body), manager);
         // B2: an omitted categoryId reached here only if none is stored (the guard above), so `?? null` keeps it.
         const categoryId = input.categoryId ?? null;
         await this.assertAssignable(manager, categoryId, post.categoryId);
@@ -169,6 +188,7 @@ export class PostsService {
             title: input.title,
             excerpt: input.excerpt,
             body: canonicalizePostBody(input.body),
+            bodyVersion: fitsBodyVersion1(input.body) ? 1 : 2,
             seoTitle: input.seoTitle,
             seoDescription: input.seoDescription,
             tags: input.tags ?? [],
@@ -189,6 +209,7 @@ export class PostsService {
       if (post.status === 'archived') throw new AppError(contentErrors.POST_ARCHIVED);
       if (post.status === 'published') return; // idempotent: no write
       if (!hasMeaningfulText(post.body)) throw new AppError(contentErrors.POST_BODY_EMPTY); // B18
+      if (hasIncompleteMedia(post.body)) throw new AppError(contentErrors.POST_MEDIA_INCOMPLETE);
       // BD-3: a new publication needs an active category.
       if (post.categoryId === null) throw new AppError(contentErrors.POST_CATEGORY_REQUIRED);
       const category = (await this.categories.findRefs([post.categoryId], manager)).get(

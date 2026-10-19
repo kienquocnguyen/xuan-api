@@ -31,6 +31,9 @@ const {
   POST_CATEGORY_REQUIRED,
   CATEGORY_NOT_FOUND,
   CATEGORY_ARCHIVED,
+  POST_MEDIA_NOT_FOUND,
+  POST_MEDIA_INCOMPLETE,
+  POST_BODY_VERSION_UNSUPPORTED,
 } = contentErrors;
 
 type PostIdParam = z.infer<typeof postIdParamSchema>;
@@ -83,6 +86,7 @@ export class AdminPostsController {
     POST_SLUG_TAKEN,
     CATEGORY_NOT_FOUND,
     CATEGORY_ARCHIVED,
+    POST_MEDIA_NOT_FOUND,
   )
   async create(
     @CurrentUser() actor: AuthenticatedUser,
@@ -106,6 +110,9 @@ export class AdminPostsController {
     POST_CATEGORY_REQUIRED,
     CATEGORY_NOT_FOUND,
     CATEGORY_ARCHIVED,
+    POST_MEDIA_NOT_FOUND,
+    POST_MEDIA_INCOMPLETE,
+    POST_BODY_VERSION_UNSUPPORTED,
   )
   async update(
     @CurrentUser() actor: AuthenticatedUser,
@@ -128,6 +135,7 @@ export class AdminPostsController {
     POST_ARCHIVED,
     POST_CATEGORY_REQUIRED,
     CATEGORY_ARCHIVED,
+    POST_MEDIA_INCOMPLETE,
   )
   async publish(
     @CurrentUser() actor: AuthenticatedUser,

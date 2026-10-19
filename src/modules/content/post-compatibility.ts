@@ -9,6 +9,17 @@ const GUARDED: readonly { field: string; hasData: (post: Post) => boolean }[] = 
   { field: 'categoryId', hasData: (post) => post.categoryId !== null },
 ];
 
+/**
+ * The body contract version (spec §3.4): a client that declares version 1 (or nothing) can't have loaded a
+ * version 2 body's nodes, so its save would drop them.
+ */
+export function declaresOlderBody(
+  input: Readonly<{ bodyVersion?: 1 | 2 }>,
+  post: Pick<Post, 'bodyVersion'>,
+): boolean {
+  return post.bodyVersion === 2 && (input.bodyVersion ?? 1) === 1;
+}
+
 /** The guarded fields absent from `input` whose stored value isn't empty; empty means the request is safe. */
 export function omittedFieldsWithData(
   input: Readonly<Record<string, unknown>>,

@@ -25,3 +25,19 @@ export function isSafeLinkHref(href: string): boolean {
   if (!ALLOWED_PROTOCOLS.has(url.protocol)) return false;
   return url.username === '' && url.password === '';
 }
+
+const ANCHOR = /^#[A-Za-z0-9_-]{1,200}$/;
+
+/**
+ * Body version 2 (blog completion spec §5.5): the version 1 rule, plus a site-relative `/path` (one leading
+ * slash, never `//host`, no backslash) and an in-page `#anchor`.
+ */
+export function isSafeLinkHrefV2(href: string): boolean {
+  if (isSafeLinkHref(href) || ANCHOR.test(href)) return true;
+  return (
+    href.startsWith('/') &&
+    !href.startsWith('//') &&
+    !href.includes('\\') &&
+    !hasUnsafeCharacter(href)
+  );
+}

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import type { Repository } from 'typeorm';
+import { type EntityManager, In, type Repository } from 'typeorm';
 import { APP_CONFIG } from '../../../config/app-config.module.js';
 import type { AppConfig } from '../../../config/load-config.js';
 import { AppError } from '../../../errors/app-error.js';
@@ -67,6 +67,45 @@ export class MediaService {
     const image = this.toImage(row);
     if (!image) throw new Error('Stored media without a public base URL.');
     return image;
+  }
+
+  /**
+   * Body images must be our own variants (spec §5.5, "Media URL"): `base/<storage_key>-<width>.webp`. A wrong
+   * shape → 400 INVALID at its path; an unknown key or a width the media lacks → 409 POST_MEDIA_NOT_FOUND.
+   * One query for the whole body.
+   */
+  async assertLibrarySources(
+    sources: readonly { path: string; src: string }[],
+    manager?: EntityManager,
+  ): Promise<void> {
+    if (sources.length === 0) return;
+    const base = this.config.media.publicBaseUrl;
+    const parsed = sources.map(({ path, src }) => {
+      const match =
+        base && src.startsWith(`${base}/`)
+          ? /^(blog\/[0-9a-f-]{36})-(\d{1,4})\.webp$/.exec(src.slice(base.length + 1))
+          : null;
+      return { path, key: match?.[1], width: Number(match?.[2]) };
+    });
+    const malformed = parsed.filter((source) => !source.key);
+    if (malformed.length > 0) {
+      throw new AppError(baselineErrors.VALIDATION_FAILED, {
+        fields: malformed.map(({ path }) => ({
+          field: path,
+          code: 'INVALID',
+          message: 'This value is invalid.',
+        })),
+      });
+    }
+    const keys = [...new Set(parsed.map((source) => source.key as string))];
+    const rows = await (manager?.getRepository(ContentMedia) ?? this.media).find({
+      select: { storageKey: true, variantWidths: true },
+      where: { storageKey: In(keys) },
+    });
+    const widths = new Map(rows.map((row) => [row.storageKey, row.variantWidths]));
+    if (parsed.some(({ key, width }) => !widths.get(key as string)?.includes(width))) {
+      throw new AppError(contentErrors.POST_MEDIA_NOT_FOUND);
+    }
   }
 
   /** URLs of a stored image; `null` when this server has no public media base (storage disabled). */
