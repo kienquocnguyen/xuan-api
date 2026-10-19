@@ -774,6 +774,156 @@ describe('Admin course authoring (/admin/courses…)', () => {
     });
   });
 
+  describe('course updatedAt: the latest meaningful change to the course or its curriculum', () => {
+    // A fixed past instant written directly, so "moved" and "unchanged" need no clock comparison.
+    const PAST = '2000-01-01T00:00:00.000Z';
+    const backdate = (courseId: string) =>
+      db.query(`UPDATE courses SET updated_at = $2 WHERE id = $1`, [courseId, PAST]);
+    const courseUpdatedAt = async (courseId: string) =>
+      ((await get(courseId)).body.data as { updatedAt: string }).updatedAt;
+
+    /** A published course: section S (draft lesson d with a video, published lesson p) and an empty section E. */
+    const fixture = async () => {
+      const courseId = await createdId();
+      const sectionId = await newSection(courseId, 'S');
+      const emptyId = await newSection(courseId, 'E');
+      const draftId = await newLesson(sectionId, { title: 'd', videoId: '76979871' });
+      const publishedId = await newLesson(sectionId, {
+        title: 'p',
+        videoId: '76979872',
+        durationSeconds: 60,
+      });
+      expect((await lessonAction(publishedId, 'publish')).status).toBe(200);
+      expect((await courseAction(courseId, 'publish')).status).toBe(200);
+      return { courseId, sectionId, emptyId, draftId, publishedId };
+    };
+    type Fixture = Awaited<ReturnType<typeof fixture>>;
+    type Case = {
+      name: string;
+      prepare?: (f: Fixture) => Promise<unknown>;
+      act: (f: Fixture) => Promise<request.Response>;
+      status: number;
+    };
+    const order = (f: Fixture, lessonIds: string[]) => ({
+      sections: [
+        { id: f.sectionId, lessonIds },
+        { id: f.emptyId, lessonIds: [] },
+      ],
+    });
+    const draftLesson = (overrides: object = {}) => ({
+      title: 'd',
+      videoId: '76979871',
+      ...overrides,
+    });
+
+    const moving: Case[] = [
+      {
+        name: 'course metadata change',
+        act: (f) => update(f.courseId, saveCourse({ title: 'Tên mới' })),
+        status: 200,
+      },
+      {
+        name: 'course publish',
+        prepare: (f) => courseAction(f.courseId, 'unpublish'),
+        act: (f) => courseAction(f.courseId, 'publish'),
+        status: 200,
+      },
+      { name: 'course unpublish', act: (f) => courseAction(f.courseId, 'unpublish'), status: 200 },
+      { name: 'section create', act: (f) => addSection(f.courseId, 'T'), status: 201 },
+      {
+        name: 'section rename',
+        act: (f) => renameSection(f.sectionId, { title: 'S2' }),
+        status: 200,
+      },
+      { name: 'section delete', act: (f) => deleteSection(f.emptyId), status: 204 },
+      { name: 'lesson create', act: (f) => addLesson(f.sectionId, { title: 'n' }), status: 201 },
+      {
+        name: 'lesson title edit',
+        act: (f) => updateLesson(f.draftId, draftLesson({ title: 'd2' })),
+        status: 200,
+      },
+      {
+        name: 'lesson video change',
+        act: (f) => updateLesson(f.draftId, draftLesson({ videoId: '76979873' })),
+        status: 200,
+      },
+      {
+        name: 'lesson duration change',
+        act: (f) => updateLesson(f.draftId, draftLesson({ durationSeconds: 90 })),
+        status: 200,
+      },
+      { name: 'lesson publish', act: (f) => lessonAction(f.draftId, 'publish'), status: 200 },
+      {
+        name: 'lesson unpublish',
+        prepare: (f) => lessonAction(f.draftId, 'publish'),
+        act: (f) => lessonAction(f.publishedId, 'unpublish'),
+        status: 200,
+      },
+      { name: 'lesson delete', act: (f) => deleteLesson(f.draftId), status: 204 },
+      {
+        name: 'curriculum order change',
+        act: (f) => reorder(f.courseId, order(f, [f.publishedId, f.draftId])),
+        status: 200,
+      },
+    ];
+    const unchanged: Case[] = [
+      {
+        name: 'identical course metadata',
+        act: (f) => update(f.courseId, saveCourse()),
+        status: 200,
+      },
+      {
+        name: 'repeated course publish',
+        act: (f) => courseAction(f.courseId, 'publish'),
+        status: 200,
+      },
+      {
+        name: 'repeated course unpublish',
+        prepare: (f) => courseAction(f.courseId, 'unpublish'),
+        act: (f) => courseAction(f.courseId, 'unpublish'),
+        status: 200,
+      },
+      {
+        name: 'identical section title',
+        act: (f) => renameSection(f.sectionId, { title: 'S' }),
+        status: 200,
+      },
+      { name: 'identical lesson', act: (f) => updateLesson(f.draftId, draftLesson()), status: 200 },
+      {
+        name: 'repeated lesson publish',
+        act: (f) => lessonAction(f.publishedId, 'publish'),
+        status: 200,
+      },
+      {
+        name: 'repeated lesson unpublish',
+        act: (f) => lessonAction(f.draftId, 'unpublish'),
+        status: 200,
+      },
+      {
+        name: 'identical curriculum order',
+        act: (f) => reorder(f.courseId, order(f, [f.draftId, f.publishedId])),
+        status: 200,
+      },
+      { name: 'refused change (409)', act: (f) => deleteLesson(f.publishedId), status: 409 },
+    ];
+
+    it.each(moving)('moves on a $name', async ({ prepare, act, status }) => {
+      const f = await fixture();
+      await prepare?.(f);
+      await backdate(f.courseId);
+      expect((await act(f)).status).toBe(status);
+      expect(await courseUpdatedAt(f.courseId)).not.toBe(PAST);
+    });
+
+    it.each(unchanged)('stays on a $name', async ({ prepare, act, status }) => {
+      const f = await fixture();
+      await prepare?.(f);
+      await backdate(f.courseId);
+      expect((await act(f)).status).toBe(status);
+      expect(await courseUpdatedAt(f.courseId)).toBe(PAST);
+    });
+  });
+
   describe('concurrency (spec §18 R1–R4)', () => {
     // Each outcome must match some serial order of the two requests (lock rule L1).
     const TRIALS = 15;

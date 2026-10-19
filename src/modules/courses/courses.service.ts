@@ -99,6 +99,11 @@ export class CoursesService {
         if (course.publishedAt !== null && input.slug !== course.slug) {
           throw new AppError(coursesErrors.COURSE_SLUG_LOCKED);
         }
+        const unchanged =
+          input.slug === course.slug &&
+          input.title === course.title &&
+          input.summary === course.summary;
+        if (unchanged) return; // no write, so updated_at stays
         await manager.update(
           Course,
           { id: courseId },
@@ -145,6 +150,7 @@ export class CoursesService {
         title: input.title,
         position: await this.nextPosition(manager, 'sections', courseId),
       });
+      await this.touchCourse(manager, courseId);
     });
     return this.getForAdmin(courseId);
   }
@@ -152,8 +158,10 @@ export class CoursesService {
   async renameSection(sectionId: string, input: SaveCourseSectionInput): Promise<CourseTree> {
     const courseId = await this.courseIdOfSection(sectionId);
     await this.withCourseLock(courseId, async (manager) => {
-      await this.lockedSection(manager, courseId, sectionId);
+      const section = await this.lockedSection(manager, courseId, sectionId);
+      if (section.title === input.title) return; // no write
       await manager.update(CourseSection, { id: sectionId }, { title: input.title });
+      await this.touchCourse(manager, courseId);
     });
     return this.getForAdmin(courseId);
   }
@@ -168,6 +176,7 @@ export class CoursesService {
       }
       await manager.delete(CourseSection, { id: sectionId });
       await this.closeGap(manager, 'sections', courseId, section.position);
+      await this.touchCourse(manager, courseId);
     });
   }
 
@@ -183,6 +192,7 @@ export class CoursesService {
         vimeoHash: input.privacyHash,
         durationSeconds: input.durationSeconds,
       });
+      await this.touchCourse(manager, courseId);
     });
     return this.getForAdmin(courseId);
   }
@@ -196,6 +206,12 @@ export class CoursesService {
       if (lesson.status === 'published' && input.videoId === null) {
         throw new AppError(coursesErrors.LESSON_VIDEO_MISSING);
       }
+      const unchanged =
+        lesson.title === input.title &&
+        lesson.vimeoVideoId === input.videoId &&
+        lesson.vimeoHash === input.privacyHash &&
+        lesson.durationSeconds === input.durationSeconds;
+      if (unchanged) return; // no write
       await manager.update(
         CourseLesson,
         { id: lessonId },
@@ -206,6 +222,7 @@ export class CoursesService {
           durationSeconds: input.durationSeconds,
         },
       );
+      await this.touchCourse(manager, courseId);
     });
     return this.getForAdmin(courseId);
   }
@@ -217,6 +234,7 @@ export class CoursesService {
       if (lesson.status === 'published') return; // idempotent: no write
       if (lesson.vimeoVideoId === null) throw new AppError(coursesErrors.LESSON_VIDEO_MISSING);
       await manager.update(CourseLesson, { id: lessonId }, { status: 'published' });
+      await this.touchCourse(manager, courseId);
     });
     return this.getForAdmin(courseId);
   }
@@ -234,6 +252,7 @@ export class CoursesService {
         throw new AppError(coursesErrors.COURSE_NEEDS_PUBLISHED_LESSON);
       }
       await manager.update(CourseLesson, { id: lessonId }, { status: 'draft' });
+      await this.touchCourse(manager, courseId);
     });
     return this.getForAdmin(courseId);
   }
@@ -245,6 +264,7 @@ export class CoursesService {
       if (lesson.status === 'published') throw new AppError(coursesErrors.LESSON_IS_PUBLISHED);
       await manager.delete(CourseLesson, { id: lessonId });
       await this.closeGap(manager, 'lessons', lesson.sectionId, lesson.position);
+      await this.touchCourse(manager, courseId);
     });
   }
 
@@ -271,9 +291,11 @@ export class CoursesService {
       }
       const sectionsById = new Map(sections.map((section) => [section.id, section]));
       const lessonsById = new Map(lessons.map((lesson) => [lesson.id, lesson]));
+      let changed = false;
       for (const [position, entry] of input.sections.entries()) {
         if (sectionsById.get(entry.id)?.position !== position) {
           await manager.update(CourseSection, { id: entry.id }, { position });
+          changed = true;
         }
         for (const [lessonPosition, lessonId] of entry.lessonIds.entries()) {
           const lesson = lessonsById.get(lessonId);
@@ -283,9 +305,11 @@ export class CoursesService {
               { id: lessonId },
               { sectionId: entry.id, position: lessonPosition },
             );
+            changed = true;
           }
         }
       }
+      if (changed) await this.touchCourse(manager, courseId);
     });
     return this.getForAdmin(courseId);
   }
@@ -307,6 +331,19 @@ export class CoursesService {
       if (!course) throw new AppError(baselineErrors.NOT_FOUND);
       return work(manager, course);
     });
+  }
+
+  /**
+   * A curriculum change is a change of its course: `courses.updated_at` is the latest meaningful change to the course
+   * or its curriculum (database.md §12). Called under L1, after the change, and never for a no-op.
+   */
+  private async touchCourse(manager: EntityManager, courseId: string): Promise<void> {
+    await manager
+      .createQueryBuilder()
+      .update(Course)
+      .set({ updatedAt: () => 'now()' })
+      .where('id = :courseId', { courseId })
+      .execute();
   }
 
   /** Plain read before the lock: `course_id` never changes, so the id stays valid (spec §10.6). */

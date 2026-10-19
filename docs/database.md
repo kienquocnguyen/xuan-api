@@ -458,7 +458,7 @@ erDiagram
 | `status` | `varchar(16)` | yes | `'draft'` | **CK** `ck_courses_status`: `status IN ('draft','published')` | Only published courses are public. "Published" means visible, not for sale (spec §10.5). A published course always has ≥ 1 published lesson: no single-row constraint can say that, so the course lock rule L1 holds it (AD15) |
 | `published_at` | `timestamptz` | no | — | **CK** `ck_courses_published_has_date`: `status <> 'published' OR published_at IS NOT NULL` | The first-publication instant, kept across unpublish/republish (as posts, B16) |
 | `created_at` | `timestamptz` | yes | `now()` | — | D27 |
-| `updated_at` | `timestamptz` | yes | `now()` | — | D27; `@UpdateDateColumn`. Orders the admin list. Idempotent publish/unpublish don't write |
+| `updated_at` | `timestamptz` | yes | `now()` | — | D27; `@UpdateDateColumn`. The latest meaningful change to the course **or its curriculum**: every section or lesson create, edit, (un)publish, delete and real reorder also sets it, under the course lock (L1). No-op writes (identical content, idempotent (un)publish, an unchanged order) and refused changes don't. Learner progress and access grants never will. Orders the admin list |
 
 **`course_sections`**
 

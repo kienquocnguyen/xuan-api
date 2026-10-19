@@ -236,7 +236,7 @@ Both are implemented (`src/modules/services/`, 2026-10-14) and proven by exact-b
 |---|---|
 | `GET /courses` | Public. `{ data: CourseSummaryDto[] }`: **published courses only**, newest `publishedAt` first (tie: `id`), **not paginated in V1** (a handful of courses, as services). Errors: `500` |
 | `GET /courses/:slug` | Public. `{ data: CourseDto }`: the published outline, only **published lessons**, sections without one omitted, curriculum order. **No video field.** Opaque slug key (D7 deviation): unknown, malformed or **draft** (also unpublished after publication) → `404 NOT_FOUND`. Errors: `404`, `500` |
-| `GET /admin/courses` | `{ data: AdminCourseSummaryDto[] }`, drafts included, newest `updatedAt` first, unpaginated. Errors: `401`, `403`, `500` |
+| `GET /admin/courses` | `{ data: AdminCourseSummaryDto[] }`, drafts included, newest `updatedAt` first, unpaginated. A course's `updatedAt` is its latest meaningful change, curriculum edits included; no-ops don't move it. Errors: `401`, `403`, `500` |
 | `POST /admin/courses` | Body `SaveCourseDto`; creates a **draft** with no curriculum → `201`. Errors: `409 COURSE_SLUG_TAKEN` |
 | `GET /admin/courses/:courseId` | `{ data: AdminCourseDto }`. Errors: `404` |
 | `PUT /admin/courses/:courseId` | Full replacement of `slug`, `title`, `summary`. The slug is locked once the course was **ever** published, also while unpublished → `409 COURSE_SLUG_LOCKED`. Errors: `404`, `409 COURSE_SLUG_TAKEN` / `COURSE_SLUG_LOCKED` |
