@@ -1,5 +1,5 @@
-import { Controller, Get, Header, Param } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Header, HttpCode, Param, Put } from '@nestjs/common';
+import { ApiNoContentResponse, ApiTags } from '@nestjs/swagger';
 import { baselineErrors } from '../../errors/baseline-errors.js';
 import { CurrentUser } from '../../http/auth/auth.decorators.js';
 import type { AuthenticatedUser } from '../../http/auth/role.js';
@@ -17,6 +17,7 @@ import {
   toLearnerCourseSummaryDto,
   toLessonPlaybackDto,
 } from './dto/learning.dto.js';
+import { type SaveLessonProgressInput, saveLessonProgressSchema } from './dto/save-progress.dto.js';
 import { LearningService } from './learning.service.js';
 
 const { VALIDATION_FAILED, UNAUTHENTICATED, NOT_FOUND } = baselineErrors;
@@ -65,5 +66,19 @@ export class LearningController {
     return toLessonPlaybackDto(
       await this.learning.getPlayback(user.id, params.slug, params.lessonId),
     );
+  }
+
+  @Put(':slug/lessons/:lessonId/progress')
+  @HttpCode(204)
+  @ApiNoContentResponse({ description: 'The progress is saved.' })
+  @ApiSchemaParameters('path', lessonPathParamsSchema)
+  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, NOT_FOUND, COURSE_ACCESS_REQUIRED)
+  async saveProgress(
+    @Param({ schema: lessonPathParamsSchema }) params: LessonPathParams,
+    @Body({ schema: saveLessonProgressSchema }) input: SaveLessonProgressInput,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<void> {
+    // Self-reported learning state for this user only (spec §9.5); the user is never client input (I9).
+    await this.learning.saveProgress(user.id, params.slug, params.lessonId, input);
   }
 }

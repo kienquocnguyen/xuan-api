@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
+import { isForeignKeyViolation } from '../../database/postgres-errors.js';
 import { AppError } from '../../errors/app-error.js';
 import { baselineErrors } from '../../errors/baseline-errors.js';
 import { CourseAccessService } from './course-access.service.js';
@@ -10,7 +11,10 @@ import type { CourseTree, LearnerCourseListItem } from './course-tree.js';
 import { Course } from './course.entity.js';
 import { coursesErrors } from './courses.errors.js';
 import { CoursesService } from './courses.service.js';
+import type { SaveLessonProgressInput } from './dto/save-progress.dto.js';
+import { LessonProgress } from './lesson-progress.entity.js';
 import { type LocatedPlayback, locatePlayback } from './playback.js';
+import { clampPosition } from './progress.js';
 
 /**
  * Learner use cases (course spec §7, §11.2). Every 404 check runs before the access check, so an ungranted user
@@ -22,6 +26,7 @@ export class LearningService {
   constructor(
     @InjectRepository(Course) private readonly courses: Repository<Course>,
     @InjectRepository(CourseLesson) private readonly lessons: Repository<CourseLesson>,
+    @InjectRepository(LessonProgress) private readonly progress: Repository<LessonProgress>,
     private readonly catalog: CoursesService,
     private readonly access: CourseAccessService,
   ) {}
@@ -66,6 +71,43 @@ export class LearningService {
     if (!located) throw new AppError(baselineErrors.NOT_FOUND);
     await this.requireAccess(userId, course.id);
     return located;
+  }
+
+  /**
+   * Saves the caller's progress (course spec §9.2): the playback checks first (404s, then 403), then one upsert
+   * on `uq_lesson_progress_user_id_lesson_id` (D32). Last write wins by arrival for the position (§9.3); the first
+   * completion instant is kept (`COALESCE`). No course lock: a save may wait behind a reorder moving its lesson.
+   */
+  async saveProgress(
+    userId: string,
+    slug: string,
+    lessonId: string,
+    input: SaveLessonProgressInput,
+  ): Promise<void> {
+    const { lesson } = await this.getPlayback(userId, slug, lessonId);
+    try {
+      await this.progress.query(
+        `INSERT INTO "lesson_progress" ("user_id", "lesson_id", "position_seconds", "completed_at", "last_watched_at")
+         VALUES ($1, $2, $3, CASE WHEN $4::boolean THEN now() END, now())
+         ON CONFLICT ON CONSTRAINT "uq_lesson_progress_user_id_lesson_id" DO UPDATE SET
+           "position_seconds" = EXCLUDED."position_seconds",
+           "last_watched_at" = now(),
+           "completed_at" = COALESCE("lesson_progress"."completed_at", EXCLUDED."completed_at"),
+           "updated_at" = now()`,
+        [
+          userId,
+          lesson.id,
+          clampPosition(input.positionSeconds, lesson.durationSeconds),
+          input.completed === true,
+        ],
+      );
+    } catch (error) {
+      // Only reachable after unpublish → delete between the check and the write (§9.2, D11).
+      if (isForeignKeyViolation(error, 'fk_lesson_progress_lesson_id')) {
+        throw new AppError(baselineErrors.NOT_FOUND);
+      }
+      throw error;
+    }
   }
 
   private async requireAccess(userId: string, courseId: string): Promise<void> {
