@@ -35,13 +35,12 @@ erDiagram
     SERVICE ||--o{ SERVICE_APPLICATION : "is applied for"
     USER |o--o{ SERVICE_APPLICATION : "may submit (guests can apply too)"
     SERVICE_APPLICATION ||--o| APPOINTMENT : "creates, once accepted"
-    USER ||--o{ ENROLLMENT : "registers"
-    COURSE ||--o{ ENROLLMENT : "receives"
+    USER ||--o{ COURSE_ACCESS_GRANT : "learns through (one row per grant)"
+    COURSE ||--o{ COURSE_ACCESS_GRANT : "is granted by"
     COURSE ||--o{ COURSE_SECTION : "contains"
     COURSE_SECTION ||--o{ LESSON : "contains (ordered)"
     USER ||--o{ ORDER : "places (deferred)"
-    ORDER ||--o{ ENTITLEMENT : "grants (deferred)"
-    ENTITLEMENT }o--|| COURSE : "gives access to (deferred; may merge with ENROLLMENT)"
+    ORDER ||--o{ COURSE_ACCESS_GRANT : "grants a purchase grant (deferred)"
     NEWSLETTER_SUBSCRIPTION }o--o| USER : "may link to (needs product confirmation)"
 ```
 
@@ -61,15 +60,14 @@ erDiagram
 | **Service offering** | An offer Xuân provides publicly, as shown on Work With Me and the homepage "Ways". Current examples: *Channel Kickstart Session* (a 90-minute 1:1 session) and *3-Month 1:1 Coaching* (a 12-week program). **A catalog entry, not an appointment** (§3.1) | CONFIRMED. **The first slice:** a public, read-only catalog | is applied for through service applications | `services` (first slice) |
 | **Service application** | A person asking to work with Xuân on a specific offering. Reviewed before Xuân accepts the client (§3.1) | CONFIRMED future concept. **Persistence DEFERRED** to the application/booking slice | service offering; optionally a user; zero or one appointment (0..1) | — |
 | **Appointment** | An actual, scheduled meeting, created only from an accepted application (§3.1) | CONFIRMED future concept. **Persistence and calendar integration DEFERRED** to the application/booking slice | service application | — |
-| **Course** | A structured learning product a user can register for | CONFIRMED | receives enrollments; contains sections | Designed 2026-10-17 (course platform spec): `courses` module |
+| **Course** | A structured learning product a user can register for | CONFIRMED | receives access grants; contains sections | Designed 2026-10-17 (course platform spec): `courses` module |
 | **Course section / lesson** | The ordered parts of a course a learner works through: sections contain ordered lessons, and a lesson points to a Vimeo video | CONFIRMED | course | Designed 2026-10-17 (course platform spec): `courses` module |
-| **Enrollment** | A user's registration in a course | CONFIRMED | user; course | — |
+| **Course access grant** (resolves *enrollment* and *entitlement*) | One right to learn one course, given by an admin now (and by a verified purchase later). **One row per grant**: a user has access while at least one of their grants for that course is active; a revocation closes its grant and keeps it as history, and restoring access adds a new grant. "Enrolled" is derived (has an active grant), not a separate record | CONFIRMED, designed 2026-10-19 (course outcome 2, course spec §5, OD-1) | user (learner, granter, revoker); course; later an order | `courses` (table `course_access_grants`) |
 | **Content post** | An article/post published on the site. **Every post has an author user** | CONFIRMED. **V1 designed 2026-10-15** (blog design spec): text-first blog posts in Vietnamese (i18n-ready), a TipTap/ProseMirror JSON body (H2/H3, lists, quotes, bold, italic, links; no images yet), draft/published, SEO title/description; slug locked after first publication; publishing needs real content. Media, taxonomy, archive/scheduling, redirects, deletion mechanism and previews are deferred (§5) | author user | `content` (table `content_posts`) |
 | **Newsletter subscription** ("Creator Notes") | An email-only list membership that may exist without an account | **NEEDS PRODUCT CONFIRMATION**: design intent only. If confirmed, it's introduced explicitly as a newsletter/email-subscription capability, never as a generic "subscribers" | optionally a user | — |
 | **Building project** ("Đang xây") | Something Xuân is building, with a status | NEEDS PRODUCT DESIGN, and only if it ever becomes database-managed (it's static copy today) | — | — |
-| **Order** | A record of a purchase | DEFERRED | user; entitlements | — |
+| **Order** | A record of a purchase | DEFERRED | user; course access grants (purchase source) | — |
 | **Payment** | Money movement for an order | DEFERRED | order | — |
-| **Entitlement** | A user's right to access paid content | DEFERRED until its relationship with enrollment is designed (they may turn out to be one concept) | order; course | — |
 | **Inquiry** | A message sent through a contact form | DEFERRED while collaboration enquiries stay `mailto` | — | — |
 | **External providers** | Email, payment, calendar or newsletter services we integrate with | Google Calendar / Meet and applicant email notifications: CONFIRMED future integrations of the application/booking slice (§3.1). The others: DEFERRED | appointments; applications | — |
 | **Support / donation** ("Arabica") | Supporting Xuân | DEFERRED while it's handled externally | — | — |
@@ -150,5 +148,5 @@ Content therefore conceptually has an **author user**. The Nest mechanism (guard
 - **Course format:** *settled 2026-10-17.* Self-paced video: a course holds ordered sections, each holding ordered lessons that point to Vimeo videos (course platform spec §4).
 - **Content publishing workflow** beyond the settled rule (editors publish and delete their own posts; admins any). V1 settled 2026-10-15: draft/published, `publishedAt` = first publication, slug locked after it, publishing needs real content (blog design spec B16–B19). **Still open:** images and media storage, cover/OG images, categories and tags, archive, scheduled publishing, slug redirects, the deletion mechanism (hard vs soft; the permission itself stays settled), draft preview links, public filtering/search, featured/reading time, multilingual UI and translation groups.
 - **Newsletter (Creator Notes):** real capability or not.
-- **Enrollment vs entitlement:** one concept or two (decided with orders).
+- **Enrollment vs entitlement:** *settled 2026-10-19.* One concept, the course access grant, one row per grant (course spec §5, OD-1).
 - **Money:** currency, price units, formatting. That's why services carry **no price** in V1.
