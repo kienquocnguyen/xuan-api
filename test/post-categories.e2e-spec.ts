@@ -132,6 +132,19 @@ describe('Public categories, filter and related posts (blog completion B2)', () 
     });
   });
 
+  it('shows no category on public reads once it is archived (final review)', async () => {
+    await post('a', travel);
+    await post('b', travel);
+    await db.query(`UPDATE content_categories SET status = 'archived' WHERE id = $1`, [travel.id]);
+    expect(
+      (await server().get('/posts')).body.data.items.map((i: { category: unknown }) => i.category),
+    ).toEqual([null, null]);
+    expect((await server().get('/posts/a')).body.data.category).toBeNull();
+    expect((await server().get('/posts/a/related')).body.data).toEqual([
+      expect.objectContaining({ slug: 'b', category: null }),
+    ]);
+  });
+
   describe('GET /posts/:slug/related', () => {
     it('prefers the same category, never pads it with others when it has enough (Review Focus 4)', async () => {
       await post('f1', food);

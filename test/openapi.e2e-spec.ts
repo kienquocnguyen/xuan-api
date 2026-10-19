@@ -796,6 +796,15 @@ describe('OpenAPI document', () => {
       expect(propsOf('AdminPostSummaryDto')).toContain('category');
       expect(propsOf('SavePostDto')).toContain('categoryId');
       expect(JSON.stringify(doc().components?.schemas?.PostsPageQuery)).toContain('category');
+      // Nullable on the wire: the generated web types must allow null (final review).
+      const prop = (schema: string, name: string) =>
+        JSON.stringify(
+          (doc().components?.schemas?.[schema] as { properties?: Record<string, unknown> })
+            ?.properties?.[name],
+        );
+      expect(prop('PostSummaryDto', 'category')).toContain('"nullable":true');
+      expect(prop('AdminPostSummaryDto', 'category')).toContain('"nullable":true');
+      expect(prop('SavePostDto', 'categoryId')).toContain('null');
     });
 
     it('documents exactly the codes each category route can return (I18)', () => {
