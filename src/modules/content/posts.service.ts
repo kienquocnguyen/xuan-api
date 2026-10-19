@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { type DataSource, type EntityManager, IsNull, type Repository } from 'typeorm';
+import { type DataSource, type EntityManager, In, IsNull, Not, type Repository } from 'typeorm';
 import { isForeignKeyViolation, isUniqueViolation } from '../../database/postgres-errors.js';
 import { AppError } from '../../errors/app-error.js';
 import { baselineErrors } from '../../errors/baseline-errors.js';
@@ -22,6 +22,8 @@ export type AuthoredPost = Readonly<{
 export type PostPage = Readonly<{ items: AuthoredPost[]; totalItems: number }>;
 type Paging = Readonly<{ page: number; pageSize: number }>;
 
+const RELATED_LIMIT = 3;
+
 /** Blog posts use cases (blog spec §6). */
 @Injectable()
 export class PostsService {
@@ -32,9 +34,23 @@ export class PostsService {
     private readonly categories: CategoriesService,
   ) {}
 
-  async listPublished({ page, pageSize }: Paging): Promise<PostPage> {
+  async listPublished({
+    page,
+    pageSize,
+    category,
+  }: Paging & { category?: string }): Promise<PostPage> {
+    let categoryId: string | undefined;
+    if (category !== undefined) {
+      const found = await this.categories.findActiveBySlug(category);
+      if (!found) throw new AppError(baselineErrors.NOT_FOUND); // unknown or archived (spec §4.3)
+      categoryId = found.id;
+    }
     const [rows, totalItems] = await this.posts.findAndCount({
-      where: { language: POST_LANGUAGE, status: 'published' },
+      where: {
+        language: POST_LANGUAGE,
+        status: 'published',
+        ...(categoryId ? { categoryId } : {}),
+      },
       order: { publishedAt: 'DESC', id: 'DESC' },
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -50,6 +66,32 @@ export class PostsService {
     const post = await this.posts.findOneBy({ language: POST_LANGUAGE, slug, status: 'published' });
     if (!post) throw new AppError(baselineErrors.NOT_FOUND); // drafts too: no existence leak (B13)
     return this.withAuthor(post);
+  }
+
+  /**
+   * Up to 3 published posts for a published post's footer (spec §4.3): its category's newest first, padded with
+   * the newest others; never the post itself. Two queries at most.
+   */
+  async listRelated(slug: string): Promise<AuthoredPost[]> {
+    const { post } = await this.getPublishedBySlug(slug);
+    const published = { language: POST_LANGUAGE, status: 'published' as const };
+    const order = { publishedAt: 'DESC' as const, id: 'DESC' as const };
+    const same = post.categoryId
+      ? await this.posts.find({
+          where: { ...published, categoryId: post.categoryId, id: Not(post.id) },
+          order,
+          take: RELATED_LIMIT,
+        })
+      : [];
+    const others =
+      same.length < RELATED_LIMIT
+        ? await this.posts.find({
+            where: { ...published, id: Not(In([post.id, ...same.map((row) => row.id)])) },
+            order,
+            take: RELATED_LIMIT - same.length,
+          })
+        : [];
+    return this.withAuthors([...same, ...others]);
   }
 
   async listForActor(

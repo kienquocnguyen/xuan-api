@@ -4,6 +4,7 @@ import { UsersModule } from '../users/users.module.js';
 import { AdminPostCategoriesController } from './admin-post-categories.controller.js';
 import { AdminPostsController } from './admin-posts.controller.js';
 import { CategoriesService } from './categories.service.js';
+import { PostCategoriesController } from './post-categories.controller.js';
 import { ContentCategory, ContentCategoryTranslation } from './category.entity.js';
 import { Post } from './post.entity.js';
 import { PostsController } from './posts.controller.js';
@@ -15,7 +16,12 @@ import { PostsService } from './posts.service.js';
     TypeOrmModule.forFeature([Post, ContentCategory, ContentCategoryTranslation]),
     UsersModule,
   ],
-  controllers: [PostsController, AdminPostsController, AdminPostCategoriesController],
+  controllers: [
+    PostsController,
+    PostCategoriesController,
+    AdminPostsController,
+    AdminPostCategoriesController,
+  ],
   providers: [PostsService, CategoriesService],
 })
 export class ContentModule {}
