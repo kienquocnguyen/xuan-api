@@ -1,6 +1,7 @@
 # Blog completion (B1–B4): design
 
-**Status:** **PROPOSED (2026-10-19)**, for owner approval. It isn't a basis for any plan or code until the owner approves it (`development-workflow.md` §3.5, Blog row).
+**Status:** **APPROVED by the owner (2026-10-19)**. The approval covers the design's direction, the four outcomes, BD-1…BD-13, and the answers to Q1–Q3 (§16), with Q3 extended by its additional safeguards (§3.4). §18 records the consistency review that followed the approval.
+- **Execution:** under the bounded autonomous execution row in `development-workflow.md` §3.5 (PR #17, `c2d5419`).
 - **Extends** the frozen Blog V1 design (`2026-10-15-blog-posts-design.md`, decisions B1–B19). Every V1 decision stands unless a row below names it and says how it changes.
 - **Inputs:**
   - the owner's product decisions BD-1…BD-13 (2026-10-19), recorded in §15;
@@ -16,7 +17,7 @@
 | **[Docs]** | Settled in canonical docs (`docs/*.md`, rule IDs) |
 | **[Impl]** | Verified in the current code (`dev` @ `6db8a8a`) |
 | **[Proposed]** | Claude's call within the owner's decisions. Approved with this spec unless the owner changes it |
-| **[Ask]** | Needs the owner's answer: it changes what gets built (§16) |
+| **[Owner Q1–Q3]** | The owner's answers to this spec's questions (§16), 2026-10-19 |
 
 ## 1. Outcome and scope
 
@@ -126,20 +127,53 @@ New FKs reach `users(id)` by entity name, like `content_posts.author_id` (AD14, 
 
 `PostSummaryDto` gains `updatedAt`, which the sitemap needs (audit gap). It's the same value as `PostDto.updatedAt`.
 
-### 3.4 Full replacement and additive compatibility [Proposed]
+### 3.4 Full replacement without silent loss [Owner Q3]
 
-`PUT /admin/posts/:id` stays **full replacement** (V1 §5.3). Every new optional `SavePostDto` field (`tags`, `categoryId`, `coverMediaId`, `coverAlt`, `ogMediaId`) follows the V1 rule: **omitted → cleared** (`[]` or `null`).
+`PUT /admin/posts/:id` stays **full replacement** (V1 §5.3). Q3 adds a requirement: an outdated client must never silently erase data it doesn't know about. It must either stay safe or fail explicitly.
 
-**What "additive" guarantees here, and what it doesn't** [Ask Q3]:
-- **Guaranteed:**
-  - the wire shape (no field, route, component or code is renamed or removed, I19);
-  - every request body valid today still parses.
-- **Not guaranteed:** an *unchanged* client keeping its old *behavior* once B2 and B3 land:
-  - it can't publish a new post (`409 POST_CATEGORY_REQUIRED`, §4.4, the owner's rule);
-  - its `PUT` clears the tags, category, cover and OG that a newer client set.
-- **Why that's acceptable:** both only matter while an old and a new client edit the same posts. xuan-web is the only client, no production deployment exists, and the web updates its editor with each outcome.
-- **The alternative** ("omitted → unchanged" for the new fields only) protects mixed clients. But it makes one DTO behave two ways and contradicts the convention every other `PUT` uses (`api-contract.md`, courses).
-- **Recommendation:** keep full replacement, and ship each outcome's xuan-web editor change before that outcome reaches production.
+**What an existing client omits** (verified against xuan-web `toSavePostInput`, read-only, 2026-10-19). It sends exactly `{ slug, title, excerpt, seoTitle, seoDescription, body }`. So it omits:
+- every new field: `tags` (B1), `categoryId` (B2), `coverMediaId`, `coverAlt`, `ogMediaId` (B3);
+- a body format declaration.
+
+Its TipTap editor is text-only, so it would silently **drop version 2 nodes** (images, embeds…) when it loads such a post and saves it.
+
+**The mechanism** has two explicit guards. Both are documented in OpenAPI and proven by regression tests that replay the real xuan-web request shape:
+
+1. **Omitted-field guard.**
+   - Each new field is optional in `SavePostDto` and **nullable**: an explicit `null` (or `[]` for `tags`) means "clear it".
+   - On `POST` (create), an omitted new field means empty, since nothing is stored yet.
+   - On `PUT`, an omitted new field is accepted **only if the stored value is already empty**. Then full replacement loses nothing, so old clients keep working on every post that has no new data.
+   - If an omitted field's stored value isn't empty, the whole request is rejected with `409 POST_FIELDS_OMITTED`, `details: { fields: ['tags', 'categoryId', …] }` (the omitted fields that hold data), and **nothing is written**.
+   - This is not a partial update: a request is either a complete replacement or refused.
+   - `coverAlt` follows `coverMediaId` (§5.4).
+2. **Body contract version.**
+   - `SavePostDto.bodyVersion?: 1 | 2` declares the body format the client's editor speaks. Omitted means `1`, today's client.
+   - A request with version 1 may only contain version 1 nodes; version 2 constructs → `400 INVALID` at their path.
+   - A version 1 request on a post whose **stored** body is version 2 → `409 POST_BODY_VERSION_UNSUPPORTED`, with no write. The old editor can't have kept nodes it never loaded.
+   - The stored version is still the lowest one the document fits (§5.5).
+
+**Creating and publishing with an old client:**
+- creating works;
+- publishing a post without a category gets the explicit `409 POST_CATEGORY_REQUIRED` (§4.4, BD-3). No data is touched.
+
+Old published posts without a category stay published, readable and editable by an old client (BD-3).
+
+**What "additive" means here:**
+- the wire shape: nothing renamed or removed (I19);
+- every request body valid today still parses;
+- an old client's request either behaves exactly as before or fails explicitly with no data loss.
+
+**Rejected alternatives:**
+- "Omitted → unchanged": a silent partial update, which Q3 forbids.
+- Switching to `PATCH`: Q3 forbids it.
+- An `If-Match`/`updatedAt` precondition: it doesn't detect field loss, because the old client reads a fresh `updatedAt` too.
+
+**Rollout order:**
+1. Each backend outcome may deploy before its web change. Old clients stay safe through these guards.
+2. The web then upgrades its post form to send every field (explicit `null`/`[]`) and `bodyVersion: 2` once its editor supports version 2.
+3. Only then do authors create data an old client would refuse to overwrite.
+
+The frontend handoff (§13) spells this out per outcome.
 
 ### 3.5 Response enum widening
 
@@ -291,7 +325,7 @@ The `body_version` CHECK widens to `IN (1, 2)`.
 | `MEDIA_LOCAL_DIR` | Default `./storage/media`. The test env uses its own folder |
 | `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_BUCKET` | Required only with `r2`. Values never printed (I5) |
 
-- **`disabled`:** `POST /admin/media/images` → `409 MEDIA_STORAGE_DISABLED`, and no file is written. It's for a production API that launches before R2 exists. It's an explicit setting, never a silent fallback [Ask Q1].
+- **`disabled`:** `POST /admin/media/images` → `409 MEDIA_STORAGE_DISABLED`, and no file is written. It's for a production API that launches before R2 exists. It's an explicit setting, never a silent fallback [Owner Q1]. Auth, courses and text-only blog endpoints work unchanged in that mode, and no R2 variable is needed to boot.
 - **Development serving:** with `local`, `configureApp()` serves `MEDIA_LOCAL_DIR` at `/media` (`express.static`):
   - `.webp` only;
   - no directory index, no dotfiles;
@@ -338,7 +372,7 @@ The `body_version` CHECK widens to `IN (1, 2)`.
 
 **Version selection** [Proposed]:
 - The server stores the **lowest version whose allow-list accepts the document**: a text-only document stays `bodyVersion: 1`, and anything using a version 2 construct is stored as 2.
-- The client never sends a version.
+- The client declares the format its editor speaks with `bodyVersion?: 1 | 2` (omitted = 1, §3.4). The server never trusts that as the stored version: it stores the lowest version that fits.
 - An unchanged web renderer therefore keeps rendering every text-only post. Stored version 1 documents stay valid forever (V1 §4.2).
 - OpenAPI documents the version 2 schema (`PostBodyDocument`, `PostBodyNode` and `PostBodyMark` widen additively). Versions are distinguished by `bodyVersion`.
 
@@ -359,7 +393,8 @@ The `body_version` CHECK widens to `IN (1, 2)`.
 |---|---|
 | `POST_MEDIA_NOT_FOUND` | A cover, OG or body image references media that doesn't exist |
 | `POST_MEDIA_INCOMPLETE` | Publishing, or keeping published, a post with an unfinished before/after block |
-| `MEDIA_STORAGE_DISABLED` | An upload while `MEDIA_STORAGE=disabled` [Ask Q1] |
+| `MEDIA_STORAGE_DISABLED` | An upload while `MEDIA_STORAGE=disabled` [Owner Q1] |
+| `POST_BODY_VERSION_UNSUPPORTED` | A `PUT` declaring body version 1 on a post stored as version 2 (§3.4) |
 
 ## 6. Discussion and moderation (outcome B4) [Owner BD-6, BD-7, BD-8]
 
@@ -373,7 +408,7 @@ The `body_version` CHECK widens to `IN (1, 2)`.
 | `post_id` | `uuid` | no | — | `fk_content_post_ratings_post_id` → `content_posts(id)` `RESTRICT` |
 | `user_id` | `uuid` | no | — | `fk_content_post_ratings_user_id` → `users(id)` `RESTRICT` (by name); `ix_content_post_ratings_user_id` |
 | `value` | `smallint` | no | — | `ck_content_post_ratings_value`: 1–5 |
-| `status` | `varchar(16)` | no | `'visible'` | `ck_…_status`: `IN ('visible','hidden')` [Ask Q2] |
+| `status` | `varchar(16)` | no | `'visible'` | `ck_…_status`: `IN ('visible','hidden')` [Owner Q2] |
 | `moderated_by` | `uuid` | yes | — | `fk_content_post_ratings_moderated_by` → `users(id)` `RESTRICT` |
 | `moderated_at` | `timestamptz` | yes | — | `ck_…_moderation_pair`: both set or both null |
 | `created_at`, `updated_at` | `timestamptz` | no | `now()` | |
@@ -434,7 +469,7 @@ Every route needs the post to be **published**; otherwise (missing, draft, archi
 | `POST /admin/post-comments/:commentId/hide` · `…/restore` · `…/delete` | `AdminPostCommentDto` |
 | `POST /admin/post-ratings/:ratingId/hide` · `…/restore` | `AdminPostRatingDto` |
 
-**Transitions** [Proposed answer to BD-7's open point, Ask Q2]:
+**Transitions** [Owner Q2]:
 - `hide`: visible → hidden.
 - `restore`: hidden → visible.
 - `delete` (comments): visible or hidden → deleted.
@@ -512,9 +547,9 @@ Every `down()` is meaningful. B1's `down()` fails if an archived post exists; th
 
 | Outcome | New routes | Changed DTOs (fields added) | New codes |
 |---|---|---|---|
-| B1 | `POST /admin/posts/:id/archive` · `…/restore`, `DELETE /admin/posts/:id` | `PostSummaryDto` + `updatedAt`; `PostDto` + `tags`; admin DTOs + `tags`, status `+'archived'`; `SavePostDto` + `tags?`; `AdminPostsQuery.status` + `archived` | `POST_ARCHIVED`, `POST_WAS_PUBLISHED` |
+| B1 | `POST /admin/posts/:id/archive` · `…/restore`, `DELETE /admin/posts/:id` | `PostSummaryDto` + `updatedAt`; `PostDto` + `tags`; admin DTOs + `tags`, status `+'archived'`; `SavePostDto` + `tags?` (nullable, §3.4); `AdminPostsQuery.status` + `archived` | `POST_ARCHIVED`, `POST_WAS_PUBLISHED`, `POST_FIELDS_OMITTED` (§3.4) |
 | B2 | `GET /post-categories`, `GET /posts/:slug/related`, 6 admin category routes | + `category` on post and admin DTOs; `SavePostDto` + `categoryId?`; `PostsPageQuery` + `category?` | §4.5 |
-| B3 | `POST /admin/media/images` | + `coverImage`, `ogImage`; `SavePostDto` + `coverMediaId?`, `coverAlt?`, `ogMediaId?`; body schema widened; `bodyVersion` may be 2 | §5.6 |
+| B3 | `POST /admin/media/images` | + `coverImage`, `ogImage`; `SavePostDto` + `coverMediaId?`, `coverAlt?`, `ogMediaId?`, `bodyVersion?`; body schema widened; `bodyVersion` may be 2 | §5.6, `POST_BODY_VERSION_UNSUPPORTED` (§3.4) |
 | B4 | 6 reader routes, 7 admin moderation routes | `PostSummaryDto` + `ratingSummary` | §6.5 + baseline `RATE_LIMITED` |
 
 New request components and DTO names are I19 identifiers once merged. Every route documents every code it can return (I18). Each outcome adds rows to the `api-contract.md` §12 xuan-web delta table.
@@ -570,6 +605,10 @@ Each outcome is done when, **with output observed**:
 - Category filter chips; related articles.
 - Discussion UI, including 429 handling; the moderation page.
 - Regenerated OpenAPI types (`status` gains `archived`).
+- **Q3 compatibility:** the post form must send **every** `SavePostDto` field (explicit `null`/`[]` to clear). It sends `bodyVersion: 2` only once its editor loads and keeps every version 2 node. Handle `409 POST_FIELDS_OMITTED` (`details.fields`) and `409 POST_BODY_VERSION_UNSUPPORTED` with a "reload in an updated editor" message.
+- **Slugs:** no backend change. The web already slugifies Vietnamese titles and handles `409 POST_SLUG_TAKEN` by asking for another slug. A server-side availability endpoint would race with the insert anyway, so the unique constraint stays the single source of truth. Published slugs stay locked (B17).
+- **Caching:** the web caches public blog reads for about 5 minutes (`revalidate`). After a successful admin mutation (publish, unpublish, archive, restore, delete, a `PUT` of a published post, category changes), the admin screen calls a **Next.js server action in xuan-web** that runs `revalidatePath`/`revalidateTag` for `/blog`, the article and the category pages. That needs no backend webhook or shared secret. Discussion reads should stay uncached, or use a short client fetch.
+- **CSRF (reviewed 2026-10-19, no change):** the session cookie is `SameSite=Lax`. Every non-GET needs `X-Requested-With: XMLHttpRequest`, which forces a CORS preflight against the exact origin list, and a present `Origin` must be allowed. The upload's `FormData` keeps the same header. OAuth callbacks are `GET` and unaffected.
 
 ## 14. Documentation changes (each in its outcome's branch)
 
@@ -602,15 +641,13 @@ Each outcome is done when, **with output observed**:
 | BD-12 | Additive-only API changes | §3.4, §10 |
 | BD-13 | Blog delegation recorded in §3.5 | PR #16 (`6db8a8a`) |
 
-## 16. Questions for the owner
+## 16. Owner answers (2026-10-19)
 
-These come from the builder check (a fresh reviewer who planned from this document alone). Each answer changes what gets built.
-
-| # | Question | Recommendation | What it changes |
-|---|---|---|---|
-| Q1 | Can production run with uploads explicitly switched off (`MEDIA_STORAGE=disabled` → `409 MEDIA_STORAGE_DISABLED`) until R2 exists? | **Yes.** Without it, a production API can't boot without R2 secrets (I5), so R2 would block launching anything, courses included. `local` stays forbidden in production, so nothing falls back silently | The config schema, one error code, and when B3 can ship |
-| Q2 | Moderation: (a) is a **deleted comment final**, with no restore by anyone? (b) do **ratings** get **hide/restore only**, with no separate delete? | **(a) yes, (b) yes.** Restoring a deleted comment could republish words its author withdrew. Hiding is the reversible tool. A rating has no content to delete, and hiding already removes it from the summary | B4's `content_post_ratings.status` values, its route count and `COMMENT_DELETED` |
-| Q3 | Compatibility (§3.4): is it acceptable that an **unchanged** client can't publish once categories land, and that its `PUT` clears fields a newer client set? | **Yes.** Keep full replacement, and ship each outcome's xuan-web editor change before that outcome reaches production. No production exists yet, and the convention stays one rule. The alternative is "omitted → unchanged" for the new fields | `SavePostDto` semantics in B1–B3, the update logic and the compatibility tests |
+| # | Question | Answer |
+|---|---|---|
+| Q1 | Can production run with uploads switched off? | **Approved.** `MEDIA_STORAGE=disabled` → uploads get `409 MEDIA_STORAGE_DISABLED` (the stable envelope). Auth, course and text-only blog endpoints keep working. Production never falls back to local disk. No R2 credential is needed to start unrelated APIs. Local development uses the local adapter; a configured R2 uses R2. No purchases, accounts or exposed credentials |
+| Q2 | Moderation and deletion | **Approved.** A comment deleted by its author is permanently non-restorable, and admins can't restore it. Admins hide and restore comments that aren't deleted. **Admin soft-delete is final as well.** Ratings support hide and restore only and can't be deleted in V1. Hidden ratings don't count in public summaries. Deleted comments never appear publicly |
+| Q3 | Full-replacement `PUT` and frontend compatibility | **Approved with safeguards:** keep full replacement, but an outdated client must never silently erase new data. It must stay safe or fail explicitly, with a documented and tested mechanism, no `PATCH` switch, and a documented rollout order. Realized in §3.4 (omitted-field guard + body contract version) |
 
 **My calls, for checking while reading** (all marked [Proposed]):
 - restore of a non-archived post is a no-op;
@@ -636,3 +673,16 @@ B1 → B2 → B3 → B4, each from the latest `dev` after the previous one merge
 - `@nestjs/throttler` arrives in B4.
 
 Each arrives with its outcome (workflow §6). The existing `test/http-contract.e2e-spec.ts` format failure on `dev` is unrelated to the blog work. It gets its own `fix/*` branch from `dev`, between outcomes (`xuan-git-branch-cohesion`).
+
+## 18. Consistency review after approval (2026-10-19)
+
+A focused review of this spec against the owner's directive, BD-1…BD-13 and Blog V1's B1–B19:
+
+| Area | Finding | Resolution |
+|---|---|---|
+| §16 calls | Every [Proposed] call stays within BD-1…BD-13 and Q1–Q3. None reopens a product decision. "Unknown or archived category filter → 404" and "public `category` null when archived" are presentation calls, consistent with BD-3's "archive instead of delete" | Kept |
+| Compatibility | The proposed "omitted → cleared" would silently erase data under Q3. The old editor would also drop version 2 nodes | Replaced by §3.4's two guards (two new 409 codes, documented and tested) |
+| Destructive operations | Only `DELETE /admin/posts/:id` hard-deletes, and only never-published drafts (BD-1). Everything else is a state change. Migrations add, or widen a CHECK; none drops data | Kept. B1's `down()` documents its roll-forward (C9) |
+| `xuan_dev` scope (§3.5 bounded row) | B1 and B3 change existing CHECKs, and B2/B3 add FKs or CHECKs to `content_posts`, so those are owner-approved per the row. B4 adds only new tables, but would wait behind an earlier pending migration | Every `xuan_dev` run goes into one consolidated owner packet. The PRs merge on full `xuan_test` evidence (§3.5 row). No design was weakened to avoid approval |
+| Security | Upload pipeline, no iframes, media-only image hosts, plain-text comments, no emails, per-user throttle; CSRF reviewed without change | Kept |
+| V1 invariants | B16 (`publishedAt`), B17 (slug lock), B18 (meaningful text), B14 (last write wins) and B13 (no draft leaks) are unchanged. Archived posts join B13's 404 | Kept |
