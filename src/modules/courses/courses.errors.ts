@@ -1,6 +1,6 @@
 import type { ErrorDefinition } from '../../errors/app-error.js';
 
-/** Courses-module error codes (D10; course spec §11.5): outcome 1's conflicts, outcome 2's access refusal. */
+/** Courses-module error codes (D10; course spec §11.5): curriculum conflicts, the access refusal, progressed lessons. */
 export const coursesErrors = {
   COURSE_SLUG_TAKEN: {
     code: 'COURSE_SLUG_TAKEN',
@@ -36,6 +36,11 @@ export const coursesErrors = {
     code: 'CURRICULUM_ORDER_MISMATCH',
     kind: 'conflict',
     message: 'The order must list every section and lesson of the course exactly once.',
+  },
+  LESSON_HAS_PROGRESS: {
+    code: 'LESSON_HAS_PROGRESS',
+    kind: 'conflict',
+    message: 'This lesson has learner progress; unpublish it instead.',
   },
   COURSE_ACCESS_REQUIRED: {
     code: 'COURSE_ACCESS_REQUIRED',

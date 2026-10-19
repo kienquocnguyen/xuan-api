@@ -329,4 +329,66 @@ describe('course catalog invariants (courses, course_sections, course_lessons)',
       );
     });
   });
+
+  describe('lesson_progress (outcome 3)', () => {
+    const UNKNOWN_ID = '01900000-0000-7000-8000-000000000000';
+    let learnerId: string;
+    let lessonId: string;
+
+    const insertProgress = (columns: Record<string, unknown> = {}) =>
+      insert('lesson_progress', {
+        user_id: learnerId,
+        lesson_id: lessonId,
+        position_seconds: 30,
+        ...columns,
+      });
+
+    beforeEach(async () => {
+      [{ id: learnerId }] = await insert('users', { email: 'hoc@example.vn', display_name: 'Học' });
+      [{ id: lessonId }] = await insertLesson();
+    });
+
+    it('fills a uuid v7 id and the timestamps; completion starts empty', async () => {
+      const [{ id }] = await insertProgress();
+      const [row] = await db.query<
+        {
+          id: string;
+          completed_at: Date | null;
+          last_watched_at: Date;
+          created_at: Date;
+          updated_at: Date;
+        }[]
+      >(
+        `SELECT id, completed_at, last_watched_at, created_at, updated_at FROM lesson_progress WHERE id = $1`,
+        [id],
+      );
+      expect(row.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/);
+      expect(row.completed_at).toBeNull();
+      expect(row.last_watched_at).toBeInstanceOf(Date);
+      expect(row.created_at).toBeInstanceOf(Date);
+      expect(row.updated_at).toBeInstanceOf(Date);
+    });
+
+    it.each([
+      ['ck_lesson_progress_position_not_negative', { position_seconds: -1 }],
+      ['fk_lesson_progress_user_id', { user_id: UNKNOWN_ID }],
+      ['fk_lesson_progress_lesson_id', { lesson_id: UNKNOWN_ID }],
+    ])('fails on %s', async (constraint, columns) => {
+      expect(await failureOf(insertProgress(columns))).toBe(constraint);
+    });
+
+    it('fails on uq_lesson_progress_user_id_lesson_id for a second row of the same user and lesson', async () => {
+      await insertProgress();
+      expect(await failureOf(insertProgress({ position_seconds: 60 }))).toBe(
+        'uq_lesson_progress_user_id_lesson_id',
+      );
+    });
+
+    it('fails on fk_lesson_progress_lesson_id when a lesson with progress is deleted', async () => {
+      await insertProgress();
+      expect(
+        await failureOf(db.query('DELETE FROM course_lessons WHERE id = $1', [lessonId])),
+      ).toBe('fk_lesson_progress_lesson_id');
+    });
+  });
 });

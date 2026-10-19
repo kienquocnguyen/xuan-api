@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { In, type DataSource, type EntityManager, type Repository } from 'typeorm';
-import { isUniqueViolation } from '../../database/postgres-errors.js';
+import { isForeignKeyViolation, isUniqueViolation } from '../../database/postgres-errors.js';
 import { AppError } from '../../errors/app-error.js';
 import { baselineErrors } from '../../errors/baseline-errors.js';
 import { CourseLesson } from './course-lesson.entity.js';
@@ -59,6 +59,32 @@ export class CoursesService {
   /** The course's published lessons in curriculum order, sections without one omitted (course spec §4.2). */
   async loadPublishedTree(course: Course): Promise<CourseTree> {
     return this.loadTree(this.dataSource.manager, course, 'published');
+  }
+
+  /** The same for several courses in two queries, whatever their number (D38: no N+1). Keeps the input order. */
+  async loadPublishedTrees(courses: readonly Course[]): Promise<CourseTree[]> {
+    if (courses.length === 0) return [];
+    const sections = await this.dataSource.manager.find(CourseSection, {
+      where: { courseId: In(courses.map((course) => course.id)) },
+      order: { position: 'ASC' },
+    });
+    const lessons =
+      sections.length === 0
+        ? []
+        : await this.dataSource.manager.find(CourseLesson, {
+            where: { sectionId: In(sections.map((section) => section.id)), status: 'published' },
+            order: { position: 'ASC' },
+          });
+    return courses.map((course) => ({
+      course,
+      sections: sections
+        .filter((section) => section.courseId === course.id)
+        .map((section) => ({
+          section,
+          lessons: lessons.filter((lesson) => lesson.sectionId === section.id),
+        }))
+        .filter((entry) => entry.lessons.length > 0),
+    }));
   }
 
   async listForAdmin(): Promise<AdminCourseListItem[]> {
@@ -269,6 +295,18 @@ export class CoursesService {
 
   async deleteLesson(lessonId: string): Promise<void> {
     const courseId = await this.courseIdOfLesson(lessonId);
+    try {
+      await this.deleteLessonLocked(courseId, lessonId);
+    } catch (error) {
+      // P5's backstop (spec §10.4): RESTRICT keeps a lesson with learner progress; unpublishing is the way out.
+      if (isForeignKeyViolation(error, 'fk_lesson_progress_lesson_id')) {
+        throw new AppError(coursesErrors.LESSON_HAS_PROGRESS);
+      }
+      throw error;
+    }
+  }
+
+  private async deleteLessonLocked(courseId: string, lessonId: string): Promise<void> {
     await this.withCourseLock(courseId, async (manager) => {
       const lesson = await this.lockedLesson(manager, courseId, lessonId);
       if (lesson.status === 'published') throw new AppError(coursesErrors.LESSON_IS_PUBLISHED);

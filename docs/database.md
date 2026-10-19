@@ -241,6 +241,7 @@ The **actual, decided schema**, so the current database can be understood at a g
 | `content_posts` | **implemented** 2026-10-15 by migration `CreateContentPosts1792001598048` (owner-approved blog design spec §3.2). Owner-approved runs: `xuan_test` (guarded run, revert/run round trip, empty second generate) and `xuan_dev` (empty second generate); `\d+` matches this map on both, cross-module FK included; invariants proven by `test/content-posts-schema.e2e-spec.ts` | `content` (entity `Post`) | `docs/superpowers/plans/2026-10-15-blog-posts.md`, Task 1 |
 | `courses`, `course_sections`, `course_lessons` | **implemented** 2026-10-19 by migration `CreateCourseCatalog1792343945663` (map owner-approved with the plan, Checkpoint M). Owner-approved runs: `xuan_test` (guarded run, revert/run round trip, empty second generate) and `xuan_dev` (empty second generate; the other tables' schema, rows and contents unchanged); `\d+` matches this map on both, including `DEFERRABLE INITIALLY DEFERRED`; invariants proven by `test/courses-schema.e2e-spec.ts` | `courses` (entities `Course`, `CourseSection`, `CourseLesson`) | `docs/superpowers/plans/2026-10-18-course-catalog.md`, Task 2 |
 | `course_access_grants` | **implemented** 2026-10-19 by migration `CreateCourseAccessGrants1792377789142` (map owner-approved with the plan, Checkpoint M). Owner-approved runs: `xuan_test` (Checkpoint A: guarded run, revert/run round trip, empty second generate) and `xuan_dev` (Checkpoint D: empty second generate; the other tables' schema, rows and contents unchanged; no grants created); `\d+` matches this map on both, including the partial unique's `WHERE`; invariants proven by `test/courses-schema.e2e-spec.ts` | `courses` (entity `CourseAccessGrant`) | `docs/superpowers/plans/2026-10-19-course-access.md`, Task 1 |
+| `lesson_progress` | **implemented** 2026-10-19 by migration `CreateLessonProgress1792393991146` (map owner-approved with the plan, Checkpoint M). Owner-approved runs: `xuan_test` (Checkpoint A: guarded run, revert/run round trip, empty second generate) and `xuan_dev` (Checkpoint D: empty second generate; the other tables' schema, rows and contents unchanged; no progress rows created); `\d+` matches this map on both, byte-identical; invariants proven by `test/courses-schema.e2e-spec.ts` | `courses` (entity `LessonProgress`) | `docs/superpowers/plans/2026-10-19-course-progress.md`, Task 1 |
 
 #### `services`
 
@@ -501,7 +502,7 @@ Sections have **no status**: a section is shown publicly only while it holds a p
 
 **TypeORM caveat:** `migration:generate` compares unique constraints **by name only** and doesn't read `condeferrable`. A later change of deferrability on either position unique is invisible to generate and needs a hand-written migration.
 
-**Not in these tables:** price, availability or a "for sale" flag (orders slice, spec §10.5); a language column (additive later); access grants (`course_access_grants`, below) and progress (`lesson_progress`, outcome 3).
+**Not in these tables:** price, availability or a "for sale" flag (orders slice, spec §10.5); a language column (additive later); access grants (`course_access_grants`) and progress (`lesson_progress`), below.
 
 #### `course_access_grants`
 
@@ -551,3 +552,44 @@ erDiagram
 **TypeORM caveat (spike S8):** `migration:generate` compares indexes by name, uniqueness and columns, **not by their `WHERE` predicate**. A later predicate change is invisible to generate and needs a hand-written migration, like the deferrable position uniques above.
 
 **Not in this table:** `order_id` and the `'purchase'` source (orders slice, spec §5.4, expand-only); an expiry (CP1: lifetime access).
+
+#### `lesson_progress`
+
+A learner's self-reported progress in one lesson (course platform design spec §9). **One row per (user, lesson)**, written by one upsert per save. The row is kept when access is revoked or the course or lesson is unpublished, so restoring access or republishing brings it back (CP2, §10.2). Nothing in V1 resets it (OD-11 deferred). The lesson FK stays inside the module; the user FK is declared by entity name (AD14).
+
+```mermaid
+erDiagram
+    users ||--o{ lesson_progress : "records"
+    course_lessons ||--o{ lesson_progress : "is tracked by"
+
+    lesson_progress {
+        uuid id PK "pk_lesson_progress · DEFAULT uuidv7()"
+        uuid user_id FK "fk_lesson_progress_user_id · RESTRICT · UQ with lesson_id"
+        uuid lesson_id FK "fk_lesson_progress_lesson_id · RESTRICT"
+        integer position_seconds "required · CK ck_lesson_progress_position_not_negative"
+        timestamptz completed_at "nullable · sticky"
+        timestamptz last_watched_at "required · DEFAULT now()"
+        timestamptz created_at "required · DEFAULT now()"
+        timestamptz updated_at "required · DEFAULT now()"
+    }
+```
+
+| Column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_lesson_progress` | D26 |
+| `user_id` | `uuid` | yes | — | **FK** `fk_lesson_progress_user_id` → `users(id)` `ON DELETE RESTRICT` (by entity name, AD14); leads `uq_lesson_progress_user_id_lesson_id` | The learner; always the session user (I9) |
+| `lesson_id` | `uuid` | yes | — | **FK** `fk_lesson_progress_lesson_id` → `course_lessons(id)` `ON DELETE RESTRICT` | Survives reorders and moves (a lesson's id never changes). `RESTRICT` makes a lesson with progress undeletable; its violation becomes `409 LESSON_HAS_PROGRESS` (P5) |
+| `position_seconds` | `integer` | yes | — | **CK** `ck_lesson_progress_position_not_negative`: `position_seconds >= 0` | Clamped on write to the lesson's `duration_seconds` when known; read-clamped after a duration decrease (§9.6). The API caps input at 86 400 |
+| `completed_at` | `timestamptz` | no | — | — | **Sticky**: the upsert keeps the first value (`COALESCE`); nothing clears it |
+| `last_watched_at` | `timestamptz` | yes | `now()` | — | Server time of the last write; the latest one picks the resume lesson (§9.4) |
+| `created_at` | `timestamptz` | yes | `now()` | — | D27 |
+| `updated_at` | `timestamptz` | yes | `now()` | — | D27; every write sets it (the upsert's `DO UPDATE` names it explicitly) |
+
+**Table-level constraints and indexes:**
+
+| Name | Kind | Definition | Note |
+|---|---|---|---|
+| `uq_lesson_progress_user_id_lesson_id` | UNIQUE | `(user_id, lesson_id)` | One row per (user, lesson). The upsert's `ON CONFLICT ON CONSTRAINT` target (D32). Its leading `user_id` is the user FK index and serves every learner read (`WHERE user_id = $1 AND lesson_id IN (…)`) |
+| `ix_lesson_progress_lesson_id` | INDEX | `(lesson_id)` | The lesson FK's `RESTRICT` check on a lesson delete looks rows up by `lesson_id`; without it that's a full scan of a table that grows with users × lessons (as `ix_sessions_user_id`) |
+
+**Not in this table:** a course id (derived through the lesson's section), watch-time totals, a reset flag (OD-11 deferred).

@@ -1,5 +1,5 @@
-import { Controller, Get, Header, Param } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Header, HttpCode, Param, Put } from '@nestjs/common';
+import { ApiNoContentResponse, ApiTags } from '@nestjs/swagger';
 import { baselineErrors } from '../../errors/baseline-errors.js';
 import { CurrentUser } from '../../http/auth/auth.decorators.js';
 import type { AuthenticatedUser } from '../../http/auth/role.js';
@@ -17,9 +17,10 @@ import {
   toLearnerCourseSummaryDto,
   toLessonPlaybackDto,
 } from './dto/learning.dto.js';
+import { type SaveLessonProgressInput, saveLessonProgressSchema } from './dto/save-progress.dto.js';
 import { LearningService } from './learning.service.js';
 
-const { VALIDATION_FAILED, UNAUTHENTICATED, NOT_FOUND } = baselineErrors;
+const { VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND } = baselineErrors;
 const { COURSE_ACCESS_REQUIRED } = coursesErrors;
 
 /**
@@ -37,8 +38,8 @@ export class LearningController {
   @ApiErrorResponses(UNAUTHENTICATED)
   async list(@CurrentUser() user: AuthenticatedUser): Promise<LearnerCourseSummaryDto[]> {
     // Unpaginated: a learner holds a handful of courses (DEFAULT deviation, course spec §11.2).
-    const items = await this.learning.listCourses(user.id);
-    return items.map(toLearnerCourseSummaryDto);
+    const views = await this.learning.listCourses(user.id);
+    return views.map(toLearnerCourseSummaryDto);
   }
 
   @Get(':slug')
@@ -65,5 +66,25 @@ export class LearningController {
     return toLessonPlaybackDto(
       await this.learning.getPlayback(user.id, params.slug, params.lessonId),
     );
+  }
+
+  @Put(':slug/lessons/:lessonId/progress')
+  @HttpCode(204)
+  @ApiNoContentResponse({ description: 'The progress is saved.' })
+  @ApiSchemaParameters('path', lessonPathParamsSchema)
+  @ApiErrorResponses(
+    VALIDATION_FAILED,
+    UNAUTHENTICATED,
+    FORBIDDEN, // CsrfGuard: a write without X-Requested-With
+    NOT_FOUND,
+    COURSE_ACCESS_REQUIRED,
+  )
+  async saveProgress(
+    @Param({ schema: lessonPathParamsSchema }) params: LessonPathParams,
+    @Body({ schema: saveLessonProgressSchema }) input: SaveLessonProgressInput,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<void> {
+    // Self-reported learning state for this user only (spec §9.5); the user is never client input (I9).
+    await this.learning.saveProgress(user.id, params.slug, params.lessonId, input);
   }
 }

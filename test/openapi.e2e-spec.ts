@@ -426,7 +426,8 @@ describe('OpenAPI document', () => {
         [
           '/admin/course-lessons/{lessonId}',
           'delete',
-          [...input, 'NOT_FOUND', 'LESSON_IS_PUBLISHED'],
+          // Outcome 3 widens this 409 union (spec §11.6 compile-time caveat).
+          [...input, 'NOT_FOUND', 'LESSON_IS_PUBLISHED', 'LESSON_HAS_PROGRESS'],
         ],
       ];
       for (const [path, method, routeCodes] of expected) {
@@ -435,9 +436,6 @@ describe('OpenAPI document', () => {
           codes: [...routeCodes].sort(),
         });
       }
-      expect(codes('/admin/course-lessons/{lessonId}', 'delete')).not.toContain(
-        'LESSON_HAS_PROGRESS',
-      );
     });
 
     it('documents the path ids as uuids, the 204 deletes and the order body', () => {
@@ -510,15 +508,26 @@ describe('OpenAPI document', () => {
         'source',
         'user',
       ]);
-      expect(propsOf('LearnerCourseSummaryDto')).toEqual(['course', 'totalLessons']);
-      expect(propsOf('LearnerCourseDto')).toEqual(['course', 'sections']);
+      expect(propsOf('LearnerCourseSummaryDto')).toEqual([
+        'completedLessons',
+        'course',
+        'resumeLessonId',
+        'totalLessons',
+      ]);
+      expect(propsOf('LearnerCourseDto')).toEqual(['course', 'resumeLessonId', 'sections']);
       expect(propsOf('LearnerCourseSectionDto')).toEqual(['id', 'lessons', 'title']);
-      expect(propsOf('LearnerCourseLessonDto')).toEqual(['durationSeconds', 'id', 'title']);
+      expect(propsOf('LearnerCourseLessonDto')).toEqual([
+        'durationSeconds',
+        'id',
+        'progress',
+        'title',
+      ]);
       expect(propsOf('LessonPlaybackDto')).toEqual([
         'durationSeconds',
         'id',
         'nextLessonId',
         'previousLessonId',
+        'progress',
         'sectionTitle',
         'title',
         'video',
@@ -594,6 +603,66 @@ describe('OpenAPI document', () => {
           doc.paths['/admin/courses/{courseId}/access/{userId}']?.delete?.responses ?? {},
         ),
       ).toContain('204');
+    });
+  });
+
+  describe('lesson progress contract (course spec §9.2, §11.6 outcome 3)', () => {
+    const path = '/learn/courses/{slug}/lessons/{lessonId}/progress';
+    const schemaOf = (name: string) =>
+      createOpenApiDocument(app).components?.schemas?.[name] as
+        { properties?: Record<string, Record<string, unknown>>; required?: string[] } | undefined;
+
+    it('names the progress components and documents their fields', () => {
+      expect(Object.keys(createOpenApiDocument(app).components?.schemas ?? {})).toEqual(
+        expect.arrayContaining(['LessonProgressDto', 'SaveLessonProgressDto']),
+      );
+      expect(Object.keys(schemaOf('LessonProgressDto')?.properties ?? {}).sort()).toEqual([
+        'completed',
+        'positionSeconds',
+      ]);
+      const save = schemaOf('SaveLessonProgressDto');
+      expect(Object.keys(save?.properties ?? {}).sort()).toEqual(['completed', 'positionSeconds']);
+      expect(save?.required).toEqual(['positionSeconds']);
+      expect(save?.properties?.positionSeconds).toMatchObject({
+        type: 'integer',
+        minimum: 0,
+        maximum: 86400,
+      });
+    });
+
+    it('documents the save as a 204 with its body, path parameters and exact codes (I18)', () => {
+      const doc = createOpenApiDocument(app);
+      const op = doc.paths[path]?.put;
+      expect(Object.keys(op?.responses ?? {})).toContain('204');
+      expect(JSON.stringify(op?.requestBody)).toContain(
+        '#/components/schemas/SaveLessonProgressDto',
+      );
+      const codes = Object.entries(op?.responses ?? {})
+        .filter(([status]) => Number(status) >= 400)
+        .flatMap(([, response]) =>
+          String((response as { description?: string }).description).split(' | '),
+        )
+        .sort();
+      expect(codes).toEqual(
+        [
+          'COURSE_ACCESS_REQUIRED',
+          'FORBIDDEN',
+          'INTERNAL_ERROR',
+          'NOT_FOUND',
+          'PAYLOAD_TOO_LARGE',
+          'UNAUTHENTICATED',
+          'VALIDATION_FAILED',
+        ].sort(),
+      );
+      type Parameter = { name: string; in: string; schema?: { format?: string } };
+      expect((op?.parameters ?? []) as Parameter[]).toEqual([
+        expect.objectContaining({ name: 'slug', in: 'path' }),
+        expect.objectContaining({
+          name: 'lessonId',
+          in: 'path',
+          schema: expect.objectContaining({ format: 'uuid' }),
+        }),
+      ]);
     });
   });
 });

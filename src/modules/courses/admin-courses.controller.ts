@@ -35,6 +35,7 @@ const {
   COURSE_NEEDS_PUBLISHED_LESSON,
   LESSON_VIDEO_MISSING,
   LESSON_IS_PUBLISHED,
+  LESSON_HAS_PROGRESS,
   SECTION_NOT_EMPTY,
   CURRICULUM_ORDER_MISMATCH,
 } = coursesErrors;
@@ -232,7 +233,14 @@ export class AdminCoursesController {
   @HttpCode(204)
   @ApiNoContentResponse({ description: 'The draft lesson is deleted.' })
   @ApiSchemaParameters('path', courseLessonIdParamSchema)
-  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, LESSON_IS_PUBLISHED)
+  @ApiErrorResponses(
+    VALIDATION_FAILED,
+    UNAUTHENTICATED,
+    FORBIDDEN,
+    NOT_FOUND,
+    LESSON_IS_PUBLISHED,
+    LESSON_HAS_PROGRESS,
+  )
   async deleteLesson(
     @Param({ schema: courseLessonIdParamSchema }) params: CourseLessonIdParam,
   ): Promise<void> {
