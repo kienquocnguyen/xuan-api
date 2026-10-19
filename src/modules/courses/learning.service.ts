@@ -51,14 +51,17 @@ export class LearningService {
       .getMany();
     const trees = await this.catalog.loadPublishedTrees(courses);
     const progress = await this.progressFor(userId, trees.flatMap(lessonIdsOf));
-    return trees.map((tree) => viewOf(tree, progress));
+    // A course whose tree came back empty was unpublished after the course read (review M1): not listed.
+    return trees.flatMap((tree) => viewOf(tree, progress) ?? []);
   }
 
   async getCourse(userId: string, slug: string): Promise<LearnerCourseView> {
     const course = await this.catalog.findPublishedBySlug(slug);
     await this.requireAccess(userId, course.id);
     const tree = await this.catalog.loadPublishedTree(course);
-    return viewOf(tree, await this.progressFor(userId, lessonIdsOf(tree)));
+    const view = viewOf(tree, await this.progressFor(userId, lessonIdsOf(tree)));
+    if (!view) throw new AppError(baselineErrors.NOT_FOUND); // unpublished since it was read
+    return view;
   }
 
   async getPlayback(userId: string, slug: string, lessonId: string): Promise<PlaybackView> {
@@ -139,10 +142,12 @@ function lessonIdsOf(tree: CourseTree): string[] {
 }
 
 /**
- * Resume over the published lessons only (§9.4, §10.2). A published course always has one (P1, lock rule L1); if
- * that ever fails, this throws (an untranslated 500 with a log, I15) rather than invent a resume target.
+ * Resume over the published lessons only (§9.4, §10.2); never a draft, deleted or other course's lesson. At every
+ * commit a published course has a published lesson (P1, lock rule L1), but the course and its lessons are read
+ * by separate statements: a course unpublished, then emptied, between them comes back with no lesson. That
+ * course is no longer published, so this returns `null` (callers: not listed, 404) rather than invent a target.
  */
-function viewOf(tree: CourseTree, all: ProgressByLesson): LearnerCourseView {
+function viewOf(tree: CourseTree, all: ProgressByLesson): LearnerCourseView | null {
   const ids = lessonIdsOf(tree);
   const progress = new Map<string, LessonProgress>();
   for (const id of ids) {
@@ -150,10 +155,5 @@ function viewOf(tree: CourseTree, all: ProgressByLesson): LearnerCourseView {
     if (row) progress.set(id, row);
   }
   const resumeLessonId = resolveResumeLessonId(ids, progress);
-  if (resumeLessonId === null) {
-    throw new Error(
-      `Invariant P1 violated: published course ${tree.course.id} has no published lesson`,
-    );
-  }
-  return { tree, progress, resumeLessonId };
+  return resumeLessonId === null ? null : { tree, progress, resumeLessonId };
 }

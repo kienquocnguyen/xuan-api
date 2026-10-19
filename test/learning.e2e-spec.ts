@@ -415,6 +415,20 @@ describe('Learner courses and gated playback (/learn/courses…)', () => {
     });
   });
 
+  it('treats a published course seen without published lessons as no longer published, never a 500 (review M1)', async () => {
+    // What a later statement sees when the course and its last lesson were unpublished after the course read.
+    const stale = await course('stale', '2026-10-03T00:00:00.000Z');
+    await lesson(await section(stale, 'S', 0), 's', 0, { status: 'draft' });
+    await grantDirect(learner.user.id, stale);
+    await grantDirect(learner.user.id, c.id);
+    const list = await learn('');
+    expect(list.status).toBe(200);
+    expect(list.body.data.map((item: { course: { slug: string } }) => item.course.slug)).toEqual([
+      'c',
+    ]);
+    expect((await learn('/stale')).body).toEqual(notFound);
+  });
+
   it('needs a session on every learner route (401)', async () => {
     for (const path of ['', '/c', `/c/lessons/${c.l1}`]) {
       expect((await server().get(`/learn/courses${path}`)).body).toEqual(unauthenticated);
