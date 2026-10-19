@@ -5,7 +5,7 @@ Backend for **Xuan Creative**: NestJS 12 · REST · PostgreSQL 18 · TypeORM 1.x
 **Status:** foundation implementation in progress, in learning-first mode.
 - Done: the NestJS 12 application, config, PostgreSQL 18 + TypeORM, the HTTP contract platform, and the public Services catalog.
 - Done also: users, Google sign-in and role-based access; text-first blog posts; the course platform backend, non-payment V1 (catalog, access grants and gated playback, progress and resume; design `docs/superpowers/specs/2026-10-17-course-platform-design.md`).
-- Current slice: blog completion, in outcomes B1–B4 (lifecycle and tags, categories, media and body version 2, discussion and moderation), delegated (`docs/development-workflow.md` §3.5). Its spec, owner-approved, is committed with outcome B1.
+- Current slice: blog completion, in outcomes B1–B4 (lifecycle and tags, categories, media and body version 2, discussion and moderation), delegated with **bounded autonomous execution** (`docs/development-workflow.md` §3.5: its scope, the `xuan_test`/`xuan_dev` limits and what stays owner-approved). Its spec, owner-approved, is committed with outcome B1.
 - Git: `main` is production; `dev` is the default integration branch (see "Git workflow" below).
 
 ## Working mode: LEARNING-FIRST (active)
