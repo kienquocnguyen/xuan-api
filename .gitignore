@@ -15,6 +15,9 @@ dist/
 !.env.example
 local-docs
 
+# Local blog media (MEDIA_STORAGE=local); never committed
+storage/
+
 # Test coverage
 coverage/
 

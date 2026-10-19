@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import type { z } from 'zod';
 import { envSchema } from './env.schema.js';
 
 export type AppConfig = Readonly<{
@@ -17,6 +18,20 @@ export type AppConfig = Readonly<{
     sessionTtlDays: number;
     /** Verified Google emails that become admin on sign-in (bootstrap, never demotes). */
     adminEmails: readonly string[];
+  }>;
+  /** Blog media storage (blog completion spec §5.3): `disabled` answers uploads with 409, never a local fallback. */
+  media: Readonly<{
+    storage: 'local' | 'r2' | 'disabled';
+    /** Public URL prefix of stored files, no trailing slash; null when disabled. */
+    publicBaseUrl: string | null;
+    /** Where the local adapter writes (git-ignored `storage/`); null unless local. */
+    localDir: string | null;
+    r2: Readonly<{
+      accountId: string;
+      accessKeyId: string;
+      secretAccessKey: string;
+      bucket: string;
+    }> | null;
   }>;
 }>;
 
@@ -48,7 +63,35 @@ export function loadConfig(source: NodeJS.ProcessEnv = readEnvironment()): AppCo
       sessionTtlDays: env.AUTH_SESSION_TTL_DAYS,
       adminEmails: Object.freeze([...env.AUTH_ADMIN_EMAILS]),
     }),
+    media: Object.freeze(mediaConfig(env)),
   });
+}
+
+type Env = z.infer<typeof envSchema>;
+
+function mediaConfig(env: Env): AppConfig['media'] {
+  const storage = env.MEDIA_STORAGE ?? 'local'; // production always sets it (schema)
+  if (storage === 'disabled') return { storage, publicBaseUrl: null, localDir: null, r2: null };
+  if (storage === 'r2') {
+    return {
+      storage,
+      publicBaseUrl: env.MEDIA_PUBLIC_BASE_URL as string,
+      localDir: null,
+      r2: Object.freeze({
+        accountId: env.R2_ACCOUNT_ID as string,
+        accessKeyId: env.R2_ACCESS_KEY_ID as string,
+        secretAccessKey: env.R2_SECRET_ACCESS_KEY as string,
+        bucket: env.R2_BUCKET as string,
+      }),
+    };
+  }
+  return {
+    storage,
+    publicBaseUrl: env.MEDIA_PUBLIC_BASE_URL ?? `http://localhost:${env.PORT}/media`,
+    localDir:
+      env.MEDIA_LOCAL_DIR ?? (env.NODE_ENV === 'test' ? 'storage/media-test' : 'storage/media'),
+    r2: null,
+  };
 }
 
 // The only place that touches process.env (I4). Local files are optional; production uses real env vars,

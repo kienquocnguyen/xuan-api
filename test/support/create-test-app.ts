@@ -13,6 +13,8 @@ import { assertTestDatabase, testDatabaseName } from './test-database-guard.js';
 export type TestAppOptions = Readonly<{
   /** Overrides AUTH_ADMIN_EMAILS for this app only. */
   adminEmails?: readonly string[];
+  /** Overrides the media storage settings for this app only (blog completion B3). */
+  media?: Partial<AppConfig['media']>;
 }>;
 
 /**
@@ -25,9 +27,11 @@ export async function createTestApp(
 ): Promise<NestExpressApplication> {
   const loaded = loadConfig();
   testDatabaseName(loaded.database.url); // fail closed before any connection is opened
-  const testConfig: AppConfig = options.adminEmails
-    ? { ...loaded, auth: { ...loaded.auth, adminEmails: options.adminEmails } }
-    : loaded;
+  const testConfig: AppConfig = {
+    ...loaded,
+    auth: options.adminEmails ? { ...loaded.auth, adminEmails: options.adminEmails } : loaded.auth,
+    media: { ...loaded.media, ...options.media },
+  };
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule, ...extraImports],
   })
