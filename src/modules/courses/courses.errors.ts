@@ -1,6 +1,6 @@
 import type { ErrorDefinition } from '../../errors/app-error.js';
 
-/** Courses-module error codes for outcome 1 (D10; course spec §11.5). */
+/** Courses-module error codes (D10; course spec §11.5): outcome 1's conflicts, outcome 2's access refusal. */
 export const coursesErrors = {
   COURSE_SLUG_TAKEN: {
     code: 'COURSE_SLUG_TAKEN',
@@ -36,5 +36,10 @@ export const coursesErrors = {
     code: 'CURRICULUM_ORDER_MISMATCH',
     kind: 'conflict',
     message: 'The order must list every section and lesson of the course exactly once.',
+  },
+  COURSE_ACCESS_REQUIRED: {
+    code: 'COURSE_ACCESS_REQUIRED',
+    kind: 'forbidden',
+    message: 'You need access to this course.',
   },
 } as const satisfies Record<string, ErrorDefinition>;
