@@ -91,7 +91,8 @@ describe('content_posts invariants', () => {
     ['ck_content_posts_body_is_doc', { body: '"doc"' }],
     ['ck_content_posts_body_is_doc', { body: '{"type":"paragraph"}' }],
     ['ck_content_posts_body_version', { body_version: 2 }],
-    ['ck_content_posts_status', { status: 'archived' }],
+    ['ck_content_posts_status', { status: 'deleted' }],
+    ['ck_content_posts_tags_count', { tags: Array.from({ length: 11 }, (_, i) => `t${i}`) }],
     ['ck_content_posts_published_has_date', { status: 'published' }],
   ])('%s rejects %o', async (constraint, columns) => {
     expect(await constraintOf(insertPost(columns))).toBe(constraint);
@@ -101,6 +102,35 @@ describe('content_posts invariants', () => {
     await expect(
       insertPost({ status: 'published', published_at: new Date() }),
     ).resolves.toHaveLength(1);
+  });
+
+  it('accepts an archived post, with or without a publication date (blog B1)', async () => {
+    await expect(insertPost({ status: 'archived' })).resolves.toHaveLength(1);
+    await expect(
+      insertPost({ slug: 'da-dang', status: 'archived', published_at: new Date() }),
+    ).resolves.toHaveLength(1);
+  });
+
+  it('defaults tags to an empty array and keeps up to 10 in order', async () => {
+    const [{ id }] = await insertPost();
+    const tags = Array.from({ length: 10 }, (_, i) => `Thẻ ${10 - i}`);
+    const [{ id: tagged }] = await insertPost({ slug: 'co-the', tags });
+    const rows = await db.query<{ id: string; tags: string[] }[]>(
+      'SELECT id, tags FROM content_posts WHERE id = ANY($1)',
+      [[id, tagged]],
+    );
+    expect(Object.fromEntries(rows.map((row) => [row.id, row.tags]))).toEqual({
+      [id]: [],
+      [tagged]: tags,
+    });
+  });
+
+  it('keeps each tag within 40 characters (spike S1)', async () => {
+    const failure = await insertPost({ tags: ['x'.repeat(41)] }).then(
+      () => null,
+      (error: unknown) => (error as QueryFailedError).driverError as { code?: string },
+    );
+    expect(failure?.code).toBe('22001'); // string_data_right_truncation
   });
 
   it('keeps slugs unique per language', async () => {
