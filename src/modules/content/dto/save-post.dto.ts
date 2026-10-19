@@ -15,6 +15,36 @@ const optionalText = (max: number) =>
     .optional()
     .transform((value) => (value ? value : null));
 
+/** One tag (blog completion spec §3.2): trimmed, 1–40 characters, storable, no comma (the web's tag input splits on it). */
+const tag = z
+  .string()
+  .trim()
+  .min(1)
+  .max(40)
+  .refine(isStorableText, STORABLE_TEXT_MESSAGE)
+  .refine((value) => !value.includes(','), 'A tag can’t contain a comma.');
+
+/** Case- and Unicode-form-insensitive identity of a tag ('Đà Lạt' = 'đà lạt'; NFC = NFD). */
+const tagKey = (value: string) => value.normalize('NFC').toLowerCase();
+
+/**
+ * 0–10 tags in the author's order. Duplicates are rejected at the later position, never dropped. `null` clears;
+ * an omitted key stays absent so the update can tell it apart (spec §3.4, the omitted-field guard).
+ */
+const tags = z
+  .array(tag)
+  .max(10)
+  .superRefine((values, ctx) => {
+    const seen = new Set<string>();
+    values.forEach((value, index) => {
+      const key = tagKey(value);
+      if (seen.has(key)) ctx.addIssue({ code: 'custom', path: [index], message: 'Duplicate tag.' });
+      seen.add(key);
+    });
+  })
+  .nullable()
+  .optional();
+
 /**
  * Create and full-replacement update (blog spec §5.3). Author, status, dates and language are never
  * client input (I9).
@@ -27,6 +57,7 @@ export const savePostSchema = z
     excerpt: optionalText(400),
     seoTitle: optionalText(200),
     seoDescription: optionalText(400),
+    tags,
   })
   .meta({ id: 'SavePostDto' });
 
