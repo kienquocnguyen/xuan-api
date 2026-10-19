@@ -17,6 +17,11 @@ const notFound = envelope('NOT_FOUND', 'The requested resource was not found.');
 const slugTaken = envelope('POST_SLUG_TAKEN', 'Another post already uses this slug.');
 const slugLocked = envelope('POST_SLUG_LOCKED', 'A published post keeps its slug.');
 const bodyEmpty = envelope('POST_BODY_EMPTY', 'A published post needs some content.');
+const archived = envelope('POST_ARCHIVED', 'An archived post must be restored first.');
+const wasPublished = envelope(
+  'POST_WAS_PUBLISHED',
+  "A post that was ever published can't be deleted; archive it instead.",
+);
 const invalid = (field: string, code: string, message: string) =>
   envelope('VALIDATION_FAILED', 'The request is invalid.', { fields: [{ field, message, code }] });
 
@@ -62,8 +67,13 @@ describe('Authoring posts (/admin/posts)', () => {
     server().post('/admin/posts').set(XHR).set('Cookie', cookie).send(input);
   const update = (id: string, input: object, cookie = editor.cookie) =>
     server().put(`/admin/posts/${id}`).set(XHR).set('Cookie', cookie).send(input);
-  const action = (id: string, verb: 'publish' | 'unpublish', cookie = editor.cookie) =>
-    server().post(`/admin/posts/${id}/${verb}`).set(XHR).set('Cookie', cookie);
+  const action = (
+    id: string,
+    verb: 'publish' | 'unpublish' | 'archive' | 'restore',
+    cookie = editor.cookie,
+  ) => server().post(`/admin/posts/${id}/${verb}`).set(XHR).set('Cookie', cookie);
+  const remove = (id: string, cookie = editor.cookie) =>
+    server().delete(`/admin/posts/${id}`).set(XHR).set('Cookie', cookie);
   const get = (id: string, cookie = editor.cookie) =>
     server().get(`/admin/posts/${id}`).set('Cookie', cookie);
   const createdId = async (input: object = save(), cookie = editor.cookie) => {
@@ -297,7 +307,7 @@ describe('Authoring posts (/admin/posts)', () => {
       });
     });
 
-    it.each(['status=archived', 'pageSize=51', 'page=0', 'foo=1'])(
+    it.each(['status=deleted', 'pageSize=51', 'page=0', 'foo=1'])(
       'rejects ?%s with 400',
       async (query) => {
         const res = await server().get(`/admin/posts?${query}`).set('Cookie', editor.cookie);
@@ -438,6 +448,171 @@ describe('Authoring posts (/admin/posts)', () => {
         [id],
       );
       expect(status).toBe('draft');
+    });
+  });
+
+  describe('lifecycle: archive, restore, delete (blog completion B1)', () => {
+    const statusOf = async (id: string) =>
+      (
+        await db.query<{ status: string }[]>('SELECT status FROM content_posts WHERE id = $1', [id])
+      )[0]?.status;
+    const publishedOnce = async (slug = 'da-dang') => {
+      const id = await createdId(save({ slug }));
+      expect((await action(id, 'publish')).status).toBe(200);
+      return id;
+    };
+
+    it('archives a draft and a published post, keeping publishedAt', async () => {
+      const draft = await createdId();
+      const res = await action(draft, 'archive');
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ status: 'archived', publishedAt: null });
+
+      const live = await publishedOnce();
+      const publishedAt = (await get(live)).body.data.publishedAt as string;
+      const archivedLive = await action(live, 'archive');
+      expect(archivedLive.body.data).toMatchObject({ status: 'archived', publishedAt });
+    });
+
+    it('archives idempotently without touching updatedAt', async () => {
+      const id = await createdId();
+      const once = await action(id, 'archive');
+      const twice = await action(id, 'archive');
+      expect(twice.status).toBe(200);
+      expect(twice.body.data.updatedAt).toBe(once.body.data.updatedAt);
+    });
+
+    it('restores an archived post to draft; the slug stays locked once published', async () => {
+      const id = await publishedOnce();
+      await action(id, 'archive');
+      const restored = await action(id, 'restore');
+      expect(restored.status).toBe(200);
+      expect(restored.body.data).toMatchObject({
+        status: 'draft',
+        publishedAt: expect.stringMatching(ISO),
+      });
+      const renamed = await update(id, save({ slug: 'ten-moi' }));
+      expect(renamed.status).toBe(409);
+      expect(renamed.body).toEqual(slugLocked);
+    });
+
+    it('restores a draft or a published post as a no-op', async () => {
+      const draft = await createdId();
+      const before = (await get(draft)).body.data.updatedAt as string;
+      const res = await action(draft, 'restore');
+      expect(res.body.data).toMatchObject({ status: 'draft', updatedAt: before });
+
+      const live = await publishedOnce();
+      const liveBefore = (await get(live)).body.data.updatedAt as string;
+      const liveRes = await action(live, 'restore');
+      expect(liveRes.body.data).toMatchObject({ status: 'published', updatedAt: liveBefore });
+    });
+
+    it.each(['publish', 'unpublish'] as const)(
+      'refuses to %s an archived post with 409 POST_ARCHIVED',
+      async (verb) => {
+        const id = await publishedOnce();
+        await action(id, 'archive');
+        const res = await action(id, verb);
+        expect(res.status).toBe(409);
+        expect(res.body).toEqual(archived);
+        expect(await statusOf(id)).toBe('archived');
+      },
+    );
+
+    it('deletes a never-published draft', async () => {
+      const id = await createdId();
+      const res = await remove(id);
+      expect(res.status).toBe(204);
+      expect(res.text).toBe('');
+      expect((await get(id)).status).toBe(404);
+      expect(await statusOf(id)).toBeUndefined();
+    });
+
+    it('refuses to delete anything ever published with 409 POST_WAS_PUBLISHED', async () => {
+      const live = await publishedOnce('mot');
+      const unpublished = await publishedOnce('hai');
+      await action(unpublished, 'unpublish');
+      const archivedLive = await publishedOnce('ba');
+      await action(archivedLive, 'archive');
+      for (const id of [live, unpublished, archivedLive]) {
+        const res = await remove(id);
+        expect(res.status).toBe(409);
+        expect(res.body).toEqual(wasPublished);
+        expect(await statusOf(id)).toBeDefined();
+      }
+    });
+
+    it('asks to restore an archived never-published post before deleting it', async () => {
+      const id = await createdId();
+      await action(id, 'archive');
+      const res = await remove(id);
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual(archived);
+      await action(id, 'restore');
+      expect((await remove(id)).status).toBe(204);
+    });
+
+    it('applies ownership, roles and CSRF to archive, restore and delete', async () => {
+      const id = await createdId();
+      for (const call of [
+        () => action(id, 'archive', otherEditor.cookie),
+        () => action(id, 'restore', otherEditor.cookie),
+        () => remove(id, otherEditor.cookie),
+      ]) {
+        const res = await call();
+        expect(res.status).toBe(403);
+        expect(res.body).toEqual(forbidden);
+      }
+      const user = await signInAs(app, { role: 'user' });
+      expect((await action(id, 'archive', user.cookie)).status).toBe(403);
+      expect((await server().delete(`/admin/posts/${id}`).set(XHR)).status).toBe(401);
+      expect(
+        (await server().delete(`/admin/posts/${id}`).set('Cookie', editor.cookie)).status,
+      ).toBe(403);
+      expect((await action(id, 'archive', admin.cookie)).status).toBe(200);
+      expect((await remove(id, admin.cookie)).status).toBe(409); // archived: restore first
+    });
+
+    it('answers 404 for an unknown id and 400 for a malformed one', async () => {
+      expect((await remove(UNKNOWN_ID)).body).toEqual(notFound);
+      expect((await action(UNKNOWN_ID, 'archive')).status).toBe(404);
+      const malformed = await remove('nope');
+      expect(malformed.status).toBe(400);
+      expect(malformed.body.error.details.fields[0]).toMatchObject({
+        field: 'id',
+        code: 'INVALID_FORMAT',
+      });
+    });
+
+    it('filters the authoring list by the archived status', async () => {
+      const kept = await createdId(save({ slug: 'giu' }));
+      const gone = await createdId(save({ slug: 'cat' }));
+      await action(gone, 'archive');
+      const onlyArchived = await server()
+        .get('/admin/posts?status=archived')
+        .set('Cookie', editor.cookie);
+      expect(onlyArchived.body.data.items.map((post: { id: string }) => post.id)).toEqual([gone]);
+      const all = await server().get('/admin/posts').set('Cookie', editor.cookie);
+      expect(all.body.data.items.map((post: { id: string }) => post.id).sort()).toEqual(
+        [kept, gone].sort(),
+      );
+    });
+
+    // Review Focus 4: each outcome must match a serial order of the two requests (row lock).
+    it('keeps delete and publish of the same draft consistent', async () => {
+      for (let trial = 0; trial < 15; trial++) {
+        const id = await createdId(save({ slug: `dua-${trial}` }));
+        const [deleted, published] = await Promise.all([remove(id), action(id, 'publish')]);
+        const pair = `${deleted.status}/${published.status}`;
+        expect(['204/404', '409/200']).toContain(pair);
+        if (pair === '409/200') {
+          expect(deleted.body).toEqual(wasPublished);
+          expect(await statusOf(id)).toBe('published');
+        } else {
+          expect(await statusOf(id)).toBeUndefined();
+        }
+      }
     });
   });
 });

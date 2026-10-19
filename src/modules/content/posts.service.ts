@@ -121,6 +121,7 @@ export class PostsService {
     // Row lock: a concurrent update can't empty the body between the check and the publish (B18).
     await this.dataSource.transaction(async (manager) => {
       const post = await this.lockManageable(manager, actor, id);
+      if (post.status === 'archived') throw new AppError(contentErrors.POST_ARCHIVED);
       if (post.status === 'published') return; // idempotent: no write
       if (!hasMeaningfulText(post.body)) throw new AppError(contentErrors.POST_BODY_EMPTY); // B18
       await manager
@@ -135,15 +136,44 @@ export class PostsService {
   }
 
   async unpublish(actor: AuthenticatedUser, id: string): Promise<AuthoredPost> {
-    const post = await this.loadManageable(actor, id);
-    if (post.status === 'draft') return this.withAuthor(post); // idempotent: no write
-    await this.posts
-      .createQueryBuilder()
-      .update(Post)
-      .set({ status: 'draft' }) // published_at stays, so the slug stays locked (B16, B17)
-      .where('id = :id AND status = :published', { id, published: 'published' })
-      .execute();
+    await this.dataSource.transaction(async (manager) => {
+      const post = await this.lockManageable(manager, actor, id);
+      if (post.status === 'archived') throw new AppError(contentErrors.POST_ARCHIVED);
+      if (post.status === 'draft') return; // idempotent: no write
+      // published_at stays, so the slug stays locked (B16, B17).
+      await manager.update(Post, { id }, { status: 'draft' });
+    });
     return this.getForActor(actor, id);
+  }
+
+  /** Retires a draft or published post without deleting it (blog completion spec §3.1, BD-1). */
+  async archive(actor: AuthenticatedUser, id: string): Promise<AuthoredPost> {
+    await this.dataSource.transaction(async (manager) => {
+      const post = await this.lockManageable(manager, actor, id);
+      if (post.status === 'archived') return; // idempotent: no write
+      await manager.update(Post, { id }, { status: 'archived' }); // published_at kept: the slug stays locked
+    });
+    return this.getForActor(actor, id);
+  }
+
+  /** Archived → draft, never straight to published; any other state is left as it is (spec §3.1). */
+  async restore(actor: AuthenticatedUser, id: string): Promise<AuthoredPost> {
+    await this.dataSource.transaction(async (manager) => {
+      const post = await this.lockManageable(manager, actor, id);
+      if (post.status !== 'archived') return; // no write
+      await manager.update(Post, { id }, { status: 'draft' });
+    });
+    return this.getForActor(actor, id);
+  }
+
+  /** Hard delete, only for a draft that was never published: anything with a public past is archived (BD-1). */
+  async remove(actor: AuthenticatedUser, id: string): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      const post = await this.lockManageable(manager, actor, id);
+      if (post.publishedAt !== null) throw new AppError(contentErrors.POST_WAS_PUBLISHED);
+      if (post.status === 'archived') throw new AppError(contentErrors.POST_ARCHIVED);
+      await manager.delete(Post, { id });
+    });
   }
 
   /** 404 if missing, then the ownership rule: editors only their own, reads included (B11, B12). */
