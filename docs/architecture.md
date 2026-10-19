@@ -430,7 +430,7 @@ These are shared with xuan-web. Agents ask instead of guessing.
 
 | Deferred | Trigger |
 |---|---|
-| Content beyond V1 blog posts: media/images, cover/OG images, taxonomy, archive, scheduled publishing, slug redirects, deletion mechanism, previews (blog spec §9) | Each owner decision |
+| Content beyond V1 blog posts: **blog completion B1–B4 in progress** (B1 2026-10-19: archive, never-published-draft deletion, tags; B2 categories; B3 media and body v2; B4 discussion). Still deferred: scheduled publishing, slug redirects, previews | Each owner decision |
 | Newsletter subscriptions ("Creator Notes") | Product confirmation |
 | Service applications and appointments: persistence, statuses, slot availability and holds (no double acceptance), Google Calendar / Meet integration, applicant emails. Confirmed concepts in `data-model.md` §3.1 | Application/booking slice design |
 | Rate limiting + `trust proxy` | **Before public launch** (D23) |
