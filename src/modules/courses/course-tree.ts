@@ -14,3 +14,6 @@ export type AdminCourseListItem = Readonly<{
   lessonCount: number;
   publishedLessonCount: number;
 }>;
+
+/** A course in the learner's list, with its published-lesson count from one grouped query (course spec §11.6). */
+export type LearnerCourseListItem = Readonly<{ course: Course; totalLessons: number }>;

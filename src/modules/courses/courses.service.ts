@@ -42,12 +42,22 @@ export class CoursesService {
   }
 
   async getPublishedOutline(slug: string): Promise<CourseTree> {
+    return this.loadPublishedTree(await this.findPublishedBySlug(slug));
+  }
+
+  /** A published course by slug, else 404: drafts too (no existence leak). Shared with the learner routes. */
+  async findPublishedBySlug(slug: string): Promise<Course> {
     // An impossible slug can't exist (ck_courses_slug_format); skip the query (a NUL would make Postgres throw).
     if (slug.length > 160 || !COURSE_SLUG_PATTERN.test(slug)) {
       throw new AppError(baselineErrors.NOT_FOUND);
     }
     const course = await this.courses.findOneBy({ slug, status: 'published' });
-    if (!course) throw new AppError(baselineErrors.NOT_FOUND); // drafts too: no existence leak
+    if (!course) throw new AppError(baselineErrors.NOT_FOUND);
+    return course;
+  }
+
+  /** The course's published lessons in curriculum order, sections without one omitted (course spec §4.2). */
+  async loadPublishedTree(course: Course): Promise<CourseTree> {
     return this.loadTree(this.dataSource.manager, course, 'published');
   }
 

@@ -240,6 +240,7 @@ The **actual, decided schema**, so the current database can be understood at a g
 | `users`, `auth_identities`, `sessions` | **implemented** 2026-10-14 by migration `CreateUsersAndAuth1791980708763` (auth design spec §3). Owner-approved runs: `xuan_test` (guarded run, revert/run round trip, empty second generate) and `xuan_dev`; `\d` matches this map on both; invariants proven by `test/users-schema.e2e-spec.ts` | `users` | `docs/superpowers/plans/2026-10-14-user-auth-and-rbac.md`, Task 2 |
 | `content_posts` | **implemented** 2026-10-15 by migration `CreateContentPosts1792001598048` (owner-approved blog design spec §3.2). Owner-approved runs: `xuan_test` (guarded run, revert/run round trip, empty second generate) and `xuan_dev` (empty second generate); `\d+` matches this map on both, cross-module FK included; invariants proven by `test/content-posts-schema.e2e-spec.ts` | `content` (entity `Post`) | `docs/superpowers/plans/2026-10-15-blog-posts.md`, Task 1 |
 | `courses`, `course_sections`, `course_lessons` | **implemented** 2026-10-19 by migration `CreateCourseCatalog1792343945663` (map owner-approved with the plan, Checkpoint M). Owner-approved runs: `xuan_test` (guarded run, revert/run round trip, empty second generate) and `xuan_dev` (empty second generate; the other tables' schema, rows and contents unchanged); `\d+` matches this map on both, including `DEFERRABLE INITIALLY DEFERRED`; invariants proven by `test/courses-schema.e2e-spec.ts` | `courses` (entities `Course`, `CourseSection`, `CourseLesson`) | `docs/superpowers/plans/2026-10-18-course-catalog.md`, Task 2 |
+| `course_access_grants` | **implemented** 2026-10-19 by migration `CreateCourseAccessGrants1792377789142` (map owner-approved with the plan, Checkpoint M). Owner-approved runs: `xuan_test` (Checkpoint A: guarded run, revert/run round trip, empty second generate) and `xuan_dev` (Checkpoint D: empty second generate; the other tables' schema, rows and contents unchanged; no grants created); `\d+` matches this map on both, including the partial unique's `WHERE`; invariants proven by `test/courses-schema.e2e-spec.ts` | `courses` (entity `CourseAccessGrant`) | `docs/superpowers/plans/2026-10-19-course-access.md`, Task 1 |
 
 #### `services`
 
@@ -500,4 +501,53 @@ Sections have **no status**: a section is shown publicly only while it holds a p
 
 **TypeORM caveat:** `migration:generate` compares unique constraints **by name only** and doesn't read `condeferrable`. A later change of deferrability on either position unique is invisible to generate and needs a hand-written migration.
 
-**Not in these tables:** price, availability or a "for sale" flag (orders slice, spec §10.5); a language column (additive later); access grants (`course_access_grants`, outcome 2) and progress (`lesson_progress`, outcome 3).
+**Not in these tables:** price, availability or a "for sale" flag (orders slice, spec §10.5); a language column (additive later); access grants (`course_access_grants`, below) and progress (`lesson_progress`, outcome 3).
+
+#### `course_access_grants`
+
+Who may learn a course (course platform design spec §5, OD-1). **One row per grant, not one per (user, course):** access ⇔ at least one row for (user, course) with `revoked_at IS NULL`. A revocation closes its row and keeps it as history; restoring access inserts a new row. This keeps a future refund of a purchase grant from cutting off an unrelated complimentary grant (spec §5.1). Three FKs reach `users`, declared by entity name with no relation (AD14). The course FK stays inside the module.
+
+```mermaid
+erDiagram
+    users ||--o{ course_access_grants : "learns through"
+    courses ||--o{ course_access_grants : "is granted by"
+    users |o--o{ course_access_grants : "granted / revoked"
+
+    course_access_grants {
+        uuid id PK "pk_course_access_grants · DEFAULT uuidv7()"
+        uuid user_id FK "fk_course_access_grants_user_id · RESTRICT"
+        uuid course_id FK "fk_course_access_grants_course_id · RESTRICT"
+        varchar_16 source "required · CK ck_course_access_grants_source"
+        uuid granted_by_user_id FK "nullable · fk_course_access_grants_granted_by_user_id · RESTRICT"
+        timestamptz granted_at "required · DEFAULT now()"
+        timestamptz revoked_at "nullable"
+        uuid revoked_by_user_id FK "nullable · fk_course_access_grants_revoked_by_user_id · RESTRICT"
+        timestamptz created_at "required · DEFAULT now()"
+        timestamptz updated_at "required · DEFAULT now()"
+    }
+```
+
+| Column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_course_access_grants` | One row per grant (OD-1) |
+| `user_id` | `uuid` | yes | — | **FK** `fk_course_access_grants_user_id` → `users(id)` `ON DELETE RESTRICT` (by entity name, AD14) | The learner. An unknown user's violation becomes `404 NOT_FOUND` |
+| `course_id` | `uuid` | yes | — | **FK** `fk_course_access_grants_course_id` → `courses(id)` `ON DELETE RESTRICT` | Any status: testers can be granted before publication. An unknown course's violation becomes `404 NOT_FOUND` |
+| `source` | `varchar(16)` | yes | — | **CK** `ck_course_access_grants_source`: `source IN ('admin')` | Only value in V1; the orders slice widens it to `'purchase'` (spec §5.4). No default: every writer names its source |
+| `granted_by_user_id` | `uuid` | no | — | **FK** `fk_course_access_grants_granted_by_user_id` → `users(id)` `ON DELETE RESTRICT`; **CK** `ck_course_access_grants_admin_has_granter`: `source <> 'admin' OR granted_by_user_id IS NOT NULL` | Who granted. A future purchase grant has none |
+| `granted_at` | `timestamptz` | yes | `now()` | — | Shown in the grant history; never changes |
+| `revoked_at` | `timestamptz` | no | — | **CK** `ck_course_access_grants_revocation_pair`: `(revoked_at IS NULL) = (revoked_by_user_id IS NULL)` | `NULL` = active |
+| `revoked_by_user_id` | `uuid` | no | — | **FK** `fk_course_access_grants_revoked_by_user_id` → `users(id)` `ON DELETE RESTRICT` | Who revoked |
+| `created_at` | `timestamptz` | yes | `now()` | — | D27 |
+| `updated_at` | `timestamptz` | yes | `now()` | — | D27; `@UpdateDateColumn`. Set by a revocation **and by a repeated grant**: the grant upsert's `DO UPDATE` must name a column (spike S8), so a repeated grant is business-idempotent (same row, `id` and `granted_at`; same DTO) but not a database no-op. Not on the wire |
+
+**Table-level constraints and indexes:**
+
+| Name | Kind | Definition | Note |
+|---|---|---|---|
+| `uq_course_access_grants_user_id_course_id_active_admin` | UNIQUE **partial** index | `(user_id, course_id) WHERE source = 'admin' AND revoked_at IS NULL` | At most one active admin grant per (user, course) (CP5). The grant upsert's `ON CONFLICT (user_id, course_id) WHERE …` target (D32, C6). Named with a predicate suffix: a plain `uq_<table>_<cols>` would suggest a full unique (spec §21) |
+| `ix_course_access_grants_user_id_course_id` | INDEX | `(user_id, course_id)` | The access check (`EXISTS … revoked_at IS NULL`, any source), `GET /learn/courses` and the user FK |
+| _(no other index)_ | — | — | The admin grant list (`WHERE course_id ORDER BY granted_at DESC, id DESC`) runs over a handful of rows, and no course or user is ever deleted in V1. Add one when `EXPLAIN` on real data says so |
+
+**TypeORM caveat (spike S8):** `migration:generate` compares indexes by name, uniqueness and columns, **not by their `WHERE` predicate**. A later predicate change is invisible to generate and needs a hand-written migration, like the deferrable position uniques above.
+
+**Not in this table:** `order_id` and the `'purchase'` source (orders slice, spec §5.4, expand-only); an expiry (CP1: lifetime access).

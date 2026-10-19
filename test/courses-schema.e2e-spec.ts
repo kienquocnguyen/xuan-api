@@ -235,4 +235,98 @@ describe('course catalog invariants (courses, course_sections, course_lessons)',
       expect(await keyShareWhileUpdating('position = 5')).toBe('55P03');
     });
   });
+
+  describe('course_access_grants (outcome 2)', () => {
+    const UNKNOWN_ID = '01900000-0000-7000-8000-000000000000';
+    let learnerId: string;
+    let adminId: string;
+
+    const insertGrant = (columns: Record<string, unknown> = {}) =>
+      insert('course_access_grants', {
+        user_id: learnerId,
+        course_id: courseId,
+        source: 'admin',
+        granted_by_user_id: adminId,
+        ...columns,
+      });
+
+    beforeEach(async () => {
+      [{ id: learnerId }] = await insert('users', { email: 'hoc@example.vn', display_name: 'Học' });
+      [{ id: adminId }] = await insert('users', {
+        email: 'admin@example.vn',
+        display_name: 'Admin',
+        role: 'admin',
+      });
+    });
+
+    it('fills a uuid v7 id and the grant timestamps; a new grant is active', async () => {
+      const [{ id }] = await insertGrant();
+      const [row] = await db.query<
+        { id: string; granted_at: Date; created_at: Date; updated_at: Date; revoked_at: null }[]
+      >(
+        `SELECT id, granted_at, created_at, updated_at, revoked_at FROM course_access_grants WHERE id = $1`,
+        [id],
+      );
+      expect(row.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7/);
+      expect(row.granted_at).toBeInstanceOf(Date);
+      expect(row.created_at).toBeInstanceOf(Date);
+      expect(row.updated_at).toBeInstanceOf(Date);
+      expect(row.revoked_at).toBeNull();
+    });
+
+    it('fails on uq_course_access_grants_user_id_course_id_active_admin for a second active admin grant', async () => {
+      await insertGrant();
+      expect(await failureOf(insertGrant())).toBe(
+        'uq_course_access_grants_user_id_course_id_active_admin',
+      );
+    });
+
+    it('accepts a new active grant once the first is revoked: the partial index keeps history', async () => {
+      const [{ id: first }] = await insertGrant();
+      await db.query(
+        `UPDATE course_access_grants SET revoked_at = now(), revoked_by_user_id = $2 WHERE id = $1`,
+        [first, adminId],
+      );
+      const [{ id: second }] = await insertGrant();
+      const rows = await db.query<{ id: string; active: boolean }[]>(
+        `SELECT id, revoked_at IS NULL AS active FROM course_access_grants ORDER BY id`,
+      );
+      expect(rows).toEqual([
+        { id: first, active: false },
+        { id: second, active: true },
+      ]);
+    });
+
+    it.each([
+      ['ck_course_access_grants_source', { source: 'purchase' }],
+      ['ck_course_access_grants_admin_has_granter', { granted_by_user_id: null }],
+      ['ck_course_access_grants_revocation_pair', { revoked_at: new Date() }],
+      ['fk_course_access_grants_user_id', { user_id: UNKNOWN_ID }],
+      ['fk_course_access_grants_course_id', { course_id: UNKNOWN_ID }],
+      ['fk_course_access_grants_granted_by_user_id', { granted_by_user_id: UNKNOWN_ID }],
+    ])('fails on %s', async (constraint, columns) => {
+      expect(await failureOf(insertGrant(columns))).toBe(constraint);
+    });
+
+    it('fails on ck_course_access_grants_revocation_pair for a revoker without a revocation instant', async () => {
+      expect(await failureOf(insertGrant({ revoked_by_user_id: adminId }))).toBe(
+        'ck_course_access_grants_revocation_pair',
+      );
+    });
+
+    it('fails on fk_course_access_grants_revoked_by_user_id for an unknown revoker', async () => {
+      expect(
+        await failureOf(insertGrant({ revoked_at: new Date(), revoked_by_user_id: UNKNOWN_ID })),
+      ).toBe('fk_course_access_grants_revoked_by_user_id');
+    });
+
+    it('fails on fk_course_access_grants_course_id when a granted course is deleted', async () => {
+      await db.query('DELETE FROM course_lessons');
+      await db.query('DELETE FROM course_sections');
+      await insertGrant();
+      expect(await failureOf(db.query('DELETE FROM courses WHERE id = $1', [courseId]))).toBe(
+        'fk_course_access_grants_course_id',
+      );
+    });
+  });
 });
