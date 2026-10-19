@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import type { DataSource, EntityManager, Repository } from 'typeorm';
+import { type DataSource, type EntityManager, IsNull, type Repository } from 'typeorm';
 import { isUniqueViolation } from '../../database/postgres-errors.js';
 import { AppError } from '../../errors/app-error.js';
 import { baselineErrors } from '../../errors/baseline-errors.js';
@@ -178,7 +178,13 @@ export class PostsService {
       const post = await this.lockManageable(manager, actor, id);
       if (post.publishedAt !== null) throw new AppError(contentErrors.POST_WAS_PUBLISHED);
       if (post.status === 'archived') throw new AppError(contentErrors.POST_ARCHIVED);
-      await manager.delete(Post, { id });
+      // The spec's conditional delete (§3.1): a backstop should the checks above ever change.
+      const { affected } = await manager.delete(Post, {
+        id,
+        status: 'draft',
+        publishedAt: IsNull(),
+      });
+      if (affected !== 1) throw new Error('A deletable draft was locked but not deleted.');
     });
   }
 

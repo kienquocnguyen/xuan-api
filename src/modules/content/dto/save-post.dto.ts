@@ -19,10 +19,16 @@ const optionalText = (max: number) =>
 const tag = z
   .string()
   .trim()
-  .min(1)
-  .max(40)
-  .refine(isStorableText, STORABLE_TEXT_MESSAGE)
-  .refine((value) => !value.includes(','), 'A tag can’t contain a comma.');
+  // One stored form whatever the keyboard sends (decomposed Vietnamese is NFD); limits count the NFC form.
+  .transform((value) => value.normalize('NFC'))
+  .pipe(
+    z
+      .string()
+      .min(1)
+      .max(40)
+      .refine(isStorableText, STORABLE_TEXT_MESSAGE)
+      .refine((value) => !value.includes(','), 'A tag can’t contain a comma.'),
+  );
 
 /** Case- and Unicode-form-insensitive identity of a tag ('Đà Lạt' = 'đà lạt'; NFC = NFD). */
 const tagKey = (value: string) => value.normalize('NFC').toLowerCase();

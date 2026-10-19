@@ -60,7 +60,13 @@ describe('savePostSchema tags (blog B1)', () => {
 
   it('rejects case-insensitive and Unicode-equivalent duplicates at the later position', () => {
     expect(issuesOf(['Đà Lạt', 'đà lạt'])).toEqual(['tags.1:custom']);
-    expect(issuesOf(['café', 'x', 'café'])).toEqual(['tags.2:custom']);
+    expect(issuesOf(['café', 'x', 'café'])).toEqual(['tags.2:custom']); // NFC vs NFD
+  });
+
+  it('stores decomposed (NFD) Vietnamese as NFC and measures length after normalizing (review)', () => {
+    const nfd = 'Thành phố Hồ Chí Minh về đêm rực rỡ'.normalize('NFD');
+    expect(nfd.length).toBeGreaterThan(40); // 34 letters, more than 40 UTF-16 units decomposed
+    expect(savePostSchema.parse(input({ tags: [nfd] })).tags).toEqual([nfd.normalize('NFC')]);
   });
 
   it('keeps null and omitted tags distinct, so an omission can be detected', () => {
