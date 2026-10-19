@@ -11,6 +11,7 @@ import {
 } from 'typeorm';
 import type { PostBodyDocument } from './body/post-body.schema.js';
 import { ContentCategory } from './category.entity.js';
+import { ContentMedia } from './media/media.entity.js';
 
 export const POST_STATUSES = ['draft', 'published', 'archived'] as const;
 export type PostStatus = (typeof POST_STATUSES)[number];
@@ -31,6 +32,8 @@ export const POST_LANGUAGE = 'vi';
   'id',
 ])
 @Index('ix_content_posts_author_id_updated_at_id', ['authorId', 'updatedAt', 'id'])
+@Index('ix_content_posts_cover_media_id', ['coverMediaId'])
+@Index('ix_content_posts_og_media_id', ['ogMediaId'])
 @Index('ix_content_posts_category_id_status_published_at_id', [
   'categoryId',
   'status',
@@ -50,7 +53,11 @@ export const POST_LANGUAGE = 'vi';
   'ck_content_posts_body_is_doc',
   `jsonb_typeof("body") = 'object' AND "body"->>'type' = 'doc'`,
 )
-@Check('ck_content_posts_body_version', `"body_version" IN (1)`)
+@Check('ck_content_posts_body_version', `"body_version" IN (1, 2)`)
+@Check(
+  'ck_content_posts_cover_alt',
+  `("cover_media_id" IS NULL AND "cover_alt" IS NULL) OR ("cover_media_id" IS NOT NULL AND btrim("cover_alt") <> '')`,
+)
 @Check('ck_content_posts_status', `"status" IN ('draft', 'published', 'archived')`)
 @Check('ck_content_posts_tags_count', `cardinality("tags") <= 10`)
 @Check(
@@ -98,6 +105,18 @@ export class Post {
   @Column({ name: 'category_id', type: 'uuid', nullable: true })
   @ForeignKey(() => ContentCategory, { name: 'fk_content_posts_category_id', onDelete: 'RESTRICT' })
   categoryId!: string | null;
+
+  /** Blog completion B3: the cover (alt required with it) and the social-share override. */
+  @Column({ name: 'cover_media_id', type: 'uuid', nullable: true })
+  @ForeignKey(() => ContentMedia, { name: 'fk_content_posts_cover_media_id', onDelete: 'RESTRICT' })
+  coverMediaId!: string | null;
+
+  @Column({ name: 'cover_alt', type: 'varchar', length: 200, nullable: true })
+  coverAlt!: string | null;
+
+  @Column({ name: 'og_media_id', type: 'uuid', nullable: true })
+  @ForeignKey(() => ContentMedia, { name: 'fk_content_posts_og_media_id', onDelete: 'RESTRICT' })
+  ogMediaId!: string | null;
 
   @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
   publishedAt!: Date | null;
