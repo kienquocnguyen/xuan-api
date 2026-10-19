@@ -5,7 +5,9 @@ import { CourseAccessGrant } from './course-access-grant.entity.js';
 import { CourseLesson } from './course-lesson.entity.js';
 import { CourseSection } from './course-section.entity.js';
 import { Course } from './course.entity.js';
+import { AdminCourseAccessController } from './admin-course-access.controller.js';
 import { AdminCoursesController } from './admin-courses.controller.js';
+import { CourseAccessService } from './course-access.service.js';
 import { CoursesController } from './courses.controller.js';
 import { CoursesService } from './courses.service.js';
 
@@ -15,7 +17,7 @@ import { CoursesService } from './courses.service.js';
     TypeOrmModule.forFeature([Course, CourseSection, CourseLesson, CourseAccessGrant]),
     UsersModule,
   ],
-  controllers: [CoursesController, AdminCoursesController],
-  providers: [CoursesService],
+  controllers: [CoursesController, AdminCoursesController, AdminCourseAccessController],
+  providers: [CoursesService, CourseAccessService],
 })
 export class CoursesModule {}
