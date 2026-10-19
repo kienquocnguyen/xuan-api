@@ -56,7 +56,7 @@ export const POST_LANGUAGE = 'vi';
 @Check('ck_content_posts_body_version', `"body_version" IN (1, 2)`)
 @Check(
   'ck_content_posts_cover_alt',
-  `("cover_media_id" IS NULL AND "cover_alt" IS NULL) OR ("cover_media_id" IS NOT NULL AND btrim("cover_alt") <> '')`,
+  `("cover_media_id" IS NULL AND "cover_alt" IS NULL) OR ("cover_media_id" IS NOT NULL AND "cover_alt" IS NOT NULL AND btrim("cover_alt") <> '')`,
 )
 @Check('ck_content_posts_status', `"status" IN ('draft', 'published', 'archived')`)
 @Check('ck_content_posts_tags_count', `cardinality("tags") <= 10`)

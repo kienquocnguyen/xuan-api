@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class AddPostMedia1792426337024 implements MigrationInterface {
-  name = 'AddPostMedia1792426337024';
+export class AddPostMedia1792426532193 implements MigrationInterface {
+  name = 'AddPostMedia1792426532193';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Hand-added: TypeORM compares CHECKs by name only (blog B1 ruling); body version 2 (spec §5.5).
@@ -27,7 +27,7 @@ export class AddPostMedia1792426337024 implements MigrationInterface {
       `CREATE INDEX "ix_content_posts_cover_media_id" ON "content_posts"  ("cover_media_id") `,
     );
     await queryRunner.query(
-      `ALTER TABLE "content_posts" ADD CONSTRAINT "ck_content_posts_cover_alt" CHECK (("cover_media_id" IS NULL AND "cover_alt" IS NULL) OR ("cover_media_id" IS NOT NULL AND btrim("cover_alt") <> ''))`,
+      `ALTER TABLE "content_posts" ADD CONSTRAINT "ck_content_posts_cover_alt" CHECK (("cover_media_id" IS NULL AND "cover_alt" IS NULL) OR ("cover_media_id" IS NOT NULL AND "cover_alt" IS NOT NULL AND btrim("cover_alt") <> ''))`,
     );
     await queryRunner.query(
       `ALTER TABLE "content_media" ADD CONSTRAINT "fk_content_media_uploader_id" FOREIGN KEY ("uploader_id") REFERENCES "users"("id") ON DELETE RESTRICT ON UPDATE NO ACTION`,
