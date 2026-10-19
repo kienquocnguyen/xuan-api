@@ -6,6 +6,7 @@ import type { Post } from './post.entity.js';
  */
 const GUARDED: readonly { field: string; hasData: (post: Post) => boolean }[] = [
   { field: 'tags', hasData: (post) => post.tags.length > 0 },
+  { field: 'categoryId', hasData: (post) => post.categoryId !== null },
 ];
 
 /** The guarded fields absent from `input` whose stored value isn't empty; empty means the request is safe. */

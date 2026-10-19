@@ -28,10 +28,13 @@ const {
   POST_ARCHIVED,
   POST_WAS_PUBLISHED,
   POST_FIELDS_OMITTED,
+  POST_CATEGORY_REQUIRED,
+  CATEGORY_NOT_FOUND,
+  CATEGORY_ARCHIVED,
 } = contentErrors;
 
 type PostIdParam = z.infer<typeof postIdParamSchema>;
-const toDto = ({ post, author }: AuthoredPost) => toAdminPostDto(post, author);
+const toDto = ({ post, author, category }: AuthoredPost) => toAdminPostDto(post, author, category);
 
 /**
  * Authoring for editors and admins (blog spec §5.2). Ownership is checked by the service after loading the
@@ -53,7 +56,9 @@ export class AdminPostsController {
   ): Promise<Page<AdminPostSummaryDto>> {
     const { items, totalItems } = await this.posts.listForActor(actor, query.status, query);
     return {
-      items: items.map(({ post, author }) => toAdminPostSummaryDto(post, author)),
+      items: items.map(({ post, author, category }) =>
+        toAdminPostSummaryDto(post, author, category),
+      ),
       pageInfo: toPageInfo(query.page, query.pageSize, totalItems),
     };
   }
@@ -71,7 +76,14 @@ export class AdminPostsController {
 
   @Post()
   @ApiEnvelopeResponse(AdminPostDto, { status: 201 })
-  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, POST_SLUG_TAKEN)
+  @ApiErrorResponses(
+    VALIDATION_FAILED,
+    UNAUTHENTICATED,
+    FORBIDDEN,
+    POST_SLUG_TAKEN,
+    CATEGORY_NOT_FOUND,
+    CATEGORY_ARCHIVED,
+  )
   async create(
     @CurrentUser() actor: AuthenticatedUser,
     @Body({ schema: savePostSchema }) input: SavePostInput,
@@ -91,6 +103,9 @@ export class AdminPostsController {
     POST_SLUG_LOCKED,
     POST_BODY_EMPTY,
     POST_FIELDS_OMITTED,
+    POST_CATEGORY_REQUIRED,
+    CATEGORY_NOT_FOUND,
+    CATEGORY_ARCHIVED,
   )
   async update(
     @CurrentUser() actor: AuthenticatedUser,
@@ -111,6 +126,8 @@ export class AdminPostsController {
     NOT_FOUND,
     POST_BODY_EMPTY,
     POST_ARCHIVED,
+    POST_CATEGORY_REQUIRED,
+    CATEGORY_ARCHIVED,
   )
   async publish(
     @CurrentUser() actor: AuthenticatedUser,

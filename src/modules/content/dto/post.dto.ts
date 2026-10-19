@@ -1,5 +1,7 @@
 import { ApiProperty, getSchemaPath } from '@nestjs/swagger';
 import type { PublicProfile } from '../../users/user-profiles.reader.js';
+import type { CategoryRef } from '../categories.service.js';
+import { PostCategoryRefDto } from './category.dto.js';
 import type { PostBodyDocument } from '../body/post-body.schema.js';
 import type { Post } from '../post.entity.js';
 
@@ -19,6 +21,8 @@ export class PostSummaryDto {
   /** The last real change; the sitemap's lastmod (blog completion spec §3.3). */
   @ApiProperty({ format: 'date-time' }) updatedAt!: string;
   @ApiProperty({ type: PostAuthorDto }) author!: PostAuthorDto;
+  /** `null` without a category or when it is archived (blog completion spec §4.3). */
+  @ApiProperty({ type: PostCategoryRefDto, nullable: true }) category!: PostCategoryRefDto | null;
 }
 
 /** A published post, read by slug. */
@@ -33,7 +37,11 @@ export class PostDto extends PostSummaryDto {
 }
 
 /** Whitelist by construction: only these fields reach the wire (I10). Callers pass published posts only. */
-export function toPostSummaryDto(post: Post, author: PublicProfile): PostSummaryDto {
+export function toPostSummaryDto(
+  post: Post,
+  author: PublicProfile,
+  category: CategoryRef | null,
+): PostSummaryDto {
   return {
     id: post.id,
     slug: post.slug,
@@ -42,11 +50,16 @@ export function toPostSummaryDto(post: Post, author: PublicProfile): PostSummary
     publishedAt: publishedAtOf(post),
     updatedAt: post.updatedAt.toISOString(),
     author: { displayName: author.displayName, avatarUrl: author.avatarUrl },
+    category: category?.status === 'active' ? { slug: category.slug, label: category.label } : null,
   };
 }
 
-export function toPostDto(post: Post, author: PublicProfile): PostDto {
-  const summary = toPostSummaryDto(post, author);
+export function toPostDto(
+  post: Post,
+  author: PublicProfile,
+  category: CategoryRef | null,
+): PostDto {
+  const summary = toPostSummaryDto(post, author, category);
   return {
     id: summary.id,
     slug: summary.slug,
@@ -55,6 +68,7 @@ export function toPostDto(post: Post, author: PublicProfile): PostDto {
     publishedAt: summary.publishedAt,
     updatedAt: summary.updatedAt,
     author: summary.author,
+    category: summary.category,
     language: post.language,
     body: post.body,
     bodyVersion: post.bodyVersion,

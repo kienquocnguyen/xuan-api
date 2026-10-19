@@ -1,6 +1,7 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { signInAs, type TestUser, XHR } from './support/auth.js';
+import { insertCategory, type TestCategory } from './support/categories.js';
 import { createTestApp } from './support/create-test-app.js';
 import { resetDatabase } from './support/reset-database.js';
 
@@ -17,6 +18,7 @@ const body = (t: string) => ({
 describe('Public posts (/posts)', () => {
   let app: NestExpressApplication;
   let editor: { user: TestUser; cookie: string };
+  let category: TestCategory;
 
   beforeAll(async () => {
     app = await createTestApp();
@@ -29,6 +31,7 @@ describe('Public posts (/posts)', () => {
       avatarUrl: 'https://lh3.googleusercontent.com/a/x',
       email: 'xuan@example.com',
     });
+    category = await insertCategory(app);
   });
   afterAll(async () => {
     await app.close();
@@ -50,6 +53,7 @@ describe('Public posts (/posts)', () => {
         body: body(`Nội dung ${slug}`),
         excerpt,
         seoTitle: `SEO ${slug}`,
+        categoryId: category.id,
       });
     expect(created.status).toBe(201);
     const id = created.body.data.id as string;
@@ -97,6 +101,7 @@ describe('Public posts (/posts)', () => {
               publishedAt: expect.stringMatching(ISO),
               updatedAt: expect.stringMatching(ISO),
               author: { displayName: 'Xuân', avatarUrl: 'https://lh3.googleusercontent.com/a/x' },
+              category: { slug: 'du-lich', label: 'Du lịch' },
             },
             {
               id: older,
@@ -106,6 +111,7 @@ describe('Public posts (/posts)', () => {
               publishedAt: expect.stringMatching(ISO),
               updatedAt: expect.stringMatching(ISO),
               author: { displayName: 'Xuân', avatarUrl: 'https://lh3.googleusercontent.com/a/x' },
+              category: { slug: 'du-lich', label: 'Du lịch' },
             },
           ],
           pageInfo: { page: 1, pageSize: 12, totalItems: 2, totalPages: 1 },
@@ -164,6 +170,7 @@ describe('Public posts (/posts)', () => {
           seoDescription: null,
           updatedAt: expect.stringMatching(ISO),
           tags: [],
+          category: { slug: 'du-lich', label: 'Du lịch' },
         },
       });
     });
