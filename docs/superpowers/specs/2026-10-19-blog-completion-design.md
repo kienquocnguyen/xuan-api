@@ -118,7 +118,7 @@ New FKs reach `users(id)` by entity name, like `content_posts.author_id` (AD14, 
 - **Input:** `SavePostDto.tags?: string[]` (0–10). Each tag is trimmed, 1–40 characters, storable text (no NUL, no lone surrogates), and has no comma [Proposed: the web's comma-list input can't round-trip one].
 - **Duplicates:** compared case-insensitively after trimming; a duplicate → `400 INVALID` at `tags.<i>` [Proposed: reject, don't silently drop, B4's principle].
 - **Order and case:** the input order is stored and returned, and the case is kept.
-- **Omitted on a `PUT`:** stored as `[]`, because full replacement applies (§3.4).
+- **Omitted on a `PUT`:** accepted only when the stored tags are already `[]`; otherwise `409 POST_FIELDS_OMITTED`. Clearing is an explicit `[]` (§3.4).
 - **Responses:** `tags: string[]` on `PostDto`, `AdminPostSummaryDto` and `AdminPostDto` (BD-12).
 - No tag pages, filter or index in V1.
 - Whether PostgreSQL enforces the 40-character limit on array elements is spike **S1** (§11). If it doesn't, a CHECK over `array_to_string` isn't exact, so the limit becomes application-only with the reason recorded (D31 deviation).
@@ -239,7 +239,7 @@ A category's slug may change [Proposed]. Category URLs are filter parameters, no
 
 ### 4.4 Category on posts [Owner BD-3]
 
-- **Input:** `SavePostDto.categoryId?: uuid`. Omitted → `null` (§3.4).
+- **Input:** `SavePostDto.categoryId?: uuid | null`. Explicit `null` clears it; an omitted value is subject to the omitted-field guard (§3.4).
 - **Assignment rules:**
   - Unknown → `409 CATEGORY_NOT_FOUND`.
   - Archived, and different from the post's current category → `409 CATEGORY_ARCHIVED`. Keeping an archived category that's already assigned is allowed, so editing such a post never fails.
