@@ -11,7 +11,7 @@ import {
 } from 'typeorm';
 import type { PostBodyDocument } from './body/post-body.schema.js';
 
-export const POST_STATUSES = ['draft', 'published'] as const;
+export const POST_STATUSES = ['draft', 'published', 'archived'] as const;
 export type PostStatus = (typeof POST_STATUSES)[number];
 
 /** The only V1 language (spec B3): widening `ck_content_posts_language` is the i18n change. */
@@ -44,7 +44,8 @@ export const POST_LANGUAGE = 'vi';
   `jsonb_typeof("body") = 'object' AND "body"->>'type' = 'doc'`,
 )
 @Check('ck_content_posts_body_version', `"body_version" IN (1)`)
-@Check('ck_content_posts_status', `"status" IN ('draft', 'published')`)
+@Check('ck_content_posts_status', `"status" IN ('draft', 'published', 'archived')`)
+@Check('ck_content_posts_tags_count', `cardinality("tags") <= 10`)
 @Check(
   'ck_content_posts_published_has_date',
   `"status" <> 'published' OR "published_at" IS NOT NULL`,
@@ -81,6 +82,10 @@ export class Post {
 
   @Column({ type: 'varchar', length: 16, default: 'draft' })
   status!: PostStatus;
+
+  /** Up to 10 labels in the author's order (blog completion B1); element rules are the API's (database.md §12). */
+  @Column({ type: 'varchar', length: 40, array: true, default: () => "'{}'" })
+  tags!: string[];
 
   @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
   publishedAt!: Date | null;

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import type { DataSource, EntityManager, Repository } from 'typeorm';
+import { type DataSource, type EntityManager, IsNull, type Repository } from 'typeorm';
 import { isUniqueViolation } from '../../database/postgres-errors.js';
 import { AppError } from '../../errors/app-error.js';
 import { baselineErrors } from '../../errors/baseline-errors.js';
@@ -10,6 +10,7 @@ import { type PublicProfile, UserProfilesReader } from '../users/user-profiles.r
 import { canonicalizePostBody, hasMeaningfulText } from './body/post-body-content.js';
 import { contentErrors } from './content.errors.js';
 import { POST_SLUG_PATTERN, type SavePostInput } from './dto/save-post.dto.js';
+import { omittedFieldsWithData } from './post-compatibility.js';
 import { POST_LANGUAGE, Post, type PostStatus } from './post.entity.js';
 
 export type AuthoredPost = Readonly<{ post: Post; author: PublicProfile }>;
@@ -77,6 +78,7 @@ export class PostsService {
         body: canonicalizePostBody(input.body),
         seoTitle: input.seoTitle,
         seoDescription: input.seoDescription,
+        tags: input.tags ?? [],
       });
       id = (result.identifiers[0] as { id: string }).id;
     } catch (error) {
@@ -90,6 +92,9 @@ export class PostsService {
       // Row lock: a concurrent publish can't slip between these checks and the write (B17, B18).
       await this.dataSource.transaction(async (manager) => {
         const post = await this.lockManageable(manager, actor, id);
+        // Q3: an old client omits newer fields; never let its full replacement erase them (spec §3.4).
+        const fields = omittedFieldsWithData(input, post);
+        if (fields.length > 0) throw new AppError(contentErrors.POST_FIELDS_OMITTED, { fields });
         // B17: once ever published, the slug is the post's permanent URL.
         if (post.publishedAt !== null && input.slug !== post.slug) {
           throw new AppError(contentErrors.POST_SLUG_LOCKED);
@@ -108,6 +113,7 @@ export class PostsService {
             body: canonicalizePostBody(input.body),
             seoTitle: input.seoTitle,
             seoDescription: input.seoDescription,
+            tags: input.tags ?? [],
           },
         );
       });
@@ -121,6 +127,7 @@ export class PostsService {
     // Row lock: a concurrent update can't empty the body between the check and the publish (B18).
     await this.dataSource.transaction(async (manager) => {
       const post = await this.lockManageable(manager, actor, id);
+      if (post.status === 'archived') throw new AppError(contentErrors.POST_ARCHIVED);
       if (post.status === 'published') return; // idempotent: no write
       if (!hasMeaningfulText(post.body)) throw new AppError(contentErrors.POST_BODY_EMPTY); // B18
       await manager
@@ -135,15 +142,50 @@ export class PostsService {
   }
 
   async unpublish(actor: AuthenticatedUser, id: string): Promise<AuthoredPost> {
-    const post = await this.loadManageable(actor, id);
-    if (post.status === 'draft') return this.withAuthor(post); // idempotent: no write
-    await this.posts
-      .createQueryBuilder()
-      .update(Post)
-      .set({ status: 'draft' }) // published_at stays, so the slug stays locked (B16, B17)
-      .where('id = :id AND status = :published', { id, published: 'published' })
-      .execute();
+    await this.dataSource.transaction(async (manager) => {
+      const post = await this.lockManageable(manager, actor, id);
+      if (post.status === 'archived') throw new AppError(contentErrors.POST_ARCHIVED);
+      if (post.status === 'draft') return; // idempotent: no write
+      // published_at stays, so the slug stays locked (B16, B17).
+      await manager.update(Post, { id }, { status: 'draft' });
+    });
     return this.getForActor(actor, id);
+  }
+
+  /** Retires a draft or published post without deleting it (blog completion spec §3.1, BD-1). */
+  async archive(actor: AuthenticatedUser, id: string): Promise<AuthoredPost> {
+    await this.dataSource.transaction(async (manager) => {
+      const post = await this.lockManageable(manager, actor, id);
+      if (post.status === 'archived') return; // idempotent: no write
+      await manager.update(Post, { id }, { status: 'archived' }); // published_at kept: the slug stays locked
+    });
+    return this.getForActor(actor, id);
+  }
+
+  /** Archived → draft, never straight to published; any other state is left as it is (spec §3.1). */
+  async restore(actor: AuthenticatedUser, id: string): Promise<AuthoredPost> {
+    await this.dataSource.transaction(async (manager) => {
+      const post = await this.lockManageable(manager, actor, id);
+      if (post.status !== 'archived') return; // no write
+      await manager.update(Post, { id }, { status: 'draft' });
+    });
+    return this.getForActor(actor, id);
+  }
+
+  /** Hard delete, only for a draft that was never published: anything with a public past is archived (BD-1). */
+  async remove(actor: AuthenticatedUser, id: string): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      const post = await this.lockManageable(manager, actor, id);
+      if (post.publishedAt !== null) throw new AppError(contentErrors.POST_WAS_PUBLISHED);
+      if (post.status === 'archived') throw new AppError(contentErrors.POST_ARCHIVED);
+      // The spec's conditional delete (§3.1): a backstop should the checks above ever change.
+      const { affected } = await manager.delete(Post, {
+        id,
+        status: 'draft',
+        publishedAt: IsNull(),
+      });
+      if (affected !== 1) throw new Error('A deletable draft was locked but not deleted.');
+    });
   }
 
   /** 404 if missing, then the ownership rule: editors only their own, reads included (B11, B12). */

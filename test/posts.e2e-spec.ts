@@ -65,6 +65,19 @@ describe('Public posts (/posts)', () => {
   const unpublish = (id: string) =>
     server().post(`/admin/posts/${id}/unpublish`).set(XHR).set('Cookie', editor.cookie);
 
+  it('hides archived posts, including ever-published ones (blog completion B1)', async () => {
+    const id = await post('luu-tru');
+    const archived = await server()
+      .post(`/admin/posts/${id}/archive`)
+      .set(XHR)
+      .set('Cookie', editor.cookie);
+    expect(archived.status).toBe(200);
+    expect((await server().get('/posts')).body.data.items).toEqual([]);
+    const read = await server().get('/posts/luu-tru');
+    expect(read.status).toBe(404);
+    expect(read.body).toEqual(notFound);
+  });
+
   describe('GET /posts', () => {
     it('lists only published posts, newest first, without author ids or emails', async () => {
       const older = await post('cu', { excerpt: 'Tóm tắt' });
@@ -82,6 +95,7 @@ describe('Public posts (/posts)', () => {
               title: 'Tiêu đề moi',
               excerpt: null,
               publishedAt: expect.stringMatching(ISO),
+              updatedAt: expect.stringMatching(ISO),
               author: { displayName: 'Xuân', avatarUrl: 'https://lh3.googleusercontent.com/a/x' },
             },
             {
@@ -90,6 +104,7 @@ describe('Public posts (/posts)', () => {
               title: 'Tiêu đề cu',
               excerpt: 'Tóm tắt',
               publishedAt: expect.stringMatching(ISO),
+              updatedAt: expect.stringMatching(ISO),
               author: { displayName: 'Xuân', avatarUrl: 'https://lh3.googleusercontent.com/a/x' },
             },
           ],
@@ -148,6 +163,7 @@ describe('Public posts (/posts)', () => {
           seoTitle: 'SEO bai-viet',
           seoDescription: null,
           updatedAt: expect.stringMatching(ISO),
+          tags: [],
         },
       });
     });

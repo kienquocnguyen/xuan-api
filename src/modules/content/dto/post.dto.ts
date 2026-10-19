@@ -16,6 +16,8 @@ export class PostSummaryDto {
   @ApiProperty() title!: string;
   @ApiProperty({ type: String, nullable: true }) excerpt!: string | null;
   @ApiProperty({ format: 'date-time' }) publishedAt!: string;
+  /** The last real change; the sitemap's lastmod (blog completion spec §3.3). */
+  @ApiProperty({ format: 'date-time' }) updatedAt!: string;
   @ApiProperty({ type: PostAuthorDto }) author!: PostAuthorDto;
 }
 
@@ -27,7 +29,7 @@ export class PostDto extends PostSummaryDto {
   @ApiProperty({ example: 1 }) bodyVersion!: number;
   @ApiProperty({ type: String, nullable: true }) seoTitle!: string | null;
   @ApiProperty({ type: String, nullable: true }) seoDescription!: string | null;
-  @ApiProperty({ format: 'date-time' }) updatedAt!: string;
+  @ApiProperty({ type: [String], example: ['GoPro', 'Đà Lạt'] }) tags!: string[];
 }
 
 /** Whitelist by construction: only these fields reach the wire (I10). Callers pass published posts only. */
@@ -38,6 +40,7 @@ export function toPostSummaryDto(post: Post, author: PublicProfile): PostSummary
     title: post.title,
     excerpt: post.excerpt,
     publishedAt: publishedAtOf(post),
+    updatedAt: post.updatedAt.toISOString(),
     author: { displayName: author.displayName, avatarUrl: author.avatarUrl },
   };
 }
@@ -50,13 +53,14 @@ export function toPostDto(post: Post, author: PublicProfile): PostDto {
     title: summary.title,
     excerpt: summary.excerpt,
     publishedAt: summary.publishedAt,
+    updatedAt: summary.updatedAt,
     author: summary.author,
     language: post.language,
     body: post.body,
     bodyVersion: post.bodyVersion,
     seoTitle: post.seoTitle,
     seoDescription: post.seoDescription,
-    updatedAt: post.updatedAt.toISOString(),
+    tags: [...post.tags],
   };
 }
 

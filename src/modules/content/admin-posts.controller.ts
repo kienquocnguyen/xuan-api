@@ -1,5 +1,5 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Put, Query } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put, Query } from '@nestjs/common';
+import { ApiNoContentResponse, ApiTags } from '@nestjs/swagger';
 import type { z } from 'zod';
 import { baselineErrors } from '../../errors/baseline-errors.js';
 import { CurrentUser, Roles } from '../../http/auth/auth.decorators.js';
@@ -21,7 +21,14 @@ import { type SavePostInput, savePostSchema } from './dto/save-post.dto.js';
 import { type AuthoredPost, PostsService } from './posts.service.js';
 
 const { VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND } = baselineErrors;
-const { POST_SLUG_TAKEN, POST_SLUG_LOCKED, POST_BODY_EMPTY } = contentErrors;
+const {
+  POST_SLUG_TAKEN,
+  POST_SLUG_LOCKED,
+  POST_BODY_EMPTY,
+  POST_ARCHIVED,
+  POST_WAS_PUBLISHED,
+  POST_FIELDS_OMITTED,
+} = contentErrors;
 
 type PostIdParam = z.infer<typeof postIdParamSchema>;
 const toDto = ({ post, author }: AuthoredPost) => toAdminPostDto(post, author);
@@ -83,6 +90,7 @@ export class AdminPostsController {
     POST_SLUG_TAKEN,
     POST_SLUG_LOCKED,
     POST_BODY_EMPTY,
+    POST_FIELDS_OMITTED,
   )
   async update(
     @CurrentUser() actor: AuthenticatedUser,
@@ -96,7 +104,14 @@ export class AdminPostsController {
   @HttpCode(200)
   @ApiSchemaParameters('path', postIdParamSchema)
   @ApiEnvelopeResponse(AdminPostDto)
-  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, POST_BODY_EMPTY)
+  @ApiErrorResponses(
+    VALIDATION_FAILED,
+    UNAUTHENTICATED,
+    FORBIDDEN,
+    NOT_FOUND,
+    POST_BODY_EMPTY,
+    POST_ARCHIVED,
+  )
   async publish(
     @CurrentUser() actor: AuthenticatedUser,
     @Param({ schema: postIdParamSchema }) params: PostIdParam,
@@ -108,11 +123,54 @@ export class AdminPostsController {
   @HttpCode(200)
   @ApiSchemaParameters('path', postIdParamSchema)
   @ApiEnvelopeResponse(AdminPostDto)
-  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND)
+  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, POST_ARCHIVED)
   async unpublish(
     @CurrentUser() actor: AuthenticatedUser,
     @Param({ schema: postIdParamSchema }) params: PostIdParam,
   ): Promise<AdminPostDto> {
     return toDto(await this.posts.unpublish(actor, params.id));
+  }
+
+  @Post(':id/archive')
+  @HttpCode(200)
+  @ApiSchemaParameters('path', postIdParamSchema)
+  @ApiEnvelopeResponse(AdminPostDto)
+  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND)
+  async archive(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param({ schema: postIdParamSchema }) params: PostIdParam,
+  ): Promise<AdminPostDto> {
+    return toDto(await this.posts.archive(actor, params.id));
+  }
+
+  @Post(':id/restore')
+  @HttpCode(200)
+  @ApiSchemaParameters('path', postIdParamSchema)
+  @ApiEnvelopeResponse(AdminPostDto)
+  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND)
+  async restore(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param({ schema: postIdParamSchema }) params: PostIdParam,
+  ): Promise<AdminPostDto> {
+    return toDto(await this.posts.restore(actor, params.id));
+  }
+
+  @Delete(':id')
+  @HttpCode(204)
+  @ApiSchemaParameters('path', postIdParamSchema)
+  @ApiNoContentResponse({ description: 'The never-published draft is deleted.' })
+  @ApiErrorResponses(
+    VALIDATION_FAILED,
+    UNAUTHENTICATED,
+    FORBIDDEN,
+    NOT_FOUND,
+    POST_WAS_PUBLISHED,
+    POST_ARCHIVED,
+  )
+  async remove(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param({ schema: postIdParamSchema }) params: PostIdParam,
+  ): Promise<void> {
+    await this.posts.remove(actor, params.id);
   }
 }

@@ -665,4 +665,84 @@ describe('OpenAPI document', () => {
       ]);
     });
   });
+
+  describe('blog lifecycle and tags contract (blog completion B1)', () => {
+    const doc = () => createOpenApiDocument(app);
+    const schemaOf = (name: string) =>
+      doc().components?.schemas?.[name] as
+        { properties?: Record<string, Record<string, unknown>> } | undefined;
+    const propsOf = (name: string) => Object.keys(schemaOf(name)?.properties ?? {}).sort();
+    const codes = (path: string, method: 'get' | 'put' | 'post' | 'delete') =>
+      Object.entries(doc().paths[path]?.[method]?.responses ?? {})
+        .filter(([status]) => Number(status) >= 400)
+        .flatMap(([, response]) =>
+          String((response as { description?: string }).description).split(' | '),
+        )
+        .sort();
+    const base = [
+      'FORBIDDEN',
+      'INTERNAL_ERROR',
+      'NOT_FOUND',
+      'PAYLOAD_TOO_LARGE',
+      'UNAUTHENTICATED',
+      'VALIDATION_FAILED',
+    ];
+
+    it('documents exactly the codes of every post write (I18)', () => {
+      expect(codes('/admin/posts/{id}/archive', 'post')).toEqual(base);
+      expect(codes('/admin/posts/{id}/restore', 'post')).toEqual(base);
+      expect(codes('/admin/posts/{id}', 'delete')).toEqual(
+        [...base, 'POST_ARCHIVED', 'POST_WAS_PUBLISHED'].sort(),
+      );
+      expect(codes('/admin/posts/{id}/publish', 'post')).toEqual(
+        [...base, 'POST_ARCHIVED', 'POST_BODY_EMPTY'].sort(),
+      );
+      expect(codes('/admin/posts/{id}/unpublish', 'post')).toEqual(
+        [...base, 'POST_ARCHIVED'].sort(),
+      );
+      expect(codes('/admin/posts/{id}', 'put')).toEqual(
+        [
+          ...base,
+          'POST_BODY_EMPTY',
+          'POST_FIELDS_OMITTED',
+          'POST_SLUG_LOCKED',
+          'POST_SLUG_TAKEN',
+        ].sort(),
+      );
+    });
+
+    it('documents the delete as 204 with no body and the new routes with the id parameter', () => {
+      const remove = doc().paths['/admin/posts/{id}']?.delete;
+      expect(Object.keys(remove?.responses ?? {})).toContain('204');
+      expect(JSON.stringify(remove?.responses['204'])).not.toContain('content');
+      for (const verb of ['archive', 'restore']) {
+        const params = (doc().paths[`/admin/posts/{id}/${verb}`]?.post?.parameters ?? []) as {
+          name: string;
+          in: string;
+        }[];
+        expect(params.map((p) => `${p.in}:${p.name}`)).toEqual(['path:id']);
+      }
+    });
+
+    it('widens the status enum and adds the fields additively', () => {
+      expect(schemaOf('AdminPostSummaryDto')?.properties?.status?.enum).toEqual([
+        'draft',
+        'published',
+        'archived',
+      ]);
+      expect(JSON.stringify(schemaOf('AdminPostsQuery'))).toContain('archived');
+      expect(propsOf('PostSummaryDto')).toEqual(
+        ['author', 'excerpt', 'id', 'publishedAt', 'slug', 'title', 'updatedAt'].sort(),
+      );
+      expect(propsOf('PostDto')).toEqual(
+        expect.arrayContaining(['tags', 'updatedAt', 'body', 'bodyVersion']),
+      );
+      expect(propsOf('AdminPostSummaryDto')).toContain('tags');
+      expect(propsOf('AdminPostDto')).toContain('tags');
+      expect(propsOf('SavePostDto')).toEqual(
+        ['body', 'excerpt', 'seoDescription', 'seoTitle', 'slug', 'tags', 'title'].sort(),
+      );
+      expect(JSON.stringify(schemaOf('SavePostDto')?.properties?.tags)).toContain('null');
+    });
+  });
 });
