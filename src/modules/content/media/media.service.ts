@@ -1,0 +1,90 @@
+import { randomUUID } from 'node:crypto';
+import { Inject, Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import type { Repository } from 'typeorm';
+import { APP_CONFIG } from '../../../config/app-config.module.js';
+import type { AppConfig } from '../../../config/load-config.js';
+import { AppError } from '../../../errors/app-error.js';
+import { baselineErrors } from '../../../errors/baseline-errors.js';
+import type { AuthenticatedUser } from '../../../http/auth/role.js';
+import { contentErrors } from '../content.errors.js';
+import { ImageRejectedError, toWebpVariants } from './image-processing.js';
+import { MEDIA_CONTENT_TYPE, ContentMedia } from './media.entity.js';
+import { MEDIA_STORAGE, type MediaStorage, mediaUrl, variantKey } from './media-storage.js';
+
+/** The image a DTO shows: URLs built from the configured base (spec §5.5). */
+export type MediaImage = Readonly<{
+  id: string;
+  url: string;
+  width: number;
+  height: number;
+  variants: readonly Readonly<{ width: number; height: number; url: string }>[];
+}>;
+
+const PREFERRED_WIDTH = 1280;
+
+/** Blog image uploads (blog completion spec §5.1, BD-4/5/11). */
+@Injectable()
+export class MediaService {
+  constructor(
+    @InjectRepository(ContentMedia) private readonly media: Repository<ContentMedia>,
+    @Inject(MEDIA_STORAGE) private readonly storage: MediaStorage,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+  ) {}
+
+  /**
+   * Re-encodes, stores every variant, then records the row. A failure after storing leaves orphan files, which
+   * BD-5 accepts. The original filename is never used.
+   */
+  async uploadImage(actor: AuthenticatedUser, file: Express.Multer.File): Promise<MediaImage> {
+    if (!this.storage.enabled) throw new AppError(contentErrors.MEDIA_STORAGE_DISABLED); // owner Q1
+    let variants;
+    try {
+      variants = await toWebpVariants(file.buffer);
+    } catch (error) {
+      if (!(error instanceof ImageRejectedError)) throw error;
+      throw new AppError(baselineErrors.VALIDATION_FAILED, {
+        fields: [{ field: 'file', code: 'INVALID', message: 'This value is invalid.' }],
+      });
+    }
+    const storageKey = `blog/${randomUUID()}`;
+    await Promise.all(
+      variants.map((variant) =>
+        this.storage.put(variantKey(storageKey, variant.width), variant.data, MEDIA_CONTENT_TYPE),
+      ),
+    );
+    const largest = variants[variants.length - 1];
+    const row = await this.media.save(
+      this.media.create({
+        uploaderId: actor.id,
+        storageKey,
+        width: largest.width,
+        height: largest.height,
+        variantWidths: variants.map((variant) => variant.width),
+        byteSize: variants.reduce((sum, variant) => sum + variant.data.length, 0),
+      }),
+    );
+    const image = this.toImage(row);
+    if (!image) throw new Error('Stored media without a public base URL.');
+    return image;
+  }
+
+  /** URLs of a stored image; `null` when this server has no public media base (storage disabled). */
+  toImage(
+    row: Pick<ContentMedia, 'id' | 'storageKey' | 'width' | 'height' | 'variantWidths'>,
+  ): MediaImage | null {
+    const base = this.config.media.publicBaseUrl;
+    if (!base) return null;
+    // Heights follow the stored ratio (sharp rounds the same way when it resizes).
+    const variants = [...row.variantWidths]
+      .sort((a, b) => a - b)
+      .map((width) => ({
+        width,
+        height: width === row.width ? row.height : Math.round((width * row.height) / row.width),
+        url: mediaUrl(base, row.storageKey, width),
+      }));
+    const preferred =
+      [...variants].reverse().find((variant) => variant.width <= PREFERRED_WIDTH) ?? variants[0];
+    return { id: row.id, ...preferred, variants };
+  }
+}

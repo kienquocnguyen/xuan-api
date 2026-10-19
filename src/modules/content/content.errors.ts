@@ -62,4 +62,9 @@ export const contentErrors = {
     kind: 'conflict',
     message: 'A published post needs a category.',
   },
+  MEDIA_STORAGE_DISABLED: {
+    code: 'MEDIA_STORAGE_DISABLED',
+    kind: 'conflict',
+    message: 'Image uploads are switched off on this server.',
+  },
 } as const satisfies Record<string, ErrorDefinition>;
