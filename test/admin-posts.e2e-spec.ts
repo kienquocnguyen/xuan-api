@@ -2,6 +2,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { signInAs, type TestUser, XHR } from './support/auth.js';
+import { insertCategory, type TestCategory } from './support/categories.js';
 import { createTestApp } from './support/create-test-app.js';
 import { resetDatabase } from './support/reset-database.js';
 
@@ -34,10 +35,13 @@ const p = (...content: unknown[]) =>
   content.length ? { type: 'paragraph', content } : { type: 'paragraph' };
 const doc = (...content: unknown[]) => ({ type: 'doc', content });
 const body = (t = 'Xin chào') => doc(p(text(t)));
+/** Set per test: publishing needs a category (blog completion B2). */
+let defaultCategoryId: string | null = null;
 const save = (overrides: Record<string, unknown> = {}) => ({
   slug: 'bai-viet',
   title: 'Bài viết',
   body: body(),
+  categoryId: defaultCategoryId,
   ...overrides,
 });
 
@@ -47,6 +51,7 @@ describe('Authoring posts (/admin/posts)', () => {
   let admin: { user: TestUser; cookie: string };
   let editor: { user: TestUser; cookie: string };
   let otherEditor: { user: TestUser; cookie: string };
+  let category: TestCategory;
 
   beforeAll(async () => {
     app = await createTestApp();
@@ -57,6 +62,8 @@ describe('Authoring posts (/admin/posts)', () => {
     admin = await signInAs(app, { role: 'admin', displayName: 'Xuân' });
     editor = await signInAs(app, { role: 'editor', displayName: 'Biên tập' });
     otherEditor = await signInAs(app, { role: 'editor', displayName: 'Người khác' });
+    category = await insertCategory(app);
+    defaultCategoryId = category.id;
   });
   afterAll(async () => {
     await app.close();
@@ -104,6 +111,13 @@ describe('Authoring posts (/admin/posts)', () => {
           seoTitle: 'SEO',
           seoDescription: null,
           tags: [],
+          category: {
+            id: category.id,
+            key: 'du-lich',
+            slug: 'du-lich',
+            label: 'Du lịch',
+            status: 'active',
+          },
           createdAt: expect.stringMatching(ISO),
         },
       });
@@ -280,6 +294,13 @@ describe('Authoring posts (/admin/posts)', () => {
         updatedAt: expect.stringMatching(ISO),
         author: { id: editor.user.id, displayName: 'Biên tập', avatarUrl: null },
         tags: [],
+        category: {
+          id: category.id,
+          key: 'du-lich',
+          slug: 'du-lich',
+          label: 'Du lịch',
+          status: 'active',
+        },
       });
       expect(own.body.data.pageInfo).toEqual({
         page: 1,
@@ -659,7 +680,7 @@ describe('Authoring posts (/admin/posts)', () => {
     });
 
     it('refuses the current xuan-web save shape on a tagged post, writing nothing', async () => {
-      const id = await createdId(save({ tags: ['giữ'] }));
+      const id = await createdId(save({ tags: ['giữ'], categoryId: null }));
       const before = await rowOf(id);
       const res = await update(id, currentWebShape('Tiêu đề mới'));
       expect(res.status).toBe(409);
@@ -668,7 +689,7 @@ describe('Authoring posts (/admin/posts)', () => {
     });
 
     it('keeps the current xuan-web save shape working on an untagged post', async () => {
-      const id = await createdId();
+      const id = await createdId(save({ categoryId: null }));
       const res = await update(id, currentWebShape('Tiêu đề mới'));
       expect(res.status).toBe(200);
       expect(res.body.data).toMatchObject({ title: 'Tiêu đề mới', tags: [] });
@@ -680,6 +701,136 @@ describe('Authoring posts (/admin/posts)', () => {
       expect(res.body.error.details.fields).toEqual([
         { field: 'tags.1', code: 'INVALID', message: 'This value is invalid.' },
       ]);
+    });
+  });
+
+  describe('one category per post (blog completion B2)', () => {
+    const required = envelope('POST_CATEGORY_REQUIRED', 'A published post needs a category.');
+    const missing = envelope('CATEGORY_NOT_FOUND', "The chosen category doesn't exist.");
+    const archivedCategory = envelope('CATEGORY_ARCHIVED', 'The chosen category is archived.');
+    const omittedFields = (fields: string[]) =>
+      envelope(
+        'POST_FIELDS_OMITTED',
+        'Send every field: the request leaves out fields that hold data.',
+        { fields },
+      );
+    const archiveCategory = (id: string) =>
+      db.query(`UPDATE content_categories SET status = 'archived' WHERE id = $1`, [id]);
+    const adminRef = {
+      id: expect.any(String),
+      key: 'du-lich',
+      slug: 'du-lich',
+      label: 'Du lịch',
+      status: 'active',
+    };
+
+    it('creates and moves posts between categories', async () => {
+      const created = await create(save());
+      expect(created.body.data.category).toEqual({ ...adminRef, id: category.id });
+      const other = await insertCategory(app, { key: 'am-thuc', label: 'Ẩm thực' });
+      const moved = await update(created.body.data.id, save({ categoryId: other.id }));
+      expect(moved.body.data.category).toEqual({
+        id: other.id,
+        key: 'am-thuc',
+        slug: 'am-thuc',
+        label: 'Ẩm thực',
+        status: 'active',
+      });
+      const cleared = await update(created.body.data.id, save({ categoryId: null }));
+      expect(cleared.body.data.category).toBeNull();
+    });
+
+    it('rejects an unknown category with 409 CATEGORY_NOT_FOUND', async () => {
+      const res = await create(save({ categoryId: UNKNOWN_ID }));
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual(missing);
+      const id = await createdId();
+      expect((await update(id, save({ categoryId: UNKNOWN_ID }))).body).toEqual(missing);
+    });
+
+    it('refuses to move a post into an archived category, but keeps one already assigned', async () => {
+      const id = await createdId();
+      const old = await insertCategory(app, { key: 'cu', label: 'Cũ' });
+      await archiveCategory(old.id);
+      const moved = await update(id, save({ categoryId: old.id }));
+      expect(moved.status).toBe(409);
+      expect(moved.body).toEqual(archivedCategory);
+      await archiveCategory(category.id);
+      const kept = await update(id, save({ title: 'Vẫn sửa được' }));
+      expect(kept.status).toBe(200);
+      expect(kept.body.data.category.status).toBe('archived');
+    });
+
+    it('needs an active category to publish', async () => {
+      const without = await createdId(save({ categoryId: null }));
+      const res = await action(without, 'publish');
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual(required);
+      const id = await createdId(save({ slug: 'co-muc' }));
+      await archiveCategory(category.id);
+      const inArchived = await action(id, 'publish');
+      expect(inArchived.status).toBe(409);
+      expect(inArchived.body).toEqual(archivedCategory);
+    });
+
+    it('keeps a published post from losing its category', async () => {
+      const id = await createdId();
+      await action(id, 'publish');
+      const res = await update(id, save({ categoryId: null }));
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual(required);
+    });
+
+    it('lets a legacy published post without a category stay so and be edited by the current web', async () => {
+      const id = await createdId(save({ categoryId: null }));
+      await db.query(
+        `UPDATE content_posts SET status = 'published', published_at = now() WHERE id = $1`,
+        [id],
+      );
+      const res = await update(id, {
+        slug: 'bai-viet',
+        title: 'Sửa bài cũ',
+        excerpt: '',
+        seoTitle: '',
+        seoDescription: '',
+        body: body(),
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toMatchObject({ status: 'published', category: null });
+    });
+
+    it('refuses the current xuan-web save shape on a post with a category, writing nothing', async () => {
+      const id = await createdId();
+      const res = await update(id, {
+        slug: 'bai-viet',
+        title: 'Mới',
+        excerpt: '',
+        seoTitle: '',
+        seoDescription: '',
+        body: body(),
+      });
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual(omittedFields(['categoryId']));
+      expect((await get(id)).body.data.title).toBe('Bài viết');
+    });
+
+    // Review Focus 1: delete ∥ assign always ends in a state some serial order explains.
+    it('keeps category deletion and assignment consistent', async () => {
+      for (let trial = 0; trial < 15; trial++) {
+        const target = await insertCategory(app, { key: `muc-${trial}`, label: `Mục ${trial}` });
+        const id = await createdId(save({ slug: `dua-${trial}` }));
+        const [deleted, assigned] = await Promise.all([
+          server()
+            .delete(`/admin/post-categories/${target.id}`)
+            .set(XHR)
+            .set('Cookie', admin.cookie),
+          update(id, save({ slug: `dua-${trial}`, categoryId: target.id })),
+        ]);
+        const pair = `${deleted.status}/${assigned.status}`;
+        expect(['204/409', '409/200']).toContain(pair);
+        if (pair === '204/409') expect(assigned.body).toEqual(missing);
+        else expect(deleted.body.error.code).toBe('CATEGORY_IN_USE');
+      }
     });
   });
 });

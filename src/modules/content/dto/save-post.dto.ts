@@ -64,6 +64,8 @@ export const savePostSchema = z
     seoTitle: optionalText(200),
     seoDescription: optionalText(400),
     tags,
+    /** One category (blog completion B2): `null` clears it; an omission is guarded (spec §3.4). */
+    categoryId: z.uuid().nullable().optional(),
   })
   .meta({ id: 'SavePostDto' });
 

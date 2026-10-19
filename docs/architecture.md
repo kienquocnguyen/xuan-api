@@ -93,7 +93,9 @@ src/
     services/        services.module.ts · .controller.ts · .service.ts · service-offering.entity.ts · dto/   (first slice)
     users/           users, auth_identities, sessions · auth + admin controllers · AccessGuard · google/ gateway (§17) ·
                      exports UserProfilesReader (its first export, AD14)
-    content/         content_posts · public + authoring post controllers · body/ (TipTap v1 schema, limits, content rules)
+    content/         content_posts, content_categories, content_category_translations · public + authoring post controllers,
+                     public + admin category controllers · posts / categories services · body/ (TipTap v1 schema, limits,
+                     content rules) · post-compatibility (the omitted-field guard, blog completion spec §3.4)
     courses/         courses, course_sections, course_lessons, course_access_grants, lesson_progress · public catalog, admin curriculum,
                      admin access and learner controllers · courses / course-access / learning services ·
                      course lock rule L1 (AD15) · grant upsert (AD16) · imports UsersModule for UserProfilesReader

@@ -3,7 +3,15 @@ import { pageQueryFields } from '../../../http/pagination/page.js';
 import { POST_STATUSES } from '../post.entity.js';
 
 export const postsPageQuerySchema = z
-  .strictObject({ ...pageQueryFields })
+  .strictObject({
+    /** An active category's slug (blog completion spec §4.3); unknown or archived → 404. */
+    category: z
+      .string()
+      .max(80)
+      .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+      .optional(),
+    ...pageQueryFields,
+  })
   .meta({ id: 'PostsPageQuery' });
 
 export const adminPostsQuerySchema = z

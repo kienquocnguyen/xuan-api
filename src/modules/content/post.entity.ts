@@ -10,6 +10,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import type { PostBodyDocument } from './body/post-body.schema.js';
+import { ContentCategory } from './category.entity.js';
 
 export const POST_STATUSES = ['draft', 'published', 'archived'] as const;
 export type PostStatus = (typeof POST_STATUSES)[number];
@@ -30,6 +31,12 @@ export const POST_LANGUAGE = 'vi';
   'id',
 ])
 @Index('ix_content_posts_author_id_updated_at_id', ['authorId', 'updatedAt', 'id'])
+@Index('ix_content_posts_category_id_status_published_at_id', [
+  'categoryId',
+  'status',
+  'publishedAt',
+  'id',
+])
 @Check('ck_content_posts_language', `"language" IN ('vi')`)
 @Check('ck_content_posts_slug_format', `"slug" ~ '^[a-z0-9]+(-[a-z0-9]+)*$'`)
 @Check('ck_content_posts_title_not_blank', `btrim("title") <> ''`)
@@ -86,6 +93,11 @@ export class Post {
   /** Up to 10 labels in the author's order (blog completion B1); element rules are the API's (database.md §12). */
   @Column({ type: 'varchar', length: 40, array: true, default: () => "'{}'" })
   tags!: string[];
+
+  /** One category per post (blog completion B2); required to publish, absent on legacy posts (database.md §12). */
+  @Column({ name: 'category_id', type: 'uuid', nullable: true })
+  @ForeignKey(() => ContentCategory, { name: 'fk_content_posts_category_id', onDelete: 'RESTRICT' })
+  categoryId!: string | null;
 
   @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
   publishedAt!: Date | null;

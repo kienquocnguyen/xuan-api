@@ -242,6 +242,7 @@ The **actual, decided schema**, so the current database can be understood at a g
 | `courses`, `course_sections`, `course_lessons` | **implemented** 2026-10-19 by migration `CreateCourseCatalog1792343945663` (map owner-approved with the plan, Checkpoint M). Owner-approved runs: `xuan_test` (guarded run, revert/run round trip, empty second generate) and `xuan_dev` (empty second generate; the other tables' schema, rows and contents unchanged); `\d+` matches this map on both, including `DEFERRABLE INITIALLY DEFERRED`; invariants proven by `test/courses-schema.e2e-spec.ts` | `courses` (entities `Course`, `CourseSection`, `CourseLesson`) | `docs/superpowers/plans/2026-10-18-course-catalog.md`, Task 2 |
 | `course_access_grants` | **implemented** 2026-10-19 by migration `CreateCourseAccessGrants1792377789142` (map owner-approved with the plan, Checkpoint M). Owner-approved runs: `xuan_test` (Checkpoint A: guarded run, revert/run round trip, empty second generate) and `xuan_dev` (Checkpoint D: empty second generate; the other tables' schema, rows and contents unchanged; no grants created); `\d+` matches this map on both, including the partial unique's `WHERE`; invariants proven by `test/courses-schema.e2e-spec.ts` | `courses` (entity `CourseAccessGrant`) | `docs/superpowers/plans/2026-10-19-course-access.md`, Task 1 |
 | `lesson_progress` | **implemented** 2026-10-19 by migration `CreateLessonProgress1792393991146` (map owner-approved with the plan, Checkpoint M). Owner-approved runs: `xuan_test` (Checkpoint A: guarded run, revert/run round trip, empty second generate) and `xuan_dev` (Checkpoint D: empty second generate; the other tables' schema, rows and contents unchanged; no progress rows created); `\d+` matches this map on both, byte-identical; invariants proven by `test/courses-schema.e2e-spec.ts` | `courses` (entity `LessonProgress`) | `docs/superpowers/plans/2026-10-19-course-progress.md`, Task 1 |
+| `content_categories`, `content_category_translations` (+ `content_posts.category_id`) | migration `CreatePostCategories1792424947762` (blog completion B2, BD-3); map recorded under the bounded autonomous execution row (workflow §3.5). **Implemented on `xuan_test` only** (2026-10-19: guarded run, `\d+` matches this map, revert/run round trip, empty second generate); invariants proven by `test/content-categories-schema.e2e-spec.ts`. **`xuan_dev` pending in the consolidated owner packet** (protected: B1 is still pending there, and B2 adds an FK to an existing table) | `content` (entities `ContentCategory`, `ContentCategoryTranslation`) | `docs/superpowers/plans/2026-10-19-post-categories.md`, Task 1 |
 
 #### `services`
 
@@ -375,6 +376,7 @@ erDiagram
         smallint body_version "required · DEFAULT 1 · CK ck_content_posts_body_version"
         varchar_16 status "required · DEFAULT 'draft' · CK ck_content_posts_status (draft, published, archived)"
         varchar_40_array tags "required · DEFAULT '{}' · CK ck_content_posts_tags_count"
+        uuid category_id FK "nullable · fk_content_posts_category_id → content_categories · ON DELETE RESTRICT"
         timestamptz published_at "nullable · CK ck_content_posts_published_has_date"
         varchar_200 seo_title "nullable · CK not blank"
         varchar_400 seo_description "nullable · CK not blank"
@@ -395,6 +397,7 @@ erDiagram
 | `body_version` | `smallint` | yes | `1` | **CK** `ck_content_posts_body_version`: `body_version IN (1)` | Which allow-list the body follows; a new version widens the CHECK |
 | `status` | `varchar(16)` | yes | `'draft'` | **CK** `ck_content_posts_status`: `status IN ('draft','published','archived')` | Only published posts are public. `archived` (blog completion B1, BD-1) retires a post without deleting it; restore returns it to `draft` |
 | `tags` | `varchar(40)[]` | yes | `'{}'` | **CK** `ck_content_posts_tags_count`: `cardinality(tags) <= 10` | Up to 10 short labels in the author's order (BD-3). Element length 1–40 is checked by the API (trimmed, no comma, case-insensitive unique); the `varchar(40)` element type is the database backstop (spike S1). No index: V1 has no tag filter |
+| `category_id` | `uuid` | no | — | **FK** `fk_content_posts_category_id` → `content_categories(id)` `ON DELETE RESTRICT` | One category per post (BD-3). Nullable: drafts may lack one and legacy published posts keep none; publishing needs one (service rule). `RESTRICT`: a used category can't be deleted (its violation becomes `409 CATEGORY_IN_USE`) |
 | `published_at` | `timestamptz` | no | — | **CK** `ck_content_posts_published_has_date`: `status <> 'published' OR published_at IS NOT NULL` | The original first-publish instant (spec B16): set once, kept across unpublish/republish |
 | `seo_title` | `varchar(200)` | no | — | **CK** `ck_content_posts_seo_title_not_blank` | Optional; the web falls back to the title |
 | `seo_description` | `varchar(400)` | no | — | **CK** `ck_content_posts_seo_description_not_blank` | Optional; the web falls back to the excerpt |
@@ -408,10 +411,58 @@ erDiagram
 | `uq_content_posts_language_slug` | UNIQUE | `(language, slug)` | One post per URL per language; the public lookup. Its violation becomes `409 POST_SLUG_TAKEN` |
 | `ix_content_posts_language_status_published_at_id` | INDEX | `(language, status, published_at, id)` | The public list (`WHERE language AND status ORDER BY published_at DESC, id DESC`, scanned backwards) |
 | `ix_content_posts_author_id_updated_at_id` | INDEX | `(author_id, updated_at, id)` | The editor's own list (`ORDER BY updated_at DESC, id DESC`) and the FK |
+| `ix_content_posts_category_id_status_published_at_id` | INDEX | `(category_id, status, published_at, id)` | The public category filter and related posts (`WHERE category_id AND status ORDER BY published_at DESC, id DESC`); also the category FK's `RESTRICT` lookup |
 
 **Deletion (B1, BD-1):** only a draft that was never published (`status = 'draft' AND published_at IS NULL`) can be hard-deleted; anything ever published is archived instead. **B1 migration safety:** the wider status CHECK accepts every existing row; the `tags` default is a constant (no table rewrite); `down()` re-narrows the CHECK, so it fails while archived rows exist (roll forward instead, C9).
 
-**Not in this table (deferred decisions):** cover/OG images and categories (blog completion B2/B3), scheduled publishing, slug redirects, preview links.
+**B2 migration safety:** two new tables, a nullable column with no default (every existing row stays `NULL`, so the new FK validates nothing) and an index; no existing row changes.
+
+**Not in this table (deferred decisions):** cover/OG images (blog completion B3), scheduled publishing, slug redirects, preview links.
+
+#### `content_categories`, `content_category_translations`
+
+Blog categories (blog completion spec §4, BD-3), owned by `content`. A category has a stable, immutable **key** (internal) and, per language, a **slug** (the `?category=` value) and a **label**. V1 stores `vi` rows only; English adds rows, not columns. Admin-only management; a used category is archived, never deleted.
+
+```mermaid
+erDiagram
+    content_categories ||--o{ content_category_translations : "is named by"
+    content_categories ||--o{ content_posts : "groups"
+    content_categories {
+        uuid id PK "pk_content_categories · DEFAULT uuidv7()"
+        varchar_60 key "required · UQ uq_content_categories_key · CK ck_content_categories_key_format"
+        varchar_16 status "required · DEFAULT 'active' · CK ck_content_categories_status"
+        timestamptz created_at "required · DEFAULT now()"
+        timestamptz updated_at "required · DEFAULT now()"
+    }
+    content_category_translations {
+        uuid id PK "pk_content_category_translations · DEFAULT uuidv7()"
+        uuid category_id FK "fk_content_category_translations_category_id · CASCADE · UQ with language"
+        varchar_16 language "required · DEFAULT 'vi' · CK ck_content_category_translations_language"
+        varchar_80 slug "required · UQ (language, slug) · CK ck_content_category_translations_slug_format"
+        varchar_60 label "required · CK ck_content_category_translations_label_not_blank"
+        timestamptz created_at "required · DEFAULT now()"
+        timestamptz updated_at "required · DEFAULT now()"
+    }
+```
+
+| Table.column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `content_categories.id` | `uuid` | yes | `uuidv7()` | **PK** `pk_content_categories` | D26 |
+| `content_categories.key` | `varchar(60)` | yes | — | **UQ** `uq_content_categories_key`; **CK** `ck_content_categories_key_format`: `key ~ '^[a-z0-9]+(-[a-z0-9]+)*$'` | Stable identity, lowercase kebab (D30), never changed by the API |
+| `content_categories.status` | `varchar(16)` | yes | `'active'` | **CK** `ck_content_categories_status`: `status IN ('active','archived')` | Archived categories leave the public list and filter; their posts stay |
+| `content_categories.created_at`, `updated_at` | `timestamptz` | yes | `now()` | — | D27 |
+| `content_category_translations.id` | `uuid` | yes | `uuidv7()` | **PK** `pk_content_category_translations` | D26 |
+| `content_category_translations.category_id` | `uuid` | yes | — | **FK** `fk_content_category_translations_category_id` → `content_categories(id)` `ON DELETE CASCADE`; leads `uq_content_category_translations_category_id_language` | A translation has no life of its own; deleting a category is already restricted to unused ones |
+| `content_category_translations.language` | `varchar(16)` | yes | `'vi'` | **CK** `ck_content_category_translations_language`: `language IN ('vi')` | As posts (B3b): widening it is the i18n change |
+| `content_category_translations.slug` | `varchar(80)` | yes | — | **CK** `ck_content_category_translations_slug_format` (kebab); part of `uq_content_category_translations_language_slug` | The public filter value, unique per language; editable (a filter, not a content URL) |
+| `content_category_translations.label` | `varchar(60)` | yes | — | **CK** `ck_content_category_translations_label_not_blank`: `btrim(label) <> ''` | Display name |
+| `content_category_translations.created_at`, `updated_at` | `timestamptz` | yes | `now()` | — | D27 |
+
+| Name | Kind | Definition | Note |
+|---|---|---|---|
+| `uq_content_categories_key` | UNIQUE | `(key)` | Its violation becomes `409 CATEGORY_KEY_TAKEN` |
+| `uq_content_category_translations_language_slug` | UNIQUE | `(language, slug)` | The public lookup; its violation becomes `409 CATEGORY_SLUG_TAKEN` |
+| `uq_content_category_translations_category_id_language` | UNIQUE | `(category_id, language)` | One name per language; also serves the FK |
 
 #### `courses`, `course_sections`, `course_lessons`
 

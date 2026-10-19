@@ -32,4 +32,34 @@ export const contentErrors = {
     kind: 'conflict',
     message: 'Send every field: the request leaves out fields that hold data.',
   },
+  CATEGORY_KEY_TAKEN: {
+    code: 'CATEGORY_KEY_TAKEN',
+    kind: 'conflict',
+    message: 'Another category already uses this key.',
+  },
+  CATEGORY_SLUG_TAKEN: {
+    code: 'CATEGORY_SLUG_TAKEN',
+    kind: 'conflict',
+    message: 'Another category already uses this slug.',
+  },
+  CATEGORY_IN_USE: {
+    code: 'CATEGORY_IN_USE',
+    kind: 'conflict',
+    message: 'Posts still use this category; archive it instead.',
+  },
+  CATEGORY_NOT_FOUND: {
+    code: 'CATEGORY_NOT_FOUND',
+    kind: 'conflict',
+    message: "The chosen category doesn't exist.",
+  },
+  CATEGORY_ARCHIVED: {
+    code: 'CATEGORY_ARCHIVED',
+    kind: 'conflict',
+    message: 'The chosen category is archived.',
+  },
+  POST_CATEGORY_REQUIRED: {
+    code: 'POST_CATEGORY_REQUIRED',
+    kind: 'conflict',
+    message: 'A published post needs a category.',
+  },
 } as const satisfies Record<string, ErrorDefinition>;

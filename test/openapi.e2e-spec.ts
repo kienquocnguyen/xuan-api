@@ -163,6 +163,8 @@ describe('OpenAPI document', () => {
       'post /auth/logout',
       'get /posts',
       'get /posts/{slug}',
+      'get /posts/{slug}/related',
+      'get /post-categories',
       'get /courses',
       'get /courses/{slug}',
     ]);
@@ -212,7 +214,11 @@ describe('OpenAPI document', () => {
       )
         .map((p) => `${p.in}:${p.name}:${p.required === true}`)
         .sort();
-    expect(params('/posts', 'get')).toEqual(['query:page:false', 'query:pageSize:false']);
+    expect(params('/posts', 'get')).toEqual([
+      'query:category:false', // blog completion B2
+      'query:page:false',
+      'query:pageSize:false',
+    ]);
     expect(params('/admin/posts', 'get')).toEqual([
       'query:page:false',
       'query:pageSize:false',
@@ -694,20 +700,9 @@ describe('OpenAPI document', () => {
       expect(codes('/admin/posts/{id}', 'delete')).toEqual(
         [...base, 'POST_ARCHIVED', 'POST_WAS_PUBLISHED'].sort(),
       );
-      expect(codes('/admin/posts/{id}/publish', 'post')).toEqual(
-        [...base, 'POST_ARCHIVED', 'POST_BODY_EMPTY'].sort(),
-      );
+      // publish and PUT gain the B2 category codes (pinned in the categories contract below).
       expect(codes('/admin/posts/{id}/unpublish', 'post')).toEqual(
         [...base, 'POST_ARCHIVED'].sort(),
-      );
-      expect(codes('/admin/posts/{id}', 'put')).toEqual(
-        [
-          ...base,
-          'POST_BODY_EMPTY',
-          'POST_FIELDS_OMITTED',
-          'POST_SLUG_LOCKED',
-          'POST_SLUG_TAKEN',
-        ].sort(),
       );
     });
 
@@ -732,7 +727,7 @@ describe('OpenAPI document', () => {
       ]);
       expect(JSON.stringify(schemaOf('AdminPostsQuery'))).toContain('archived');
       expect(propsOf('PostSummaryDto')).toEqual(
-        ['author', 'excerpt', 'id', 'publishedAt', 'slug', 'title', 'updatedAt'].sort(),
+        ['author', 'category', 'excerpt', 'id', 'publishedAt', 'slug', 'title', 'updatedAt'].sort(),
       );
       expect(propsOf('PostDto')).toEqual(
         expect.arrayContaining(['tags', 'updatedAt', 'body', 'bodyVersion']),
@@ -740,9 +735,123 @@ describe('OpenAPI document', () => {
       expect(propsOf('AdminPostSummaryDto')).toContain('tags');
       expect(propsOf('AdminPostDto')).toContain('tags');
       expect(propsOf('SavePostDto')).toEqual(
-        ['body', 'excerpt', 'seoDescription', 'seoTitle', 'slug', 'tags', 'title'].sort(),
+        [
+          'body',
+          'categoryId',
+          'excerpt',
+          'seoDescription',
+          'seoTitle',
+          'slug',
+          'tags',
+          'title',
+        ].sort(),
       );
       expect(JSON.stringify(schemaOf('SavePostDto')?.properties?.tags)).toContain('null');
+    });
+  });
+
+  describe('blog categories contract (blog completion B2)', () => {
+    const doc = () => createOpenApiDocument(app);
+    const propsOf = (name: string) =>
+      Object.keys(
+        (doc().components?.schemas?.[name] as { properties?: object } | undefined)?.properties ??
+          {},
+      ).sort();
+    const codes = (path: string, method: 'get' | 'put' | 'post' | 'delete') =>
+      Object.entries(doc().paths[path]?.[method]?.responses ?? {})
+        .filter(([status]) => Number(status) >= 400)
+        .flatMap(([, response]) =>
+          String((response as { description?: string }).description).split(' | '),
+        )
+        .sort();
+    const input = [
+      'FORBIDDEN',
+      'INTERNAL_ERROR',
+      'PAYLOAD_TOO_LARGE',
+      'UNAUTHENTICATED',
+      'VALIDATION_FAILED',
+    ];
+    const withId = [...input, 'NOT_FOUND'];
+    const sorted = (...lists: string[][]) => lists.flat().sort();
+
+    it('names every category component (I19)', () => {
+      expect(Object.keys(doc().components?.schemas ?? {})).toEqual(
+        expect.arrayContaining([
+          'CreatePostCategoryDto',
+          'UpdatePostCategoryDto',
+          'PostCategoryIdParam',
+          'AdminPostCategoryDto',
+          'PostCategoryDto',
+          'PostCategoryRefDto',
+          'AdminPostCategoryRefDto',
+        ]),
+      );
+      expect(propsOf('AdminPostCategoryDto')).toEqual(
+        ['createdAt', 'id', 'key', 'label', 'postCount', 'slug', 'status', 'updatedAt'].sort(),
+      );
+      expect(propsOf('PostCategoryDto')).toEqual(['label', 'publishedPostCount', 'slug']);
+      expect(propsOf('PostCategoryRefDto')).toEqual(['label', 'slug']);
+      expect(propsOf('AdminPostCategoryRefDto')).toEqual(['id', 'key', 'label', 'slug', 'status']);
+      expect(propsOf('PostSummaryDto')).toContain('category');
+      expect(propsOf('AdminPostSummaryDto')).toContain('category');
+      expect(propsOf('SavePostDto')).toContain('categoryId');
+      expect(JSON.stringify(doc().components?.schemas?.PostsPageQuery)).toContain('category');
+      // Nullable on the wire: the generated web types must allow null (final review).
+      const prop = (schema: string, name: string) =>
+        JSON.stringify(
+          (doc().components?.schemas?.[schema] as { properties?: Record<string, unknown> })
+            ?.properties?.[name],
+        );
+      expect(prop('PostSummaryDto', 'category')).toContain('"nullable":true');
+      expect(prop('AdminPostSummaryDto', 'category')).toContain('"nullable":true');
+      expect(prop('SavePostDto', 'categoryId')).toContain('null');
+    });
+
+    it('documents exactly the codes each category route can return (I18)', () => {
+      expect(codes('/admin/post-categories', 'get')).toEqual(
+        ['FORBIDDEN', 'INTERNAL_ERROR', 'UNAUTHENTICATED'].sort(),
+      );
+      expect(codes('/admin/post-categories', 'post')).toEqual(
+        sorted(input, ['CATEGORY_KEY_TAKEN', 'CATEGORY_SLUG_TAKEN']),
+      );
+      expect(codes('/admin/post-categories/{categoryId}', 'put')).toEqual(
+        sorted(withId, ['CATEGORY_SLUG_TAKEN']),
+      );
+      expect(codes('/admin/post-categories/{categoryId}/archive', 'post')).toEqual(sorted(withId));
+      expect(codes('/admin/post-categories/{categoryId}/restore', 'post')).toEqual(sorted(withId));
+      expect(codes('/admin/post-categories/{categoryId}', 'delete')).toEqual(
+        sorted(withId, ['CATEGORY_IN_USE']),
+      );
+      expect(codes('/post-categories', 'get')).toEqual(['INTERNAL_ERROR']);
+      expect(codes('/posts', 'get')).toEqual(
+        ['INTERNAL_ERROR', 'NOT_FOUND', 'PAYLOAD_TOO_LARGE', 'VALIDATION_FAILED'].sort(),
+      );
+      expect(codes('/posts/{slug}/related', 'get')).toEqual(['INTERNAL_ERROR', 'NOT_FOUND']);
+    });
+
+    it('adds the category codes to the post writes (I18)', () => {
+      expect(codes('/admin/posts', 'post')).toEqual(
+        sorted(input, ['POST_SLUG_TAKEN', 'CATEGORY_NOT_FOUND', 'CATEGORY_ARCHIVED']),
+      );
+      expect(codes('/admin/posts/{id}', 'put')).toEqual(
+        sorted(withId, [
+          'POST_BODY_EMPTY',
+          'POST_FIELDS_OMITTED',
+          'POST_SLUG_LOCKED',
+          'POST_SLUG_TAKEN',
+          'POST_CATEGORY_REQUIRED',
+          'CATEGORY_NOT_FOUND',
+          'CATEGORY_ARCHIVED',
+        ]),
+      );
+      expect(codes('/admin/posts/{id}/publish', 'post')).toEqual(
+        sorted(withId, [
+          'POST_ARCHIVED',
+          'POST_BODY_EMPTY',
+          'POST_CATEGORY_REQUIRED',
+          'CATEGORY_ARCHIVED',
+        ]),
+      );
     });
   });
 });

@@ -1,5 +1,7 @@
 import { ApiProperty, getSchemaPath } from '@nestjs/swagger';
 import type { PublicProfile } from '../../users/user-profiles.reader.js';
+import type { CategoryRef } from '../categories.service.js';
+import { AdminPostCategoryRefDto } from './category.dto.js';
 import type { PostBodyDocument } from '../body/post-body.schema.js';
 import { POST_STATUSES, type Post, type PostStatus } from '../post.entity.js';
 
@@ -20,6 +22,8 @@ export class AdminPostSummaryDto {
   @ApiProperty({ format: 'date-time' }) updatedAt!: string;
   @ApiProperty({ type: AdminPostAuthorDto }) author!: AdminPostAuthorDto;
   @ApiProperty({ type: [String], example: ['GoPro', 'Đà Lạt'] }) tags!: string[];
+  @ApiProperty({ type: AdminPostCategoryRefDto, nullable: true })
+  category!: AdminPostCategoryRefDto | null;
 }
 
 /** A post as its author (or an admin) edits it. */
@@ -35,7 +39,11 @@ export class AdminPostDto extends AdminPostSummaryDto {
 }
 
 /** Whitelist by construction: only these fields reach the wire (I10). */
-export function toAdminPostSummaryDto(post: Post, author: PublicProfile): AdminPostSummaryDto {
+export function toAdminPostSummaryDto(
+  post: Post,
+  author: PublicProfile,
+  category: CategoryRef | null,
+): AdminPostSummaryDto {
   return {
     id: post.id,
     slug: post.slug,
@@ -45,11 +53,24 @@ export function toAdminPostSummaryDto(post: Post, author: PublicProfile): AdminP
     updatedAt: post.updatedAt.toISOString(),
     author: { id: author.id, displayName: author.displayName, avatarUrl: author.avatarUrl },
     tags: [...post.tags],
+    category: category
+      ? {
+          id: category.id,
+          key: category.key,
+          slug: category.slug,
+          label: category.label,
+          status: category.status,
+        }
+      : null,
   };
 }
 
-export function toAdminPostDto(post: Post, author: PublicProfile): AdminPostDto {
-  const summary = toAdminPostSummaryDto(post, author);
+export function toAdminPostDto(
+  post: Post,
+  author: PublicProfile,
+  category: CategoryRef | null,
+): AdminPostDto {
+  const summary = toAdminPostSummaryDto(post, author, category);
   return {
     id: summary.id,
     slug: summary.slug,
@@ -59,6 +80,7 @@ export function toAdminPostDto(post: Post, author: PublicProfile): AdminPostDto 
     updatedAt: summary.updatedAt,
     author: summary.author,
     tags: summary.tags,
+    category: summary.category,
     language: post.language,
     excerpt: post.excerpt,
     body: post.body,

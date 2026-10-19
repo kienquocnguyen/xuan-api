@@ -1,21 +1,28 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
-import { type DataSource, type EntityManager, IsNull, type Repository } from 'typeorm';
-import { isUniqueViolation } from '../../database/postgres-errors.js';
+import { type DataSource, type EntityManager, In, IsNull, Not, type Repository } from 'typeorm';
+import { isForeignKeyViolation, isUniqueViolation } from '../../database/postgres-errors.js';
 import { AppError } from '../../errors/app-error.js';
 import { baselineErrors } from '../../errors/baseline-errors.js';
 import { assertCanManageOwnedResource } from '../../http/auth/ownership.js';
 import type { AuthenticatedUser } from '../../http/auth/role.js';
 import { type PublicProfile, UserProfilesReader } from '../users/user-profiles.reader.js';
 import { canonicalizePostBody, hasMeaningfulText } from './body/post-body-content.js';
+import { CategoriesService, type CategoryRef } from './categories.service.js';
 import { contentErrors } from './content.errors.js';
 import { POST_SLUG_PATTERN, type SavePostInput } from './dto/save-post.dto.js';
 import { omittedFieldsWithData } from './post-compatibility.js';
 import { POST_LANGUAGE, Post, type PostStatus } from './post.entity.js';
 
-export type AuthoredPost = Readonly<{ post: Post; author: PublicProfile }>;
+export type AuthoredPost = Readonly<{
+  post: Post;
+  author: PublicProfile;
+  category: CategoryRef | null;
+}>;
 export type PostPage = Readonly<{ items: AuthoredPost[]; totalItems: number }>;
 type Paging = Readonly<{ page: number; pageSize: number }>;
+
+const RELATED_LIMIT = 3;
 
 /** Blog posts use cases (blog spec §6). */
 @Injectable()
@@ -24,11 +31,26 @@ export class PostsService {
     @InjectRepository(Post) private readonly posts: Repository<Post>,
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly profiles: UserProfilesReader,
+    private readonly categories: CategoriesService,
   ) {}
 
-  async listPublished({ page, pageSize }: Paging): Promise<PostPage> {
+  async listPublished({
+    page,
+    pageSize,
+    category,
+  }: Paging & { category?: string }): Promise<PostPage> {
+    let categoryId: string | undefined;
+    if (category !== undefined) {
+      const found = await this.categories.findActiveBySlug(category);
+      if (!found) throw new AppError(baselineErrors.NOT_FOUND); // unknown or archived (spec §4.3)
+      categoryId = found.id;
+    }
     const [rows, totalItems] = await this.posts.findAndCount({
-      where: { language: POST_LANGUAGE, status: 'published' },
+      where: {
+        language: POST_LANGUAGE,
+        status: 'published',
+        ...(categoryId ? { categoryId } : {}),
+      },
       order: { publishedAt: 'DESC', id: 'DESC' },
       skip: (page - 1) * pageSize,
       take: pageSize,
@@ -44,6 +66,32 @@ export class PostsService {
     const post = await this.posts.findOneBy({ language: POST_LANGUAGE, slug, status: 'published' });
     if (!post) throw new AppError(baselineErrors.NOT_FOUND); // drafts too: no existence leak (B13)
     return this.withAuthor(post);
+  }
+
+  /**
+   * Up to 3 published posts for a published post's footer (spec §4.3): its category's newest first, padded with
+   * the newest others; never the post itself. Two queries at most.
+   */
+  async listRelated(slug: string): Promise<AuthoredPost[]> {
+    const { post } = await this.getPublishedBySlug(slug);
+    const published = { language: POST_LANGUAGE, status: 'published' as const };
+    const order = { publishedAt: 'DESC' as const, id: 'DESC' as const };
+    const same = post.categoryId
+      ? await this.posts.find({
+          where: { ...published, categoryId: post.categoryId, id: Not(post.id) },
+          order,
+          take: RELATED_LIMIT,
+        })
+      : [];
+    const others =
+      same.length < RELATED_LIMIT
+        ? await this.posts.find({
+            where: { ...published, id: Not(In([post.id, ...same.map((row) => row.id)])) },
+            order,
+            take: RELATED_LIMIT - same.length,
+          })
+        : [];
+    return this.withAuthors([...same, ...others]);
   }
 
   async listForActor(
@@ -70,6 +118,8 @@ export class PostsService {
   async create(actor: AuthenticatedUser, input: SavePostInput): Promise<AuthoredPost> {
     let id: string;
     try {
+      const categoryId = input.categoryId ?? null;
+      await this.assertAssignable(this.dataSource.manager, categoryId, null);
       const result = await this.posts.insert({
         authorId: actor.id,
         slug: input.slug,
@@ -79,6 +129,7 @@ export class PostsService {
         seoTitle: input.seoTitle,
         seoDescription: input.seoDescription,
         tags: input.tags ?? [],
+        categoryId,
       });
       id = (result.identifiers[0] as { id: string }).id;
     } catch (error) {
@@ -103,6 +154,13 @@ export class PostsService {
         if (post.status === 'published' && !hasMeaningfulText(input.body)) {
           throw new AppError(contentErrors.POST_BODY_EMPTY);
         }
+        // B2: an omitted categoryId reached here only if none is stored (the guard above), so `?? null` keeps it.
+        const categoryId = input.categoryId ?? null;
+        await this.assertAssignable(manager, categoryId, post.categoryId);
+        // A published post keeps its category; a legacy one without a category may stay so (BD-3).
+        if (post.status === 'published' && post.categoryId !== null && categoryId === null) {
+          throw new AppError(contentErrors.POST_CATEGORY_REQUIRED);
+        }
         await manager.update(
           Post,
           { id },
@@ -114,6 +172,7 @@ export class PostsService {
             seoTitle: input.seoTitle,
             seoDescription: input.seoDescription,
             tags: input.tags ?? [],
+            categoryId,
           },
         );
       });
@@ -130,6 +189,12 @@ export class PostsService {
       if (post.status === 'archived') throw new AppError(contentErrors.POST_ARCHIVED);
       if (post.status === 'published') return; // idempotent: no write
       if (!hasMeaningfulText(post.body)) throw new AppError(contentErrors.POST_BODY_EMPTY); // B18
+      // BD-3: a new publication needs an active category.
+      if (post.categoryId === null) throw new AppError(contentErrors.POST_CATEGORY_REQUIRED);
+      const category = (await this.categories.findRefs([post.categoryId], manager)).get(
+        post.categoryId,
+      );
+      if (category?.status !== 'active') throw new AppError(contentErrors.CATEGORY_ARCHIVED);
       await manager
         .createQueryBuilder()
         .update(Post)
@@ -211,25 +276,52 @@ export class PostsService {
     return post;
   }
 
+  /**
+   * A category the post doesn't have yet must exist and be active (spec §4.4); keeping an archived one is
+   * allowed so editing such a post never fails.
+   */
+  private async assertAssignable(
+    manager: EntityManager,
+    next: string | null,
+    current: string | null,
+  ): Promise<void> {
+    if (next === null || next === current) return;
+    const category = (await this.categories.findRefs([next], manager)).get(next);
+    if (!category) throw new AppError(contentErrors.CATEGORY_NOT_FOUND);
+    if (category.status !== 'active') throw new AppError(contentErrors.CATEGORY_ARCHIVED);
+  }
+
   private async withAuthor(post: Post): Promise<AuthoredPost> {
     return (await this.withAuthors([post]))[0];
   }
 
-  /** One profile query per page, not per post. */
+  /** One profile query and one category query per page, not per post. */
   private async withAuthors(rows: Post[]): Promise<AuthoredPost[]> {
-    const profiles = await this.profiles.findPublicProfiles(rows.map((post) => post.authorId));
+    const [profiles, categories] = await Promise.all([
+      this.profiles.findPublicProfiles(rows.map((post) => post.authorId)),
+      this.categories.findRefs(rows.flatMap((post) => (post.categoryId ? [post.categoryId] : []))),
+    ]);
     const byId = new Map(profiles.map((profile) => [profile.id, profile]));
     return rows.map((post) => {
       const author = byId.get(post.authorId);
       if (!author) throw new Error('Post author missing despite fk_content_posts_author_id.');
-      return { post, author };
+      const category = post.categoryId ? (categories.get(post.categoryId) ?? null) : null;
+      if (post.categoryId && !category) {
+        throw new Error('Post category missing despite fk_content_posts_category_id.');
+      }
+      return { post, author, category };
     });
   }
 
   /** D11: the content service, not HTTP, gives the unique violation its meaning (I15). */
   private translate(error: unknown): unknown {
-    return isUniqueViolation(error, 'uq_content_posts_language_slug')
-      ? new AppError(contentErrors.POST_SLUG_TAKEN)
-      : error;
+    if (isUniqueViolation(error, 'uq_content_posts_language_slug')) {
+      return new AppError(contentErrors.POST_SLUG_TAKEN);
+    }
+    // The category was deleted after the check (spec §4.4; the delete holds its row lock).
+    if (isForeignKeyViolation(error, 'fk_content_posts_category_id')) {
+      return new AppError(contentErrors.CATEGORY_NOT_FOUND);
+    }
+    return error;
   }
 }
