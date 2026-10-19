@@ -564,10 +564,10 @@ describe('OpenAPI document', () => {
           codes: [...routeCodes].sort(),
         });
       }
-      const responses = createOpenApiDocument(app).paths['/learn/courses/{slug}']?.get?.responses;
-      expect(String((responses?.['403'] as { description?: string }).description)).toBe(
-        'COURSE_ACCESS_REQUIRED',
-      );
+      const forbidden = createOpenApiDocument(app).paths['/learn/courses/{slug}']?.get?.responses?.[
+        '403'
+      ] as { description?: string } | undefined;
+      expect(forbidden?.description).toBe('COURSE_ACCESS_REQUIRED');
     });
 
     it('documents the path ids as uuids and the revoke as 204', () => {
