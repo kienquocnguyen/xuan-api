@@ -737,6 +737,7 @@ describe('OpenAPI document', () => {
       expect(propsOf('SavePostDto')).toEqual(
         [
           'body',
+          'bodyVersion', // B3
           'categoryId',
           'excerpt',
           'seoDescription',
@@ -831,7 +832,13 @@ describe('OpenAPI document', () => {
 
     it('adds the category codes to the post writes (I18)', () => {
       expect(codes('/admin/posts', 'post')).toEqual(
-        sorted(input, ['POST_SLUG_TAKEN', 'CATEGORY_NOT_FOUND', 'CATEGORY_ARCHIVED']),
+        // + B3 media code
+        sorted(input, [
+          'POST_SLUG_TAKEN',
+          'CATEGORY_NOT_FOUND',
+          'CATEGORY_ARCHIVED',
+          'POST_MEDIA_NOT_FOUND',
+        ]),
       );
       expect(codes('/admin/posts/{id}', 'put')).toEqual(
         sorted(withId, [
@@ -842,6 +849,9 @@ describe('OpenAPI document', () => {
           'POST_CATEGORY_REQUIRED',
           'CATEGORY_NOT_FOUND',
           'CATEGORY_ARCHIVED',
+          'POST_MEDIA_NOT_FOUND', // B3
+          'POST_MEDIA_INCOMPLETE',
+          'POST_BODY_VERSION_UNSUPPORTED',
         ]),
       );
       expect(codes('/admin/posts/{id}/publish', 'post')).toEqual(
@@ -850,6 +860,7 @@ describe('OpenAPI document', () => {
           'POST_BODY_EMPTY',
           'POST_CATEGORY_REQUIRED',
           'CATEGORY_ARCHIVED',
+          'POST_MEDIA_INCOMPLETE', // B3
         ]),
       );
     });
