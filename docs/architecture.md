@@ -94,7 +94,7 @@ src/
     users/           users, auth_identities, sessions · auth + admin controllers · AccessGuard · google/ gateway (§17) ·
                      exports UserProfilesReader (its first export, AD14)
     content/         content_posts · public + authoring post controllers · body/ (TipTap v1 schema, limits, content rules)
-    courses/         courses, course_sections, course_lessons, course_access_grants · public catalog, admin curriculum,
+    courses/         courses, course_sections, course_lessons, course_access_grants, lesson_progress · public catalog, admin curriculum,
                      admin access and learner controllers · courses / course-access / learning services ·
                      course lock rule L1 (AD15) · grant upsert (AD16) · imports UsersModule for UserProfilesReader
 test/                e2e specs, test-only fixture controller, test support (development-workflow.md: Testing)
@@ -499,4 +499,4 @@ Browser ─GET /auth/me (credentials)──► AccessGuard: xc_session → SHA-2
 
 **Future providers (Facebook):** widen `ck_auth_identities_provider`, add a gateway and two routes. A new identity whose email belongs to another account is refused (`ACCOUNT_CONFLICT`), as for Google; linking is an explicit action by a signed-in user, never an email match.
 
-**References to `users.id`:** `content_posts.author_id` (**implemented**: FK `fk_content_posts_author_id`, ownership via the policy above, AD14); `course_access_grants.user_id`, `.granted_by_user_id`, `.revoked_by_user_id` (**decided**: FKs `fk_course_access_grants_*_user_id`, by entity name, AD14/AD16); future: `service_applications.user_id` (nullable: guests apply; the application snapshots the submitted name/email for history while `users` stays the live profile used for prefill), appointments through their application, `orders.user_id`.
+**References to `users.id`:** `content_posts.author_id` (**implemented**: FK `fk_content_posts_author_id`, ownership via the policy above, AD14); `course_access_grants.user_id`, `.granted_by_user_id`, `.revoked_by_user_id` (**implemented**: FKs `fk_course_access_grants_*_user_id`, by entity name, AD14/AD16), `lesson_progress.user_id` (**decided**: FK `fk_lesson_progress_user_id`, by entity name, AD14); future: `service_applications.user_id` (nullable: guests apply; the application snapshots the submitted name/email for history while `users` stays the live profile used for prefill), appointments through their application, `orders.user_id`.
