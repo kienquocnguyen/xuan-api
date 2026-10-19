@@ -38,8 +38,8 @@ export class LearningController {
   @ApiErrorResponses(UNAUTHENTICATED)
   async list(@CurrentUser() user: AuthenticatedUser): Promise<LearnerCourseSummaryDto[]> {
     // Unpaginated: a learner holds a handful of courses (DEFAULT deviation, course spec §11.2).
-    const items = await this.learning.listCourses(user.id);
-    return items.map(toLearnerCourseSummaryDto);
+    const views = await this.learning.listCourses(user.id);
+    return views.map(toLearnerCourseSummaryDto);
   }
 
   @Get(':slug')

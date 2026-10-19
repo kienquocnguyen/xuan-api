@@ -27,6 +27,10 @@ const lessonIsPublished = envelope(
   'LESSON_IS_PUBLISHED',
   'Unpublish the lesson before deleting it.',
 );
+const hasProgress = envelope(
+  'LESSON_HAS_PROGRESS',
+  'This lesson has learner progress; unpublish it instead.',
+);
 const sectionNotEmpty = envelope(
   'SECTION_NOT_EMPTY',
   'Move or delete the lessons in this section first.',
@@ -565,6 +569,21 @@ describe('Admin course authoring (/admin/courses…)', () => {
       expect(lessonIn(allowed.body.data, lessonId).status).toBe('draft');
       const again = await lessonAction(lessonId, 'unpublish');
       expect(again.status).toBe(200);
+    });
+
+    it('refuses to delete a draft lesson that has learner progress (409 LESSON_HAS_PROGRESS)', async () => {
+      const courseId = await createdId();
+      const sectionId = await newSection(courseId);
+      const lessonId = await newLesson(sectionId, { title: 'Bài', videoId: '76979871' });
+      const learner = await signInAs(app);
+      await db.query(
+        `INSERT INTO lesson_progress (user_id, lesson_id, position_seconds) VALUES ($1, $2, 30)`,
+        [learner.user.id, lessonId],
+      );
+      const res = await deleteLesson(lessonId);
+      expect(res.status).toBe(409);
+      expect(res.body).toEqual(hasProgress);
+      expect(lessonIn((await get(courseId)).body.data, lessonId)).toBeDefined();
     });
 
     it('deletes only draft lessons (204; 409 LESSON_IS_PUBLISHED) and closes the gap', async () => {

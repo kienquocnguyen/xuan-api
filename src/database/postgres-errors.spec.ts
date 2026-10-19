@@ -12,6 +12,12 @@ describe('isForeignKeyViolation', () => {
     );
   });
 
+  it('is true for a 23001 on the named constraint: deleting a parent row under ON DELETE RESTRICT', () => {
+    expect(isForeignKeyViolation(queryFailed({ code: '23001', constraint: 'fk_x' }), 'fk_x')).toBe(
+      true,
+    );
+  });
+
   it.each([
     ['another constraint', queryFailed({ code: '23503', constraint: 'fk_y' })],
     ['a unique violation on that name', queryFailed({ code: '23505', constraint: 'fk_x' })],

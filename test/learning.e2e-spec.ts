@@ -124,8 +124,18 @@ describe('Learner courses and gated playback (/learn/courses…)', () => {
       expect(res.headers['cache-control']).toBe('no-store');
       expect(res.body).toEqual({
         data: [
-          { course: summaryOf('c2', c2.id, '2026-10-02T00:00:00.000Z'), totalLessons: 1 },
-          { course: summaryOf('c', c.id, '2026-10-01T00:00:00.000Z'), totalLessons: 3 },
+          {
+            course: summaryOf('c2', c2.id, '2026-10-02T00:00:00.000Z'),
+            totalLessons: 1,
+            completedLessons: 0,
+            resumeLessonId: c2.x,
+          },
+          {
+            course: summaryOf('c', c.id, '2026-10-01T00:00:00.000Z'),
+            totalLessons: 3,
+            completedLessons: 0,
+            resumeLessonId: c.l1,
+          },
         ],
       });
     });
@@ -145,16 +155,38 @@ describe('Learner courses and gated playback (/learn/courses…)', () => {
       expect(res.body).toEqual({
         data: {
           course: summaryOf('c', c.id, '2026-10-01T00:00:00.000Z'),
+          resumeLessonId: c.l1,
           sections: [
             {
               id: c.a,
               title: 'A',
               lessons: [
-                { id: c.l1, title: 'l1', durationSeconds: 600 },
-                { id: c.l2, title: 'l2', durationSeconds: null },
+                {
+                  id: c.l1,
+                  title: 'l1',
+                  durationSeconds: 600,
+                  progress: { positionSeconds: 0, completed: false },
+                },
+                {
+                  id: c.l2,
+                  title: 'l2',
+                  durationSeconds: null,
+                  progress: { positionSeconds: 0, completed: false },
+                },
               ],
             },
-            { id: c.b, title: 'B', lessons: [{ id: c.l3, title: 'l3', durationSeconds: 300 }] },
+            {
+              id: c.b,
+              title: 'B',
+              lessons: [
+                {
+                  id: c.l3,
+                  title: 'l3',
+                  durationSeconds: 300,
+                  progress: { positionSeconds: 0, completed: false },
+                },
+              ],
+            },
           ],
         },
       });
@@ -191,6 +223,7 @@ describe('Learner courses and gated playback (/learn/courses…)', () => {
           video: { provider: 'vimeo', videoId: '333', privacyHash: null },
           previousLessonId: c.l1,
           nextLessonId: c.l3,
+          progress: { positionSeconds: 0, completed: false },
         },
       });
       expect((await learn(`/c/lessons/${c.l3}`)).body).toEqual({
@@ -202,6 +235,7 @@ describe('Learner courses and gated playback (/learn/courses…)', () => {
           video: { provider: 'vimeo', videoId: '444', privacyHash: 'abc123' },
           previousLessonId: c.l2,
           nextLessonId: null,
+          progress: { positionSeconds: 0, completed: false },
         },
       });
     });
@@ -263,6 +297,121 @@ describe('Learner courses and gated playback (/learn/courses…)', () => {
       expect((await adminAction(`/admin/courses/${c.id}/publish`, 'post')).status).toBe(200);
       expect((await learn('')).body.data).toHaveLength(1);
       expect((await learn(`/c/lessons/${c.l1}`)).status).toBe(200);
+    });
+  });
+
+  describe('progress and resume (outcome 3, additive)', () => {
+    const save = (lessonId: string, body: object) =>
+      server()
+        .put(`/learn/courses/c/lessons/${lessonId}/progress`)
+        .set(XHR)
+        .set('Cookie', learner.cookie)
+        .send(body);
+    const lessonsOf = (body: { data: { sections: Array<{ lessons: unknown[] }> } }) =>
+      body.data.sections.flatMap((s) => s.lessons);
+
+    beforeEach(async () => {
+      await grantDirect(learner.user.id, c.id);
+    });
+
+    it('shows each lesson’s progress, the completed count and the resume lesson', async () => {
+      expect((await save(c.l1, { positionSeconds: 600, completed: true })).status).toBe(204);
+      expect((await save(c.l2, { positionSeconds: 120 })).status).toBe(204);
+      const list = await learn('');
+      expect(list.body.data).toEqual([
+        {
+          course: summaryOf('c', c.id, '2026-10-01T00:00:00.000Z'),
+          totalLessons: 3,
+          completedLessons: 1,
+          resumeLessonId: c.l2, // the latest save, not completed
+        },
+      ]);
+      const detail = await learn('/c');
+      expect(detail.body.data.resumeLessonId).toBe(c.l2);
+      expect(lessonsOf(detail.body)).toEqual([
+        {
+          id: c.l1,
+          title: 'l1',
+          durationSeconds: 600,
+          progress: { positionSeconds: 600, completed: true },
+        },
+        {
+          id: c.l2,
+          title: 'l2',
+          durationSeconds: null,
+          progress: { positionSeconds: 120, completed: false },
+        },
+        {
+          id: c.l3,
+          title: 'l3',
+          durationSeconds: 300,
+          progress: { positionSeconds: 0, completed: false },
+        },
+      ]);
+      expect((await learn(`/c/lessons/${c.l2}`)).body.data.progress).toEqual({
+        positionSeconds: 120,
+        completed: false,
+      });
+
+      expect((await save(c.l2, { positionSeconds: 130, completed: true })).status).toBe(204);
+      expect((await learn('/c')).body.data.resumeLessonId).toBe(c.l3); // completed → the next lesson
+    });
+
+    it('read-clamps a position after the duration is lowered, without writing', async () => {
+      await save(c.l1, { positionSeconds: 500 });
+      const update = await server()
+        .put(`/admin/course-lessons/${c.l1}`)
+        .set(XHR)
+        .set('Cookie', admin.cookie)
+        .send({ title: 'l1', videoId: '111', durationSeconds: 300 });
+      expect(update.status).toBe(200);
+      expect((await learn(`/c/lessons/${c.l1}`)).body.data.progress).toEqual({
+        positionSeconds: 300,
+        completed: false,
+      });
+      const [{ position_seconds }] = await db.query<{ position_seconds: number }[]>(
+        `SELECT position_seconds FROM lesson_progress WHERE user_id = $1 AND lesson_id = $2`,
+        [learner.user.id, c.l1],
+      );
+      expect(position_seconds).toBe(500);
+    });
+
+    it('ignores progress on an unpublished lesson for resume and counts, keeps it, and restores it on republish', async () => {
+      await save(c.l1, { positionSeconds: 10, completed: true });
+      await save(c.l3, { positionSeconds: 50, completed: true }); // latest, last lesson
+      expect((await learn('')).body.data[0]).toEqual(
+        expect.objectContaining({ completedLessons: 2, resumeLessonId: c.l3 }),
+      );
+      const unpublish = await server()
+        .post(`/admin/course-lessons/${c.l3}/unpublish`)
+        .set(XHR)
+        .set('Cookie', admin.cookie);
+      expect(unpublish.status).toBe(200);
+      // l3 gone: the latest published progress is l1 (completed) → its next published lesson, l2.
+      expect((await learn('')).body.data[0]).toEqual(
+        expect.objectContaining({ totalLessons: 2, completedLessons: 1, resumeLessonId: c.l2 }),
+      );
+      expect(
+        await db.query(`SELECT 1 FROM lesson_progress WHERE lesson_id = $1`, [c.l3]),
+      ).toHaveLength(1);
+      await server()
+        .post(`/admin/course-lessons/${c.l3}/publish`)
+        .set(XHR)
+        .set('Cookie', admin.cookie);
+      expect((await learn('')).body.data[0]).toEqual(
+        expect.objectContaining({ totalLessons: 3, completedLessons: 2, resumeLessonId: c.l3 }),
+      );
+    });
+
+    it('scopes progress to the caller: another learner sees their own zeros', async () => {
+      await save(c.l1, { positionSeconds: 77, completed: true });
+      const other = await signInAs(app);
+      await grantDirect(other.user.id, c.id);
+      const theirs = await learn('/c', other.cookie);
+      expect(theirs.body.data.resumeLessonId).toBe(c.l1);
+      for (const lesson of lessonsOf(theirs.body) as Array<{ progress: object }>) {
+        expect(lesson.progress).toEqual({ positionSeconds: 0, completed: false });
+      }
     });
   });
 
