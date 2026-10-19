@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { z } from 'zod';
 import type { CourseTree, LearnerCourseListItem } from '../course-tree.js';
 import type { LocatedPlayback } from '../playback.js';
+import { clampPosition, type ProgressState } from '../progress.js';
 import { CourseSummaryDto, toCourseSummaryDto } from './course.dto.js';
 
 // Learner DTOs are separate classes from the public outline, so outcome 3 only adds fields (course spec §11.6).
@@ -12,6 +13,29 @@ export const lessonPathParamsSchema = z
   .strictObject({ slug: z.string(), lessonId: z.uuid() })
   .meta({ id: 'LessonPathParams' });
 export type LessonPathParams = z.infer<typeof lessonPathParamsSchema>;
+
+/** A learner's progress in one lesson (outcome 3, additive). Zeros and `false` when nothing was saved yet. */
+export class LessonProgressDto {
+  @ApiProperty({
+    type: 'integer',
+    example: 120,
+    description: 'Clamped to the lesson duration when known.',
+  })
+  positionSeconds!: number;
+  @ApiProperty() completed!: boolean;
+}
+
+/** Read clamping (spec §9.6): never written back, so a later duration increase shows the saved value again. */
+export function toLessonProgressDto(
+  row: (ProgressState & { positionSeconds: number }) | undefined,
+  durationSeconds: number | null,
+): LessonProgressDto {
+  if (!row) return { positionSeconds: 0, completed: false };
+  return {
+    positionSeconds: clampPosition(row.positionSeconds, durationSeconds),
+    completed: row.completedAt !== null,
+  };
+}
 
 export class LearnerCourseSummaryDto {
   @ApiProperty({ type: CourseSummaryDto }) course!: CourseSummaryDto;
