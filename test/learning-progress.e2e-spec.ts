@@ -271,6 +271,30 @@ describe('Learner progress writes (PUT /learn/courses/:slug/lessons/:lessonId/pr
     });
   });
 
+  describe('completion in both serial orders (owner R7b, deterministic)', () => {
+    beforeEach(async () => {
+      await grantDirect(learner.user.id, c.id);
+    });
+
+    it.each([
+      [
+        'completing first, then an older incomplete save',
+        [{ positionSeconds: 590, completed: true }, { positionSeconds: 100 }],
+        100,
+      ],
+      [
+        'an incomplete save first, then the completing one',
+        [{ positionSeconds: 100 }, { positionSeconds: 590, completed: true }],
+        590,
+      ],
+    ])('%s → completed, last arrival’s position', async (_case, bodies, position) => {
+      for (const body of bodies) expect((await save('c', c.l1, body)).status).toBe(204);
+      const row = await rowOf(c.l1);
+      expect(row.completed_at).toBeInstanceOf(Date);
+      expect(row.position_seconds).toBe(position);
+    });
+  });
+
   describe('concurrency (spec §18 R7; owner R7b)', () => {
     const TRIALS = 15;
 
@@ -301,7 +325,7 @@ describe('Learner progress writes (PUT /learn/courses/:slug/lessons/:lessonId/pr
       }
     });
 
-    it('R7b: a completing save ∥ an older incomplete save, either order → completion kept, one row, a position from one of them', async () => {
+    it('R7b: a completing save ∥ an older incomplete save (arrival order uncontrolled) → completion kept, one row, a position from one of them', async () => {
       await grantDirect(learner.user.id, c.id);
       for (let trial = 0; trial < TRIALS; trial++) {
         await db.query(`DELETE FROM lesson_progress WHERE user_id = $1`, [learner.user.id]);
