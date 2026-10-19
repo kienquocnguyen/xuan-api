@@ -10,6 +10,8 @@ import { AdminCoursesController } from './admin-courses.controller.js';
 import { CourseAccessService } from './course-access.service.js';
 import { CoursesController } from './courses.controller.js';
 import { CoursesService } from './courses.service.js';
+import { LearningController } from './learning.controller.js';
+import { LearningService } from './learning.service.js';
 
 @Module({
   // The only registration of the course entities (I1). UsersModule: for its exported UserProfilesReader (AD14).
@@ -17,7 +19,12 @@ import { CoursesService } from './courses.service.js';
     TypeOrmModule.forFeature([Course, CourseSection, CourseLesson, CourseAccessGrant]),
     UsersModule,
   ],
-  controllers: [CoursesController, AdminCoursesController, AdminCourseAccessController],
-  providers: [CoursesService, CourseAccessService],
+  controllers: [
+    CoursesController,
+    AdminCoursesController,
+    AdminCourseAccessController,
+    LearningController,
+  ],
+  providers: [CoursesService, CourseAccessService, LearningService],
 })
 export class CoursesModule {}
