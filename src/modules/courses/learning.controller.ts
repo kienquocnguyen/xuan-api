@@ -20,7 +20,7 @@ import {
 import { type SaveLessonProgressInput, saveLessonProgressSchema } from './dto/save-progress.dto.js';
 import { LearningService } from './learning.service.js';
 
-const { VALIDATION_FAILED, UNAUTHENTICATED, NOT_FOUND } = baselineErrors;
+const { VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND } = baselineErrors;
 const { COURSE_ACCESS_REQUIRED } = coursesErrors;
 
 /**
@@ -72,7 +72,13 @@ export class LearningController {
   @HttpCode(204)
   @ApiNoContentResponse({ description: 'The progress is saved.' })
   @ApiSchemaParameters('path', lessonPathParamsSchema)
-  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, NOT_FOUND, COURSE_ACCESS_REQUIRED)
+  @ApiErrorResponses(
+    VALIDATION_FAILED,
+    UNAUTHENTICATED,
+    FORBIDDEN, // CsrfGuard: a write without X-Requested-With
+    NOT_FOUND,
+    COURSE_ACCESS_REQUIRED,
+  )
   async saveProgress(
     @Param({ schema: lessonPathParamsSchema }) params: LessonPathParams,
     @Body({ schema: saveLessonProgressSchema }) input: SaveLessonProgressInput,
