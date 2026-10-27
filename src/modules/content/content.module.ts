@@ -15,7 +15,10 @@ import { MediaService } from './media/media.service.js';
 import { createMediaStorage, MEDIA_STORAGE } from './media/media-storage.js';
 import { PostComment } from './discussion/post-comment.entity.js';
 import { PostRating } from './discussion/post-rating.entity.js';
-import { DiscussionController } from './discussion/discussion.controller.js';
+import {
+  DiscussionController,
+  PostCommentsController,
+} from './discussion/discussion.controller.js';
 import { DiscussionService } from './discussion/discussion.service.js';
 import { DISCUSSION_LIMITS } from './discussion/discussion-throttle.guard.js';
 import { Post } from './post.entity.js';
@@ -41,6 +44,7 @@ import { PostsService } from './posts.service.js';
   controllers: [
     PostsController,
     DiscussionController,
+    PostCommentsController,
     PostCategoriesController,
     AdminPostsController,
     AdminPostCategoriesController,

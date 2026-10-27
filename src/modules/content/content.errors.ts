@@ -62,6 +62,17 @@ export const contentErrors = {
     kind: 'conflict',
     message: 'A published post needs a category.',
   },
+  // Blog completion B4 (spec §6.5).
+  COMMENT_NOT_EDITABLE: {
+    code: 'COMMENT_NOT_EDITABLE',
+    kind: 'conflict',
+    message: 'Only a visible comment can be edited.',
+  },
+  COMMENT_DELETED: {
+    code: 'COMMENT_DELETED',
+    kind: 'conflict',
+    message: "A deleted comment can't be changed.",
+  },
   MEDIA_STORAGE_DISABLED: {
     code: 'MEDIA_STORAGE_DISABLED',
     kind: 'conflict',

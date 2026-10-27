@@ -92,6 +92,11 @@ export class PostsService {
     return post.id;
   }
 
+  /** Whether a post is published right now (discussion on an existing comment, spec §6.2). */
+  async isPublished(id: string): Promise<boolean> {
+    return this.posts.exists({ where: { id, status: 'published' } });
+  }
+
   /**
    * Up to 3 published posts for a published post's footer (spec §4.3): its category's newest first, padded with
    * the newest others; never the post itself. Two queries at most.
