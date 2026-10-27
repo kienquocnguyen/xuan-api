@@ -76,7 +76,11 @@ describe('HTTP contract (fixture)', () => {
     expect(res.body).toEqual(
       envelope('VALIDATION_FAILED', 'The request is invalid.', {
         fields: [
-          { field: 'address.city', code: 'INVALID_TYPE', message: 'This value has the wrong type.' },
+          {
+            field: 'address.city',
+            code: 'INVALID_TYPE',
+            message: 'This value has the wrong type.',
+          },
         ],
       }),
     );
