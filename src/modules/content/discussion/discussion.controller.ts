@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   Param,
   Post,
@@ -59,6 +60,7 @@ export class DiscussionController {
   }
 
   @Get(':slug/discussion/me')
+  @Header('Cache-Control', 'no-store') // per user, like the learner routes
   @ApiEnvelopeResponse(MyPostDiscussionDto)
   @ApiErrorResponses(UNAUTHENTICATED, NOT_FOUND)
   async mine(

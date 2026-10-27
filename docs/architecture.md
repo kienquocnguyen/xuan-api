@@ -444,7 +444,7 @@ These are shared with xuan-web. Agents ask instead of guessing.
 
 | Deferred | Trigger |
 |---|---|
-| Content beyond V1 blog posts: **blog completion B1–B4 in progress** (B1 2026-10-19: archive, never-published-draft deletion, tags; B2 categories; B3 2026-10-27: media upload, cover/OG images, body version 2 (AD17, AD18); B4 2026-10-27: ratings, comments, moderation, per-user throttle (AD19)). Still deferred: scheduled publishing, slug redirects, previews | Each owner decision |
+| Content beyond V1 blog posts: **blog completion B1–B4 done** (B1 2026-10-19: archive, never-published-draft deletion, tags; B2 categories; B3 2026-10-27: media upload, cover/OG images, body version 2 (AD17, AD18); B4 2026-10-27: ratings, comments, moderation, per-user throttle (AD19)). Still deferred: scheduled publishing, slug redirects, previews | Each owner decision |
 | Newsletter subscriptions ("Creator Notes") | Product confirmation |
 | Service applications and appointments: persistence, statuses, slot availability and holds (no double acceptance), Google Calendar / Meet integration, applicant emails. Confirmed concepts in `data-model.md` §3.1 | Application/booking slice design |
 | Rate limiting + `trust proxy` | **Before public launch** (D23). Discussion writes are already throttled per user (AD19); the rest of the gate stays open |

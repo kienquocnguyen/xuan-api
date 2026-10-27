@@ -21,6 +21,9 @@ describe('discussion request schemas (blog completion spec §6.2)', () => {
     it.each([
       ['empty', ''],
       ['only whitespace and newlines', ' \r\n\t \n '],
+      // JS trim() keeps these; ck_content_post_comments_body_not_blank may count them as space (final review).
+      ['only a NEL (U+0085)', '\u0085'],
+      ['only information separators (U+001C–U+001F)', '\u001c\u001d\u001e\u001f'],
       ['a NUL', 'a\u0000b'],
       ['a lone surrogate', 'a\ud800b'],
       ['not a string', 42],

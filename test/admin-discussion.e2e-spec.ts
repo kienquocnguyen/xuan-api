@@ -140,6 +140,16 @@ describe('Moderating discussion (/admin/post-comments, /admin/post-ratings, blog
     expect((await server().get('/posts/bai-viet/comments')).body.data.items).toEqual([]);
   });
 
+  it("records an author's deletion of a hidden comment as the author's, not the admin's (final review)", async () => {
+    const id = await insertComment('Bình luận');
+    await act('post-comments', id, 'hide');
+    const own = await server().delete(`/post-comments/${id}`).set(XHR).set('Cookie', reader.cookie);
+    expect(own.status).toBe(204);
+    const [listed] = (await server().get('/admin/post-comments').set('Cookie', admin.cookie)).body
+      .data.items;
+    expect(listed).toMatchObject({ id, status: 'deleted', moderatedBy: null, moderatedAt: null });
+  });
+
   it('hides and restores ratings, which leave and rejoin the public summary', async () => {
     const id = await insertRating(reader.user.id, 2);
     await insertRating(admin.user.id, 4);

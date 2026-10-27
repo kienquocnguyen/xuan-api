@@ -18,6 +18,10 @@ const commentBody = z
   .string()
   .overwrite((value) => value.replace(/\r\n?/g, '\n').trim())
   .min(1)
+  // JS trim() keeps U+0085 and U+001C–U+001F, which ck_content_post_comments_body_not_blank may count as space.
+  .refine((value) => /[^\s\u0085\u001c-\u001f]/u.test(value), {
+    message: 'Write something other than spaces.',
+  })
   .refine((value) => Array.from(value).length <= COMMENT_MAX_CODE_POINTS, {
     message: `At most ${COMMENT_MAX_CODE_POINTS} characters.`,
   })

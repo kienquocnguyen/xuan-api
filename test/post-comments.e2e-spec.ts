@@ -272,6 +272,7 @@ describe('Commenting on posts (blog completion B4, spec §6.2)', () => {
         .get('/posts/bai-viet/discussion/me')
         .set('Cookie', reader.cookie);
       expect(empty.status).toBe(200);
+      expect(empty.headers['cache-control']).toBe('no-store'); // per user (final review)
       expect(empty.body).toEqual({ data: { rating: null, ownCommentIds: [] } });
       const [{ id: older }] = await insertComment(
         reader.user.id,

@@ -58,11 +58,14 @@ export class DiscussionService {
     return this.view(id);
   }
 
-  /** Final for everyone (Q2). A hidden comment may still be deleted by its author; a repeat writes nothing. */
+  /**
+   * Final for everyone (Q2). A hidden comment may still be deleted by its author; a repeat writes nothing. The
+   * moderation pair is cleared, so moderation never shows an author's deletion as an admin's.
+   */
   async deleteComment(actor: AuthenticatedUser, id: string): Promise<void> {
     const comment = await this.ownComment(actor, id);
     if (comment.status === 'deleted') return;
-    await this.comments.update({ id }, { status: 'deleted' });
+    await this.comments.update({ id }, { status: 'deleted', moderatedBy: null, moderatedAt: null });
   }
 
   /** Visible comments of a published post, oldest first; authors in one query. */
