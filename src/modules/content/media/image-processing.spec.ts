@@ -26,6 +26,33 @@ describe('image processing (blog completion spec §5.1)', () => {
   });
 
   describe('toWebpVariants', () => {
+    it.each([
+      ['jpeg', () => solid(700, 500).jpeg().toBuffer()],
+      ['png', () => solid(700, 500).png().toBuffer()],
+      ['webp', () => solid(700, 500).webp().toBuffer()],
+      ['avif', () => solid(700, 500).avif().toBuffer()],
+    ])('accepts %s, whose decoder agrees with its magic bytes', async (_name, make) => {
+      const variants = await toWebpVariants(await make());
+      expect(variants.map(({ width }) => width)).toEqual([640]);
+    });
+
+    // Each of these decodes in sharp; only the magic-byte allow-list refuses them (spec §5.1 step 2, §8).
+    it.each([
+      [
+        'a sized SVG',
+        async () =>
+          Buffer.from(
+            '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="800" height="600" fill="red"/></svg>',
+          ),
+      ],
+      ['a GIF', () => solid(700, 500).gif().toBuffer()],
+      ['a TIFF', () => solid(700, 500).tiff().toBuffer()],
+    ])('refuses %s that sharp could decode', async (_name, make) => {
+      const input = await make();
+      expect((await sharp(input).metadata()).width).toBeGreaterThan(0); // decodable: the guard is the sniff
+      await expect(toWebpVariants(input)).rejects.toBeInstanceOf(ImageRejectedError);
+    });
+
     it('makes 640, 1280 and 1920 WebP variants of a large image, keeping its ratio', async () => {
       const variants = await toWebpVariants(await solid(2400, 1600).jpeg().toBuffer());
       expect(variants.map(({ width, height }) => [width, height])).toEqual([

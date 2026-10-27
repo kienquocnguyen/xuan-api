@@ -117,7 +117,12 @@ describe('Cover and OG images on posts (blog completion B3, spec §5.4)', () => 
 
   it('requires alt text with a cover and refuses it without one', async () => {
     expect((await create(save({ coverMediaId: cover.id }))).body).toEqual(fieldError('coverAlt'));
-    expect((await create(save({ coverMediaId: cover.id, coverAlt: '   ' }))).status).toBe(400);
+    // One error per field: the pairing rule doesn't repeat a failed length check (final review).
+    const blank = await create(save({ coverMediaId: cover.id, coverAlt: '   ' }));
+    expect(blank.status).toBe(400);
+    expect(blank.body.error.details.fields.map((f: { field: string }) => f.field)).toEqual([
+      'coverAlt',
+    ]);
     expect((await create(save({ coverAlt: 'Không có ảnh' }))).body).toEqual(fieldError('coverAlt'));
   });
 

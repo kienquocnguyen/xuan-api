@@ -88,8 +88,9 @@ export const savePostSchema = z
     ogMediaId: z.uuid().nullable().optional(),
   })
   .superRefine((input, ctx) => {
-    // ck_content_posts_cover_alt: alt text exactly when there is a cover.
-    if (Boolean(input.coverMediaId) !== Boolean(input.coverAlt)) {
+    // ck_content_posts_cover_alt: alt text exactly when there is a cover. Presence only: a blank alt already
+    // failed its length check, and Zod 4 still runs this refine after that issue.
+    if ((input.coverMediaId != null) !== (input.coverAlt != null)) {
       ctx.addIssue({ code: 'custom', path: ['coverAlt'], message: 'Alt text goes with a cover.' });
     }
   })

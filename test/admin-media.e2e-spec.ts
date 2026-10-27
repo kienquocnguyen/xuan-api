@@ -110,8 +110,16 @@ describe('Uploading images (POST /admin/media/images, blog completion B3)', () =
 
   it.each([
     ['a renamed text file', async () => Buffer.from('hello'), 'photo.jpg'],
-    ['an SVG', async () => Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'), 'a.svg'],
-    ['a GIF', async () => Buffer.from('GIF89a\x01\x00\x01\x00\x00\x00\x00;'), 'a.gif'],
+    [
+      'a sized SVG',
+      async () =>
+        Buffer.from(
+          '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="800" height="600" fill="red"/></svg>',
+        ),
+      'a.svg',
+    ],
+    ['a real GIF', () => solid(700, 500).gif().toBuffer(), 'a.gif'],
+    ['a TIFF', () => solid(700, 500).tiff().toBuffer(), 'a.tif'],
     [
       'an animated WebP',
       async () => {

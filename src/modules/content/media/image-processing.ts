@@ -10,6 +10,14 @@ const WEBP_QUALITY = 82;
 export type ImageType = 'jpeg' | 'png' | 'webp' | 'avif';
 export type WebpVariant = Readonly<{ width: number; height: number; data: Buffer }>;
 
+/** What sharp's `metadata().format` reports for each accepted type (AVIF decodes through libheif). */
+const DECODER_FORMAT: Readonly<Record<ImageType, string>> = {
+  jpeg: 'jpeg',
+  png: 'png',
+  webp: 'webp',
+  avif: 'heif',
+};
+
 /** The upload is not an image we accept; the service answers 400 at `file`. */
 export class ImageRejectedError extends Error {}
 
@@ -35,11 +43,18 @@ export function sniffImageType(buffer: Buffer): ImageType | null {
  * drops EXIF (GPS included), ICC and XMP.
  */
 export async function toWebpVariants(input: Buffer): Promise<WebpVariant[]> {
+  // Only our four formats reach the decoder: sharp would also rasterize SVG, GIF, TIFF… (spec §5.1 step 2, §8).
+  const type = sniffImageType(input);
+  if (!type) throw new ImageRejectedError('Not a JPEG, PNG, WebP or AVIF image.');
   const open = () => sharp(input, { limitInputPixels: MAX_INPUT_PIXELS, failOn: 'error' });
   let width: number;
   let height: number;
   try {
     const meta = await open().metadata();
+    // The decoder must agree with the magic bytes, so a polyglot can't pick another decoder.
+    if (meta.format !== DECODER_FORMAT[type]) {
+      throw new ImageRejectedError('Mismatched image type.');
+    }
     if ((meta.pages ?? 1) > 1) throw new ImageRejectedError('Animated images are not accepted.');
     ({ width, height } = meta.autoOrient);
   } catch (error) {
