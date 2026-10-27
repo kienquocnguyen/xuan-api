@@ -973,4 +973,140 @@ describe('OpenAPI document', () => {
       }
     });
   });
+
+  describe('blog discussion contract (blog completion B4)', () => {
+    const doc = () => createOpenApiDocument(app);
+    const schema = (name: string) =>
+      doc().components?.schemas?.[name] as { properties?: Record<string, unknown> } | undefined;
+    const propsOf = (name: string) => Object.keys(schema(name)?.properties ?? {}).sort();
+    const prop = (name: string, field: string) => JSON.stringify(schema(name)?.properties?.[field]);
+    const codes = (path: string, method: 'get' | 'put' | 'post' | 'delete') =>
+      Object.entries(doc().paths[path]?.[method]?.responses ?? {})
+        .filter(([status]) => Number(status) >= 400)
+        .flatMap(([, response]) =>
+          String((response as { description?: string }).description).split(' | '),
+        )
+        .sort();
+    const sorted = (...lists: string[][]) => lists.flat().sort();
+    const write = [
+      'FORBIDDEN',
+      'INTERNAL_ERROR',
+      'NOT_FOUND',
+      'PAYLOAD_TOO_LARGE',
+      'RATE_LIMITED',
+      'UNAUTHENTICATED',
+      'VALIDATION_FAILED',
+    ];
+    const admin = [
+      'FORBIDDEN',
+      'INTERNAL_ERROR',
+      'PAYLOAD_TOO_LARGE',
+      'UNAUTHENTICATED',
+      'VALIDATION_FAILED',
+    ];
+
+    it('names every discussion component with its exact fields (I19)', () => {
+      expect(propsOf('SavePostRatingDto')).toEqual(['value']);
+      expect(propsOf('SavePostCommentDto')).toEqual(['body']);
+      expect(propsOf('PostCommentDto')).toEqual(['author', 'body', 'createdAt', 'editedAt', 'id']);
+      expect(propsOf('MyPostDiscussionDto')).toEqual(['ownCommentIds', 'rating']);
+      expect(propsOf('RatingSummaryDto')).toEqual(['average', 'count']);
+      expect(propsOf('AdminDiscussionPostRefDto')).toEqual(['id', 'slug', 'title']);
+      expect(propsOf('AdminPostCommentDto')).toEqual(
+        [
+          'author',
+          'body',
+          'createdAt',
+          'editedAt',
+          'id',
+          'moderatedAt',
+          'moderatedBy',
+          'post',
+          'status',
+          'updatedAt',
+        ].sort(),
+      );
+      expect(propsOf('AdminPostRatingDto')).toEqual(
+        [
+          'author',
+          'createdAt',
+          'id',
+          'moderatedAt',
+          'moderatedBy',
+          'post',
+          'status',
+          'updatedAt',
+          'value',
+        ].sort(),
+      );
+      expect(Object.keys(doc().components?.schemas ?? {})).toEqual(
+        expect.arrayContaining([
+          'PostCommentsQuery',
+          'AdminPostCommentsQuery',
+          'AdminPostRatingsQuery',
+          'PostCommentIdParam',
+          'PostRatingIdParam',
+        ]),
+      );
+      expect(propsOf('PostDto')).toContain('ratingSummary');
+      expect(propsOf('AdminPostSummaryDto')).not.toContain('ratingSummary');
+    });
+
+    it('marks the nullable fields and the status enums', () => {
+      for (const [name, field] of [
+        ['PostCommentDto', 'editedAt'],
+        ['MyPostDiscussionDto', 'rating'],
+        ['RatingSummaryDto', 'average'],
+        ['AdminPostCommentDto', 'moderatedBy'],
+        ['AdminPostCommentDto', 'moderatedAt'],
+        ['AdminPostRatingDto', 'moderatedBy'],
+      ]) {
+        expect(prop(name, field)).toContain('"nullable":true');
+      }
+      expect(prop('AdminPostCommentDto', 'status')).toContain('["visible","hidden","deleted"]');
+      expect(prop('AdminPostRatingDto', 'status')).toContain('["visible","hidden"]');
+      expect(JSON.stringify(schema('PostCommentDto'))).not.toContain('email');
+    });
+
+    it('documents exactly the codes each discussion route can return (I18)', () => {
+      expect(codes('/posts/{slug}/comments', 'get')).toEqual(
+        ['INTERNAL_ERROR', 'NOT_FOUND', 'PAYLOAD_TOO_LARGE', 'VALIDATION_FAILED'].sort(),
+      );
+      expect(codes('/posts/{slug}/discussion/me', 'get')).toEqual(
+        ['INTERNAL_ERROR', 'NOT_FOUND', 'UNAUTHENTICATED'].sort(),
+      );
+      // RATE_LIMITED on the four reader writes only.
+      expect(codes('/posts/{slug}/rating', 'put')).toEqual(sorted(write));
+      expect(codes('/posts/{slug}/comments', 'post')).toEqual(sorted(write));
+      expect(codes('/post-comments/{commentId}', 'put')).toEqual(
+        sorted(write, ['COMMENT_NOT_EDITABLE']),
+      );
+      expect(codes('/post-comments/{commentId}', 'delete')).toEqual(sorted(write));
+      expect(codes('/admin/post-comments', 'get')).toEqual(sorted(admin));
+      expect(codes('/admin/post-ratings', 'get')).toEqual(sorted(admin));
+      for (const verb of ['hide', 'restore']) {
+        expect(codes(`/admin/post-comments/{commentId}/${verb}`, 'post')).toEqual(
+          sorted(admin, ['NOT_FOUND', 'COMMENT_DELETED']),
+        );
+        expect(codes(`/admin/post-ratings/{ratingId}/${verb}`, 'post')).toEqual(
+          sorted(admin, ['NOT_FOUND']),
+        );
+      }
+      expect(codes('/admin/post-comments/{commentId}/delete', 'post')).toEqual(
+        sorted(admin, ['NOT_FOUND']),
+      );
+      expect(doc().paths['/admin/post-ratings/{ratingId}/delete']).toBeUndefined();
+    });
+
+    it('documents the rating and the comment deletion as 204 with no body', () => {
+      for (const [path, method] of [
+        ['/posts/{slug}/rating', 'put'],
+        ['/post-comments/{commentId}', 'delete'],
+      ] as const) {
+        const responses = doc().paths[path]?.[method]?.responses ?? {};
+        expect(Object.keys(responses)).toContain('204');
+        expect(JSON.stringify(responses['204'])).not.toContain('content');
+      }
+    });
+  });
 });
