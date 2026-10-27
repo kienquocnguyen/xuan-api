@@ -43,6 +43,13 @@ export class AdminPostDto extends AdminPostSummaryDto {
   @ApiProperty({ type: String, nullable: true }) seoTitle!: string | null;
   @ApiProperty({ type: String, nullable: true }) seoDescription!: string | null;
   @ApiProperty({ format: 'date-time' }) createdAt!: string;
+  /**
+   * The stored references, exactly as `SavePostDto` takes them back. Present even when this server can't build
+   * image URLs (`MEDIA_STORAGE=disabled` without a base), so a full save never drops them (B3 pre-deployment fix).
+   */
+  @ApiProperty({ type: String, format: 'uuid', nullable: true }) coverMediaId!: string | null;
+  @ApiProperty({ type: String, nullable: true }) coverAlt!: string | null;
+  @ApiProperty({ type: String, format: 'uuid', nullable: true }) ogMediaId!: string | null;
 }
 
 /** Whitelist by construction: only these fields reach the wire (I10). */
@@ -109,5 +116,8 @@ export function toAdminPostDto(
     seoTitle: post.seoTitle,
     seoDescription: post.seoDescription,
     createdAt: post.createdAt.toISOString(),
+    coverMediaId: post.coverMediaId,
+    coverAlt: post.coverAlt,
+    ogMediaId: post.ogMediaId,
   };
 }

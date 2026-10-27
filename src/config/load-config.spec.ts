@@ -162,6 +162,28 @@ describe('loadConfig', () => {
       });
     });
 
+    it('keeps reading stored media while uploads are disabled, when a base URL is set (B3 fix)', () => {
+      expect(
+        loadConfig({
+          ...production,
+          MEDIA_STORAGE: 'disabled',
+          MEDIA_PUBLIC_BASE_URL: 'https://media.xuancreative.com',
+        }).media,
+      ).toEqual({
+        storage: 'disabled',
+        publicBaseUrl: 'https://media.xuancreative.com',
+        localDir: null,
+        r2: null,
+      });
+      expect(
+        failureOf({
+          ...production,
+          MEDIA_STORAGE: 'disabled',
+          MEDIA_PUBLIC_BASE_URL: 'http://media.x',
+        }),
+      ).toContain('MEDIA_PUBLIC_BASE_URL');
+    });
+
     it('configures R2 with an https base URL and never prints a secret', () => {
       expect(loadConfig({ ...production, ...r2 }).media).toEqual({
         storage: 'r2',

@@ -121,6 +121,9 @@ describe('Authoring posts (/admin/posts)', () => {
           coverImage: null,
           ogImage: null,
           createdAt: expect.stringMatching(ISO),
+          coverMediaId: null,
+          coverAlt: null,
+          ogMediaId: null,
         },
       });
     });

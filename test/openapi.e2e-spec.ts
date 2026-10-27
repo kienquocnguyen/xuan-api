@@ -960,5 +960,15 @@ describe('OpenAPI document', () => {
       }
       expect(prop('SavePostDto', 'bodyVersion')).toMatch(/1.*2|enum/);
     });
+
+    it('gives the admin form its raw media references, nullable (B3 pre-deployment fix)', () => {
+      expect(propsOf('AdminPostDto')).toEqual(
+        expect.arrayContaining(['coverMediaId', 'coverAlt', 'ogMediaId']),
+      );
+      for (const field of ['coverMediaId', 'coverAlt', 'ogMediaId']) {
+        expect(prop('AdminPostDto', field)).toContain('"nullable":true');
+        expect(propsOf('AdminPostSummaryDto')).not.toContain(field); // the list stays a list
+      }
+    });
   });
 });

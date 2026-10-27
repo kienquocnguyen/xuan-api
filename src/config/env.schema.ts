@@ -63,11 +63,18 @@ export const envSchema = z
     if (env.MEDIA_PUBLIC_BASE_URL?.endsWith('/')) {
       issue('MEDIA_PUBLIC_BASE_URL', 'Must not end with a slash.');
     }
+    if (env.MEDIA_STORAGE === 'r2' && !env.MEDIA_PUBLIC_BASE_URL) {
+      issue('MEDIA_PUBLIC_BASE_URL', 'Required with r2.');
+    }
+    // Media is served from its own origin in production (r2, or disabled but still reading it).
+    if (
+      (env.MEDIA_STORAGE === 'r2' || env.NODE_ENV === 'production') &&
+      env.MEDIA_PUBLIC_BASE_URL &&
+      new URL(env.MEDIA_PUBLIC_BASE_URL).protocol !== 'https:'
+    ) {
+      issue('MEDIA_PUBLIC_BASE_URL', 'Must use https.');
+    }
     if (env.MEDIA_STORAGE === 'r2') {
-      if (!env.MEDIA_PUBLIC_BASE_URL) issue('MEDIA_PUBLIC_BASE_URL', 'Required with r2.');
-      else if (new URL(env.MEDIA_PUBLIC_BASE_URL).protocol !== 'https:') {
-        issue('MEDIA_PUBLIC_BASE_URL', 'Must use https with r2.');
-      }
       for (const name of [
         'R2_ACCOUNT_ID',
         'R2_ACCESS_KEY_ID',
