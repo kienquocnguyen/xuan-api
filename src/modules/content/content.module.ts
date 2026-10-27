@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { APP_CONFIG, AppConfigModule } from '../../config/app-config.module.js';
 import type { AppConfig } from '../../config/load-config.js';
@@ -14,6 +15,9 @@ import { MediaService } from './media/media.service.js';
 import { createMediaStorage, MEDIA_STORAGE } from './media/media-storage.js';
 import { PostComment } from './discussion/post-comment.entity.js';
 import { PostRating } from './discussion/post-rating.entity.js';
+import { DiscussionController } from './discussion/discussion.controller.js';
+import { DiscussionService } from './discussion/discussion.service.js';
+import { DISCUSSION_LIMITS } from './discussion/discussion-throttle.guard.js';
 import { Post } from './post.entity.js';
 import { PostsController } from './posts.controller.js';
 import { PostsService } from './posts.service.js';
@@ -31,9 +35,12 @@ import { PostsService } from './posts.service.js';
     ]),
     UsersModule,
     AppConfigModule,
+    // In-memory store: one API instance today (spec §6.4). Only DiscussionThrottle uses it; no global guard.
+    ThrottlerModule.forRoot({ throttlers: DISCUSSION_LIMITS, setHeaders: false }),
   ],
   controllers: [
     PostsController,
+    DiscussionController,
     PostCategoriesController,
     AdminPostsController,
     AdminPostCategoriesController,
@@ -41,6 +48,7 @@ import { PostsService } from './posts.service.js';
   ],
   providers: [
     PostsService,
+    DiscussionService,
     CategoriesService,
     MediaService,
     // The storage gateway is chosen from config (C5, blog completion spec §5.3).

@@ -79,6 +79,19 @@ export class PostsService {
     return this.withAuthor(post);
   }
 
+  /** The id of a published post, for discussion (spec §6.2); missing, draft or archived → 404, like reads. */
+  async findPublishedId(slug: string): Promise<string> {
+    if (slug.length > 160 || !POST_SLUG_PATTERN.test(slug)) {
+      throw new AppError(baselineErrors.NOT_FOUND);
+    }
+    const post = await this.posts.findOne({
+      select: { id: true },
+      where: { language: POST_LANGUAGE, slug, status: 'published' },
+    });
+    if (!post) throw new AppError(baselineErrors.NOT_FOUND);
+    return post.id;
+  }
+
   /**
    * Up to 3 published posts for a published post's footer (spec §4.3): its category's newest first, padded with
    * the newest others; never the post itself. Two queries at most.

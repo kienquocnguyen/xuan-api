@@ -72,6 +72,7 @@ export function configureApp(app: NestExpressApplication, config: AppConfig): vo
     origin: [...config.cors.origins], // exact origins, never '*' (I20)
     credentials: true,
     allowedHeaders: ['Content-Type', 'X-Requested-With'],
+    exposedHeaders: ['Retry-After'], // not CORS-safelisted: the web reads it on 429 (api-contract §4)
   });
   if (config.media.storage === 'local' && config.media.localDir) {
     serveLocalMedia(app, config.media.localDir);
