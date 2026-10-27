@@ -94,14 +94,16 @@ export type Limiter = Readonly<{
 export function createLimiter(max: number): Limiter {
   let active = 0;
   const queue: (() => void)[] = [];
+  // A freed slot passes straight to the next waiter, so an arrival in between can't take it as well.
   const release = () => {
-    active -= 1;
-    queue.shift()?.();
+    const next = queue.shift();
+    if (next) next();
+    else active -= 1;
   };
   return {
     async run<T>(task: () => Promise<T>): Promise<T> {
       if (active >= max) await new Promise<void>((resolve) => queue.push(resolve));
-      active += 1;
+      else active += 1;
       try {
         return await task();
       } finally {

@@ -145,6 +145,59 @@ describe('bounded image pipelines', () => {
     expect([limiter.active, limiter.waiting]).toEqual([0, 0]);
   });
 
+  it("encodes one upload's widths one after another (final review)", async () => {
+    const proto = Object.getPrototypeOf(sharp()) as { toBuffer: (...args: unknown[]) => unknown };
+    const original = proto.toBuffer;
+    let inFlight = 0;
+    let peak = 0;
+    const spy = vi.spyOn(proto, 'toBuffer').mockImplementation(async function (
+      this: unknown,
+      ...args: unknown[]
+    ) {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      try {
+        return await (original.apply(this, args) as Promise<unknown>);
+      } finally {
+        inFlight -= 1;
+      }
+    });
+    try {
+      const input = await solid(2000, 1000).png().toBuffer();
+      peak = 0;
+      const variants = await toWebpVariants(input);
+      expect(variants.map(({ width }) => width)).toEqual([640, 1280, 1920]);
+      expect(peak).toBe(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it.each([0, 1, 2, 3, 4, 5, 6, 8])(
+    'never exceeds its limit when a task arrives %i microtasks after a release (final review)',
+    async (depth) => {
+      const limiter = createLimiter(1);
+      let running = 0;
+      let peak = 0;
+      const body = (wait: Promise<void>) => async () => {
+        running += 1;
+        peak = Math.max(peak, running);
+        await wait;
+        running -= 1;
+      };
+      const first = deferred();
+      const runs = [limiter.run(body(first.promise)), limiter.run(body(Promise.resolve()))];
+      await tick();
+      first.resolve();
+      let chain = Promise.resolve();
+      for (let i = 0; i < depth; i += 1) chain = chain.then(() => undefined);
+      runs.push(chain.then(() => limiter.run(body(Promise.resolve()))));
+      await Promise.all(runs);
+      expect(peak).toBe(1);
+      expect([limiter.active, limiter.waiting]).toEqual([0, 0]);
+    },
+  );
+
   it('shares one limit across uploads; refusals never wait for a slot', async () => {
     expect(MAX_CONCURRENT_PIPELINES).toBe(2);
     const holds = [deferred(), deferred()];
@@ -161,9 +214,8 @@ describe('bounded image pipelines', () => {
       ImageRejectedError,
     );
     await expect(toWebpVariants(await animated())).rejects.toBeInstanceOf(ImageRejectedError);
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await vi.waitFor(() => expect(imagePipelines.waiting).toBe(1), { timeout: 10_000 });
     expect(done).toBe(false); // the valid upload queues behind the held slots
-    expect(imagePipelines.waiting).toBe(1);
 
     holds.forEach((hold) => hold.resolve());
     await Promise.all(held);
