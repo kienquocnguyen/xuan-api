@@ -20,7 +20,9 @@ import {
   PostCommentsController,
 } from './discussion/discussion.controller.js';
 import { DiscussionService } from './discussion/discussion.service.js';
+import { AdminDiscussionController } from './discussion/admin-discussion.controller.js';
 import { DISCUSSION_LIMITS } from './discussion/discussion-throttle.guard.js';
+import { ModerationService } from './discussion/moderation.service.js';
 import { RatingSummaries } from './discussion/rating-summaries.js';
 import { Post } from './post.entity.js';
 import { PostsController } from './posts.controller.js';
@@ -46,6 +48,7 @@ import { PostsService } from './posts.service.js';
     PostsController,
     DiscussionController,
     PostCommentsController,
+    AdminDiscussionController,
     PostCategoriesController,
     AdminPostsController,
     AdminPostCategoriesController,
@@ -54,6 +57,7 @@ import { PostsService } from './posts.service.js';
   providers: [
     PostsService,
     DiscussionService,
+    ModerationService,
     RatingSummaries,
     CategoriesService,
     MediaService,

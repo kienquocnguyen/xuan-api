@@ -33,6 +33,8 @@ export type AuthoredPost = Readonly<{
   rating: RatingSummary;
 }>;
 export type PostPage = Readonly<{ items: AuthoredPost[]; totalItems: number }>;
+/** What moderation shows of a post, in any status (blog completion B4). */
+export type PostRef = Readonly<{ id: string; slug: string; title: string }>;
 type Paging = Readonly<{ page: number; pageSize: number }>;
 
 const RELATED_LIMIT = 3;
@@ -94,6 +96,17 @@ export class PostsService {
     });
     if (!post) throw new AppError(baselineErrors.NOT_FOUND);
     return post.id;
+  }
+
+  /** Posts of any status by id, for moderation lists (one query). */
+  async findRefs(ids: readonly string[]): Promise<Map<string, PostRef>> {
+    const wanted = [...new Set(ids)];
+    if (wanted.length === 0) return new Map();
+    const rows = await this.posts.find({
+      select: { id: true, slug: true, title: true },
+      where: { id: In(wanted) },
+    });
+    return new Map(rows.map(({ id, slug, title }) => [id, { id, slug, title }]));
   }
 
   /** Whether a post is published right now (discussion on an existing comment, spec §6.2). */
