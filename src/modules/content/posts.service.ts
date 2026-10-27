@@ -17,6 +17,7 @@ import {
 import { CategoriesService, type CategoryRef } from './categories.service.js';
 import { contentErrors } from './content.errors.js';
 import { POST_SLUG_PATTERN, type SavePostInput } from './dto/save-post.dto.js';
+import { NO_RATINGS, RatingSummaries, type RatingSummary } from './discussion/rating-summaries.js';
 import { type MediaImage, MediaService } from './media/media.service.js';
 import { declaresOlderBody, omittedFieldsWithData } from './post-compatibility.js';
 import { POST_LANGUAGE, Post, type PostStatus } from './post.entity.js';
@@ -28,8 +29,12 @@ export type AuthoredPost = Readonly<{
   /** `null` without one, or when this server can't build media URLs (storage disabled). */
   cover: MediaImage | null;
   og: MediaImage | null;
+  /** Visible ratings (blog completion B4); shown on public DTOs only. */
+  rating: RatingSummary;
 }>;
 export type PostPage = Readonly<{ items: AuthoredPost[]; totalItems: number }>;
+/** What moderation shows of a post, in any status (blog completion B4). */
+export type PostRef = Readonly<{ id: string; slug: string; title: string }>;
 type Paging = Readonly<{ page: number; pageSize: number }>;
 
 const RELATED_LIMIT = 3;
@@ -43,6 +48,7 @@ export class PostsService {
     private readonly profiles: UserProfilesReader,
     private readonly categories: CategoriesService,
     private readonly media: MediaService,
+    private readonly ratingSummaries: RatingSummaries,
   ) {}
 
   async listPublished({
@@ -77,6 +83,35 @@ export class PostsService {
     const post = await this.posts.findOneBy({ language: POST_LANGUAGE, slug, status: 'published' });
     if (!post) throw new AppError(baselineErrors.NOT_FOUND); // drafts too: no existence leak (B13)
     return this.withAuthor(post);
+  }
+
+  /** The id of a published post, for discussion (spec §6.2); missing, draft or archived → 404, like reads. */
+  async findPublishedId(slug: string): Promise<string> {
+    if (slug.length > 160 || !POST_SLUG_PATTERN.test(slug)) {
+      throw new AppError(baselineErrors.NOT_FOUND);
+    }
+    const post = await this.posts.findOne({
+      select: { id: true },
+      where: { language: POST_LANGUAGE, slug, status: 'published' },
+    });
+    if (!post) throw new AppError(baselineErrors.NOT_FOUND);
+    return post.id;
+  }
+
+  /** Posts of any status by id, for moderation lists (one query). */
+  async findRefs(ids: readonly string[]): Promise<Map<string, PostRef>> {
+    const wanted = [...new Set(ids)];
+    if (wanted.length === 0) return new Map();
+    const rows = await this.posts.find({
+      select: { id: true, slug: true, title: true },
+      where: { id: In(wanted) },
+    });
+    return new Map(rows.map(({ id, slug, title }) => [id, { id, slug, title }]));
+  }
+
+  /** Whether a post is published right now (discussion on an existing comment, spec §6.2). */
+  async isPublished(id: string): Promise<boolean> {
+    return this.posts.exists({ where: { id, status: 'published' } });
   }
 
   /**
@@ -327,12 +362,13 @@ export class PostsService {
     return (await this.withAuthors([post]))[0];
   }
 
-  /** One profile, one category and one media query per page, not per post. */
+  /** One profile, one category, one media and one rating query per page, not per post. */
   private async withAuthors(rows: Post[]): Promise<AuthoredPost[]> {
-    const [profiles, categories, images] = await Promise.all([
+    const [profiles, categories, images, ratings] = await Promise.all([
       this.profiles.findPublicProfiles(rows.map((post) => post.authorId)),
       this.categories.findRefs(rows.flatMap((post) => (post.categoryId ? [post.categoryId] : []))),
       this.media.findImages(rows.flatMap((post) => [post.coverMediaId, post.ogMediaId])),
+      this.ratingSummaries.forPosts(rows.map((post) => post.id)),
     ]);
     const byId = new Map(profiles.map((profile) => [profile.id, profile]));
     return rows.map((post) => {
@@ -344,7 +380,7 @@ export class PostsService {
       }
       const cover = post.coverMediaId ? (images.get(post.coverMediaId) ?? null) : null;
       const og = post.ogMediaId ? (images.get(post.ogMediaId) ?? null) : null;
-      return { post, author, category, cover, og };
+      return { post, author, category, cover, og, rating: ratings.get(post.id) ?? NO_RATINGS };
     });
   }
 

@@ -103,6 +103,7 @@ describe('Public posts (/posts)', () => {
               author: { displayName: 'Xuân', avatarUrl: 'https://lh3.googleusercontent.com/a/x' },
               category: { slug: 'du-lich', label: 'Du lịch' },
               coverImage: null,
+              ratingSummary: { average: null, count: 0 },
             },
             {
               id: older,
@@ -114,6 +115,7 @@ describe('Public posts (/posts)', () => {
               author: { displayName: 'Xuân', avatarUrl: 'https://lh3.googleusercontent.com/a/x' },
               category: { slug: 'du-lich', label: 'Du lịch' },
               coverImage: null,
+              ratingSummary: { average: null, count: 0 },
             },
           ],
           pageInfo: { page: 1, pageSize: 12, totalItems: 2, totalPages: 1 },
@@ -175,6 +177,7 @@ describe('Public posts (/posts)', () => {
           category: { slug: 'du-lich', label: 'Du lịch' },
           coverImage: null,
           ogImage: null,
+          ratingSummary: { average: null, count: 0 },
         },
       });
     });
