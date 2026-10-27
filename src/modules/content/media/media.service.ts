@@ -108,6 +108,29 @@ export class MediaService {
     }
   }
 
+  /** Cover/OG ids must exist (spec §5.4); one query. */
+  async assertExisting(ids: readonly (string | null | undefined)[], manager?: EntityManager) {
+    const wanted = [...new Set(ids.filter((id): id is string => Boolean(id)))];
+    if (wanted.length === 0) return;
+    const found = await (manager?.getRepository(ContentMedia) ?? this.media).count({
+      where: { id: In(wanted) },
+    });
+    if (found !== wanted.length) throw new AppError(contentErrors.POST_MEDIA_NOT_FOUND);
+  }
+
+  /** The images of a page of posts: one query, whatever the page size. */
+  async findImages(ids: readonly (string | null)[]): Promise<Map<string, MediaImage>> {
+    const wanted = [...new Set(ids.filter((id): id is string => Boolean(id)))];
+    if (wanted.length === 0) return new Map();
+    const rows = await this.media.findBy({ id: In(wanted) });
+    const images = new Map<string, MediaImage>();
+    for (const row of rows) {
+      const image = this.toImage(row);
+      if (image) images.set(row.id, image);
+    }
+    return images;
+  }
+
   /** URLs of a stored image; `null` when this server has no public media base (storage disabled). */
   toImage(
     row: Pick<ContentMedia, 'id' | 'storageKey' | 'width' | 'height' | 'variantWidths'>,

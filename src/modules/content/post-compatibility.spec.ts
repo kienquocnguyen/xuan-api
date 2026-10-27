@@ -1,7 +1,11 @@
 import type { Post } from './post.entity.js';
 import { omittedFieldsWithData } from './post-compatibility.js';
 
-const stored = (tags: string[], categoryId: string | null = null) => ({ tags, categoryId }) as Post;
+const stored = (
+  tags: string[],
+  categoryId: string | null = null,
+  media: { coverMediaId?: string; ogMediaId?: string } = {},
+) => ({ tags, categoryId, coverMediaId: null, ogMediaId: null, ...media }) as Post;
 
 describe('omittedFieldsWithData (blog spec §3.4, Q3)', () => {
   it('reports tags omitted while the post has some', () => {
@@ -22,5 +26,20 @@ describe('omittedFieldsWithData (blog spec §3.4, Q3)', () => {
       'categoryId',
     ]);
     expect(omittedFieldsWithData({ slug: 'a', categoryId: null }, stored([], 'c'))).toEqual([]);
+  });
+
+  it('reports coverMediaId and ogMediaId omitted while set, after categoryId', () => {
+    const post = stored([], 'c', { coverMediaId: 'm1', ogMediaId: 'm2' });
+    expect(omittedFieldsWithData({ slug: 'a' }, post)).toEqual([
+      'categoryId',
+      'coverMediaId',
+      'ogMediaId',
+    ]);
+    expect(
+      omittedFieldsWithData(
+        { slug: 'a', categoryId: 'c', coverMediaId: null, ogMediaId: null },
+        post,
+      ),
+    ).toEqual([]);
   });
 });

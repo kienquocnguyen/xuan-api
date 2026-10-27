@@ -1,6 +1,9 @@
 import { ApiProperty, getSchemaPath } from '@nestjs/swagger';
 import type { PublicProfile } from '../../users/user-profiles.reader.js';
 import type { CategoryRef } from '../categories.service.js';
+import type { MediaImage } from '../media/media.service.js';
+import { AdminPostImageDto, type PostImageDto } from './media.dto.js';
+import { coverImageOf, ogImageOf } from './post.dto.js';
 import { AdminPostCategoryRefDto } from './category.dto.js';
 import type { PostBodyDocument } from '../body/post-body.schema.js';
 import { POST_STATUSES, type Post, type PostStatus } from '../post.entity.js';
@@ -24,7 +27,11 @@ export class AdminPostSummaryDto {
   @ApiProperty({ type: [String], example: ['GoPro', 'Đà Lạt'] }) tags!: string[];
   @ApiProperty({ type: AdminPostCategoryRefDto, nullable: true })
   category!: AdminPostCategoryRefDto | null;
+  @ApiProperty({ type: AdminPostImageDto, nullable: true }) coverImage!: AdminPostImageDto | null;
+  @ApiProperty({ type: AdminPostImageDto, nullable: true }) ogImage!: AdminPostImageDto | null;
 }
+
+type Images = Readonly<{ cover: MediaImage | null; og: MediaImage | null }>;
 
 /** A post as its author (or an admin) edits it. */
 export class AdminPostDto extends AdminPostSummaryDto {
@@ -43,7 +50,10 @@ export function toAdminPostSummaryDto(
   post: Post,
   author: PublicProfile,
   category: CategoryRef | null,
+  images: Images,
 ): AdminPostSummaryDto {
+  const cover = coverImageOf(post, images);
+  const og = ogImageOf(post, images);
   return {
     id: post.id,
     slug: post.slug,
@@ -62,15 +72,24 @@ export function toAdminPostSummaryDto(
           status: category.status,
         }
       : null,
+    coverImage: withMediaId(cover, post.coverMediaId),
+    ogImage: withMediaId(og, post.ogMediaId),
   };
+}
+
+function withMediaId(image: PostImageDto | null, mediaId: string | null): AdminPostImageDto | null {
+  if (!image || !mediaId) return null;
+  const { url, width, height, alt, variants } = image;
+  return { mediaId, url, width, height, alt, variants };
 }
 
 export function toAdminPostDto(
   post: Post,
   author: PublicProfile,
   category: CategoryRef | null,
+  images: Images,
 ): AdminPostDto {
-  const summary = toAdminPostSummaryDto(post, author, category);
+  const summary = toAdminPostSummaryDto(post, author, category, images);
   return {
     id: summary.id,
     slug: summary.slug,
@@ -81,6 +100,8 @@ export function toAdminPostDto(
     author: summary.author,
     tags: summary.tags,
     category: summary.category,
+    coverImage: summary.coverImage,
+    ogImage: summary.ogImage,
     language: post.language,
     excerpt: post.excerpt,
     body: post.body,

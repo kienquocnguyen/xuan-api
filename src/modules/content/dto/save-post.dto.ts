@@ -75,6 +75,23 @@ export const savePostSchema = z
      * body may contain; the stored version is still the lowest the document fits.
      */
     bodyVersion: z.union([z.literal(1), z.literal(2)]).optional(),
+    /** Blog completion B3 (spec §5.4): the cover needs alt text; the OG image overrides it for sharing. */
+    coverMediaId: z.uuid().nullable().optional(),
+    coverAlt: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .refine(isStorableText, STORABLE_TEXT_MESSAGE)
+      .nullable()
+      .optional(),
+    ogMediaId: z.uuid().nullable().optional(),
+  })
+  .superRefine((input, ctx) => {
+    // ck_content_posts_cover_alt: alt text exactly when there is a cover.
+    if (Boolean(input.coverMediaId) !== Boolean(input.coverAlt)) {
+      ctx.addIssue({ code: 'custom', path: ['coverAlt'], message: 'Alt text goes with a cover.' });
+    }
   })
   .superRefine((input, ctx) => {
     if ((input.bodyVersion ?? 1) !== 1) return;

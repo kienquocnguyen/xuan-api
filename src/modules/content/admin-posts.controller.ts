@@ -37,7 +37,8 @@ const {
 } = contentErrors;
 
 type PostIdParam = z.infer<typeof postIdParamSchema>;
-const toDto = ({ post, author, category }: AuthoredPost) => toAdminPostDto(post, author, category);
+const toDto = ({ post, author, category, cover, og }: AuthoredPost) =>
+  toAdminPostDto(post, author, category, { cover, og });
 
 /**
  * Authoring for editors and admins (blog spec §5.2). Ownership is checked by the service after loading the
@@ -59,8 +60,8 @@ export class AdminPostsController {
   ): Promise<Page<AdminPostSummaryDto>> {
     const { items, totalItems } = await this.posts.listForActor(actor, query.status, query);
     return {
-      items: items.map(({ post, author, category }) =>
-        toAdminPostSummaryDto(post, author, category),
+      items: items.map(({ post, author, category, cover, og }) =>
+        toAdminPostSummaryDto(post, author, category, { cover, og }),
       ),
       pageInfo: toPageInfo(query.page, query.pageSize, totalItems),
     };

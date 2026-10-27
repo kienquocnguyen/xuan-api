@@ -7,6 +7,9 @@ import type { Post } from './post.entity.js';
 const GUARDED: readonly { field: string; hasData: (post: Post) => boolean }[] = [
   { field: 'tags', hasData: (post) => post.tags.length > 0 },
   { field: 'categoryId', hasData: (post) => post.categoryId !== null },
+  // coverAlt follows coverMediaId (the schema pairs them).
+  { field: 'coverMediaId', hasData: (post) => post.coverMediaId !== null },
+  { field: 'ogMediaId', hasData: (post) => post.ogMediaId !== null },
 ];
 
 /**

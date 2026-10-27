@@ -17,7 +17,7 @@ import {
 import { CategoriesService, type CategoryRef } from './categories.service.js';
 import { contentErrors } from './content.errors.js';
 import { POST_SLUG_PATTERN, type SavePostInput } from './dto/save-post.dto.js';
-import { MediaService } from './media/media.service.js';
+import { type MediaImage, MediaService } from './media/media.service.js';
 import { declaresOlderBody, omittedFieldsWithData } from './post-compatibility.js';
 import { POST_LANGUAGE, Post, type PostStatus } from './post.entity.js';
 
@@ -25,6 +25,9 @@ export type AuthoredPost = Readonly<{
   post: Post;
   author: PublicProfile;
   category: CategoryRef | null;
+  /** `null` without one, or when this server can't build media URLs (storage disabled). */
+  cover: MediaImage | null;
+  og: MediaImage | null;
 }>;
 export type PostPage = Readonly<{ items: AuthoredPost[]; totalItems: number }>;
 type Paging = Readonly<{ page: number; pageSize: number }>;
@@ -129,6 +132,7 @@ export class PostsService {
       const categoryId = input.categoryId ?? null;
       await this.assertAssignable(this.dataSource.manager, categoryId, null);
       await this.media.assertLibrarySources(collectMediaSources(input.body));
+      await this.media.assertExisting([input.coverMediaId, input.ogMediaId]);
       const result = await this.posts.insert({
         authorId: actor.id,
         slug: input.slug,
@@ -140,6 +144,9 @@ export class PostsService {
         seoDescription: input.seoDescription,
         tags: input.tags ?? [],
         categoryId,
+        coverMediaId: input.coverMediaId ?? null,
+        coverAlt: input.coverAlt ?? null,
+        ogMediaId: input.ogMediaId ?? null,
       });
       id = (result.identifiers[0] as { id: string }).id;
     } catch (error) {
@@ -173,6 +180,7 @@ export class PostsService {
           throw new AppError(contentErrors.POST_MEDIA_INCOMPLETE);
         }
         await this.media.assertLibrarySources(collectMediaSources(input.body), manager);
+        await this.media.assertExisting([input.coverMediaId, input.ogMediaId], manager);
         // B2: an omitted categoryId reached here only if none is stored (the guard above), so `?? null` keeps it.
         const categoryId = input.categoryId ?? null;
         await this.assertAssignable(manager, categoryId, post.categoryId);
@@ -193,6 +201,9 @@ export class PostsService {
             seoDescription: input.seoDescription,
             tags: input.tags ?? [],
             categoryId,
+            coverMediaId: input.coverMediaId ?? null,
+            coverAlt: input.coverAlt ?? null,
+            ogMediaId: input.ogMediaId ?? null,
           },
         );
       });
@@ -316,11 +327,12 @@ export class PostsService {
     return (await this.withAuthors([post]))[0];
   }
 
-  /** One profile query and one category query per page, not per post. */
+  /** One profile, one category and one media query per page, not per post. */
   private async withAuthors(rows: Post[]): Promise<AuthoredPost[]> {
-    const [profiles, categories] = await Promise.all([
+    const [profiles, categories, images] = await Promise.all([
       this.profiles.findPublicProfiles(rows.map((post) => post.authorId)),
       this.categories.findRefs(rows.flatMap((post) => (post.categoryId ? [post.categoryId] : []))),
+      this.media.findImages(rows.flatMap((post) => [post.coverMediaId, post.ogMediaId])),
     ]);
     const byId = new Map(profiles.map((profile) => [profile.id, profile]));
     return rows.map((post) => {
@@ -330,7 +342,9 @@ export class PostsService {
       if (post.categoryId && !category) {
         throw new Error('Post category missing despite fk_content_posts_category_id.');
       }
-      return { post, author, category };
+      const cover = post.coverMediaId ? (images.get(post.coverMediaId) ?? null) : null;
+      const og = post.ogMediaId ? (images.get(post.ogMediaId) ?? null) : null;
+      return { post, author, category, cover, og };
     });
   }
 
@@ -342,6 +356,12 @@ export class PostsService {
     // The category was deleted after the check (spec §4.4; the delete holds its row lock).
     if (isForeignKeyViolation(error, 'fk_content_posts_category_id')) {
       return new AppError(contentErrors.CATEGORY_NOT_FOUND);
+    }
+    if (
+      isForeignKeyViolation(error, 'fk_content_posts_cover_media_id') ||
+      isForeignKeyViolation(error, 'fk_content_posts_og_media_id')
+    ) {
+      return new AppError(contentErrors.POST_MEDIA_NOT_FOUND);
     }
     return error;
   }

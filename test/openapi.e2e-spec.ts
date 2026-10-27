@@ -727,7 +727,17 @@ describe('OpenAPI document', () => {
       ]);
       expect(JSON.stringify(schemaOf('AdminPostsQuery'))).toContain('archived');
       expect(propsOf('PostSummaryDto')).toEqual(
-        ['author', 'category', 'excerpt', 'id', 'publishedAt', 'slug', 'title', 'updatedAt'].sort(),
+        [
+          'author',
+          'category',
+          'coverImage', // B3
+          'excerpt',
+          'id',
+          'publishedAt',
+          'slug',
+          'title',
+          'updatedAt',
+        ].sort(),
       );
       expect(propsOf('PostDto')).toEqual(
         expect.arrayContaining(['tags', 'updatedAt', 'body', 'bodyVersion']),
@@ -739,7 +749,10 @@ describe('OpenAPI document', () => {
           'body',
           'bodyVersion', // B3
           'categoryId',
+          'coverAlt', // B3
+          'coverMediaId', // B3
           'excerpt',
+          'ogMediaId', // B3
           'seoDescription',
           'seoTitle',
           'slug',

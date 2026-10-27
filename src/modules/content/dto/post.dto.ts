@@ -1,6 +1,8 @@
 import { ApiProperty, getSchemaPath } from '@nestjs/swagger';
 import type { PublicProfile } from '../../users/user-profiles.reader.js';
 import type { CategoryRef } from '../categories.service.js';
+import type { MediaImage } from '../media/media.service.js';
+import { PostImageDto } from './media.dto.js';
 import { PostCategoryRefDto } from './category.dto.js';
 import type { PostBodyDocument } from '../body/post-body.schema.js';
 import type { Post } from '../post.entity.js';
@@ -23,6 +25,8 @@ export class PostSummaryDto {
   @ApiProperty({ type: PostAuthorDto }) author!: PostAuthorDto;
   /** `null` without a category or when it is archived (blog completion spec §4.3). */
   @ApiProperty({ type: PostCategoryRefDto, nullable: true }) category!: PostCategoryRefDto | null;
+  /** Blog completion B3 (spec §5.4). */
+  @ApiProperty({ type: PostImageDto, nullable: true }) coverImage!: PostImageDto | null;
 }
 
 /** A published post, read by slug. */
@@ -34,6 +38,25 @@ export class PostDto extends PostSummaryDto {
   @ApiProperty({ type: String, nullable: true }) seoTitle!: string | null;
   @ApiProperty({ type: String, nullable: true }) seoDescription!: string | null;
   @ApiProperty({ type: [String], example: ['GoPro', 'Đà Lạt'] }) tags!: string[];
+  /** The share image override; its alt is the cover's, else the title. The web falls back to the cover. */
+  @ApiProperty({ type: PostImageDto, nullable: true }) ogImage!: PostImageDto | null;
+}
+
+type Images = Readonly<{ cover: MediaImage | null; og: MediaImage | null }>;
+
+/** Whitelist by construction (I10). */
+export function toPostImageDto(image: MediaImage | null, alt: string): PostImageDto | null {
+  if (!image) return null;
+  const variants = image.variants.map(({ width, height, url }) => ({ width, height, url }));
+  return { url: image.url, width: image.width, height: image.height, alt, variants };
+}
+
+export function coverImageOf(post: Post, images: Images): PostImageDto | null {
+  return toPostImageDto(images.cover, post.coverAlt ?? post.title);
+}
+
+export function ogImageOf(post: Post, images: Images): PostImageDto | null {
+  return toPostImageDto(images.og, post.coverAlt ?? post.title);
 }
 
 /** Whitelist by construction: only these fields reach the wire (I10). Callers pass published posts only. */
@@ -41,6 +64,7 @@ export function toPostSummaryDto(
   post: Post,
   author: PublicProfile,
   category: CategoryRef | null,
+  images: Images,
 ): PostSummaryDto {
   return {
     id: post.id,
@@ -51,6 +75,7 @@ export function toPostSummaryDto(
     updatedAt: post.updatedAt.toISOString(),
     author: { displayName: author.displayName, avatarUrl: author.avatarUrl },
     category: category?.status === 'active' ? { slug: category.slug, label: category.label } : null,
+    coverImage: coverImageOf(post, images),
   };
 }
 
@@ -58,8 +83,9 @@ export function toPostDto(
   post: Post,
   author: PublicProfile,
   category: CategoryRef | null,
+  images: Images,
 ): PostDto {
-  const summary = toPostSummaryDto(post, author, category);
+  const summary = toPostSummaryDto(post, author, category, images);
   return {
     id: summary.id,
     slug: summary.slug,
@@ -69,12 +95,14 @@ export function toPostDto(
     updatedAt: summary.updatedAt,
     author: summary.author,
     category: summary.category,
+    coverImage: summary.coverImage,
     language: post.language,
     body: post.body,
     bodyVersion: post.bodyVersion,
     seoTitle: post.seoTitle,
     seoDescription: post.seoDescription,
     tags: [...post.tags],
+    ogImage: ogImageOf(post, images),
   };
 }
 

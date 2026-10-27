@@ -118,6 +118,8 @@ describe('Authoring posts (/admin/posts)', () => {
             label: 'Du lịch',
             status: 'active',
           },
+          coverImage: null,
+          ogImage: null,
           createdAt: expect.stringMatching(ISO),
         },
       });
@@ -301,6 +303,8 @@ describe('Authoring posts (/admin/posts)', () => {
           label: 'Du lịch',
           status: 'active',
         },
+        coverImage: null,
+        ogImage: null,
       });
       expect(own.body.data.pageInfo).toEqual({
         page: 1,

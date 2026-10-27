@@ -102,6 +102,7 @@ describe('Public posts (/posts)', () => {
               updatedAt: expect.stringMatching(ISO),
               author: { displayName: 'Xuân', avatarUrl: 'https://lh3.googleusercontent.com/a/x' },
               category: { slug: 'du-lich', label: 'Du lịch' },
+              coverImage: null,
             },
             {
               id: older,
@@ -112,6 +113,7 @@ describe('Public posts (/posts)', () => {
               updatedAt: expect.stringMatching(ISO),
               author: { displayName: 'Xuân', avatarUrl: 'https://lh3.googleusercontent.com/a/x' },
               category: { slug: 'du-lich', label: 'Du lịch' },
+              coverImage: null,
             },
           ],
           pageInfo: { page: 1, pageSize: 12, totalItems: 2, totalPages: 1 },
@@ -171,6 +173,8 @@ describe('Public posts (/posts)', () => {
           updatedAt: expect.stringMatching(ISO),
           tags: [],
           category: { slug: 'du-lich', label: 'Du lịch' },
+          coverImage: null,
+          ogImage: null,
         },
       });
     });
