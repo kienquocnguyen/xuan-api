@@ -1,5 +1,12 @@
 import sharp from 'sharp';
-import { ImageRejectedError, sniffImageType, toWebpVariants } from './image-processing.js';
+import {
+  createLimiter,
+  ImageRejectedError,
+  imagePipelines,
+  MAX_CONCURRENT_PIPELINES,
+  sniffImageType,
+  toWebpVariants,
+} from './image-processing.js';
 
 const solid = (width: number, height: number) =>
   sharp({ create: { width, height, channels: 3, background: '#c33' } });
@@ -95,6 +102,73 @@ describe('image processing (blog completion spec §5.1)', () => {
     ])('rejects %s', async (_name, make) => {
       await expect(toWebpVariants(await make())).rejects.toBeInstanceOf(ImageRejectedError);
     });
+  });
+});
+
+// Memory is bounded by how many re-encodes run at once, not by one upload (measured: workflow ledger).
+describe('bounded image pipelines', () => {
+  const deferred = () => {
+    let resolve!: () => void;
+    let reject!: (error: Error) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+  const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+  it('runs at most its limit at once, in arrival order, and frees a slot when a task fails', async () => {
+    const limiter = createLimiter(2);
+    const tasks = [deferred(), deferred(), deferred(), deferred()];
+    const started: number[] = [];
+    const results = tasks.map((task, i) =>
+      limiter.run(async () => {
+        started.push(i);
+        await task.promise;
+        return i;
+      }),
+    );
+    await tick();
+    expect(started).toEqual([0, 1]);
+    expect([limiter.active, limiter.waiting]).toEqual([2, 2]);
+
+    tasks[1].reject(new Error('decode failed'));
+    await expect(results[1]).rejects.toThrow('decode failed');
+    await tick();
+    expect(started).toEqual([0, 1, 2]);
+
+    tasks[0].resolve();
+    tasks[2].resolve();
+    tasks[3].resolve();
+    expect(await Promise.all([results[0], results[2], results[3]])).toEqual([0, 2, 3]);
+    expect([limiter.active, limiter.waiting]).toEqual([0, 0]);
+  });
+
+  it('shares one limit across uploads; refusals never wait for a slot', async () => {
+    expect(MAX_CONCURRENT_PIPELINES).toBe(2);
+    const holds = [deferred(), deferred()];
+    const held = holds.map((hold) => imagePipelines.run(() => hold.promise));
+    await tick();
+    expect(imagePipelines.active).toBe(MAX_CONCURRENT_PIPELINES);
+
+    let done = false;
+    const valid = toWebpVariants(await solid(700, 500).png().toBuffer()).then((variants) => {
+      done = true;
+      return variants;
+    });
+    await expect(toWebpVariants(Buffer.from('not an image'))).rejects.toBeInstanceOf(
+      ImageRejectedError,
+    );
+    await expect(toWebpVariants(await animated())).rejects.toBeInstanceOf(ImageRejectedError);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(done).toBe(false); // the valid upload queues behind the held slots
+    expect(imagePipelines.waiting).toBe(1);
+
+    holds.forEach((hold) => hold.resolve());
+    await Promise.all(held);
+    expect((await valid).map(({ width }) => width)).toEqual([640]);
+    expect([imagePipelines.active, imagePipelines.waiting]).toEqual([0, 0]);
   });
 });
 
