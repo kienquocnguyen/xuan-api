@@ -5,8 +5,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
-# Yarn runtime/cache
-.yarn/
+# Yarn runtime/cache; the pinned release is committed (yarnPath)
+.yarn/*
+!.yarn/releases/
 .pnp.*
 
 # Environment
