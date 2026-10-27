@@ -198,6 +198,118 @@ describe('Commenting on posts (blog completion B4, spec §6.2)', () => {
     },
   );
 
+  describe('GET /posts/:slug/comments and /discussion/me', () => {
+    const insertComment = (userId: string, body: string, status = 'visible', at = 'now()') =>
+      db.query<{ id: string }[]>(
+        `INSERT INTO content_post_comments (post_id, user_id, body, status, moderated_by, moderated_at, created_at) VALUES ($1, $2, $3, $4::varchar, CASE WHEN $4::varchar = 'hidden' THEN $2::uuid END, CASE WHEN $4::varchar = 'hidden' THEN now() END, ${at}) RETURNING id`,
+        [postId, userId, body, status],
+      );
+
+    it('lists visible comments only, oldest first, 10 a page by default, publicly', async () => {
+      const [{ id: first }] = await insertComment(
+        reader.user.id,
+        'Một',
+        'visible',
+        "now() - interval '2 minutes'",
+      );
+      await insertComment(reader.user.id, 'Ẩn', 'hidden', "now() - interval '1 minute'");
+      await insertComment(reader.user.id, 'Xoá', 'deleted');
+      const [{ id: second }] = await insertComment(reader.user.id, 'Hai');
+      const res = await server().get('/posts/bai-viet/comments');
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        data: {
+          items: [
+            {
+              id: first,
+              body: 'Một',
+              createdAt: expect.stringMatching(ISO),
+              editedAt: null,
+              author: {
+                displayName: 'Bạn đọc',
+                avatarUrl: 'https://lh3.googleusercontent.com/a/r',
+              },
+            },
+            {
+              id: second,
+              body: 'Hai',
+              createdAt: expect.stringMatching(ISO),
+              editedAt: null,
+              author: {
+                displayName: 'Bạn đọc',
+                avatarUrl: 'https://lh3.googleusercontent.com/a/r',
+              },
+            },
+          ],
+          pageInfo: { page: 1, pageSize: 10, totalItems: 2, totalPages: 1 },
+        },
+      });
+      expect(JSON.stringify(res.body)).not.toContain(reader.user.id);
+      expect(JSON.stringify(res.body)).not.toContain('@example.com');
+      const paged = await server().get('/posts/bai-viet/comments?page=2&pageSize=1');
+      expect(paged.body.data.items.map((c: { id: string }) => c.id)).toEqual([second]);
+      for (const query of ['pageSize=51', 'pageSize=0', 'foo=1']) {
+        expect((await server().get(`/posts/bai-viet/comments?${query}`)).status).toBe(400);
+      }
+    });
+
+    it('answers 404 for comments of a draft, archived or unknown post', async () => {
+      await insertPost('nhap', 'draft');
+      await insertPost('luu-tru', 'archived');
+      for (const slug of ['nhap', 'luu-tru', 'khong-co']) {
+        const res = await server().get(`/posts/${slug}/comments`);
+        expect(res.status).toBe(404);
+        expect(res.body).toEqual(notFound);
+        const mine = await server()
+          .get(`/posts/${slug}/discussion/me`)
+          .set('Cookie', reader.cookie);
+        expect(mine.body).toEqual(notFound);
+      }
+    });
+
+    it('tells the reader their rating (any status) and their visible comments, newest first', async () => {
+      const empty = await server()
+        .get('/posts/bai-viet/discussion/me')
+        .set('Cookie', reader.cookie);
+      expect(empty.status).toBe(200);
+      expect(empty.body).toEqual({ data: { rating: null, ownCommentIds: [] } });
+      const [{ id: older }] = await insertComment(
+        reader.user.id,
+        'Cũ',
+        'visible',
+        "now() - interval '1 minute'",
+      );
+      const [{ id: newer }] = await insertComment(reader.user.id, 'Mới');
+      await insertComment(reader.user.id, 'Ẩn', 'hidden');
+      const other = await signInAs(app, { role: 'user' });
+      await insertComment(other.user.id, 'Người khác');
+      await db.query(
+        `INSERT INTO content_post_ratings (post_id, user_id, value, status, moderated_by, moderated_at) VALUES ($1, $2, 3, 'hidden', $2, now())`,
+        [postId, reader.user.id],
+      );
+      const mine = await server().get('/posts/bai-viet/discussion/me').set('Cookie', reader.cookie);
+      expect(mine.body).toEqual({ data: { rating: 3, ownCommentIds: [newer, older] } });
+      expect((await server().get('/posts/bai-viet/discussion/me')).status).toBe(401);
+    });
+
+    it('summarizes visible ratings on the public post DTOs (Review Focus 1)', async () => {
+      const raters = await Promise.all([1, 2, 3].map(() => signInAs(app, { role: 'user' })));
+      for (const [i, value] of [4, 4, 5].entries()) {
+        await db.query(
+          'INSERT INTO content_post_ratings (post_id, user_id, value) VALUES ($1, $2, $3)',
+          [postId, raters[i].user.id, value],
+        );
+      }
+      await db.query(
+        `INSERT INTO content_post_ratings (post_id, user_id, value, status, moderated_by, moderated_at) VALUES ($1, $2, 1, 'hidden', $2, now())`,
+        [postId, reader.user.id],
+      );
+      const summary = { average: 4.33, count: 3 };
+      expect((await server().get('/posts')).body.data.items[0].ratingSummary).toEqual(summary);
+      expect((await server().get('/posts/bai-viet')).body.data.ratingSummary).toEqual(summary);
+    });
+  });
+
   it('shares one write budget with ratings (Review Focus 3)', async () => {
     for (let i = 0; i < 3; i += 1) {
       expect(

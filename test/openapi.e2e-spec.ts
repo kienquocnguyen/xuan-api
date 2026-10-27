@@ -164,6 +164,7 @@ describe('OpenAPI document', () => {
       'get /posts',
       'get /posts/{slug}',
       'get /posts/{slug}/related',
+      'get /posts/{slug}/comments', // blog completion B4
       'get /post-categories',
       'get /courses',
       'get /courses/{slug}',
@@ -734,6 +735,7 @@ describe('OpenAPI document', () => {
           'excerpt',
           'id',
           'publishedAt',
+          'ratingSummary', // B4
           'slug',
           'title',
           'updatedAt',

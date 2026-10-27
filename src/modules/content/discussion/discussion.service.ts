@@ -11,6 +11,9 @@ import { PostComment } from './post-comment.entity.js';
 import { PostRating } from './post-rating.entity.js';
 
 export type CommentView = Readonly<{ comment: PostComment; author: PublicProfile }>;
+export type MyDiscussion = Readonly<{ rating: number | null; ownCommentIds: string[] }>;
+
+const OWN_COMMENT_IDS_LIMIT = 500;
 
 /** Reader discussion on published posts (blog completion spec §6.2): ratings and comments, always as the session user. */
 @Injectable()
@@ -60,6 +63,43 @@ export class DiscussionService {
     const comment = await this.ownComment(actor, id);
     if (comment.status === 'deleted') return;
     await this.comments.update({ id }, { status: 'deleted' });
+  }
+
+  /** Visible comments of a published post, oldest first; authors in one query. */
+  async listVisible(
+    slug: string,
+    { page, pageSize }: Readonly<{ page: number; pageSize: number }>,
+  ): Promise<Readonly<{ items: CommentView[]; totalItems: number }>> {
+    const postId = await this.posts.findPublishedId(slug);
+    const [rows, totalItems] = await this.comments.findAndCount({
+      where: { postId, status: 'visible' },
+      order: { createdAt: 'ASC', id: 'ASC' },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+    });
+    const profiles = await this.profiles.findPublicProfiles(rows.map((row) => row.userId));
+    const byId = new Map(profiles.map((profile) => [profile.id, profile]));
+    const items = rows.map((comment) => {
+      const author = byId.get(comment.userId);
+      if (!author)
+        throw new Error('Comment author missing despite fk_content_post_comments_user_id.');
+      return { comment, author };
+    });
+    return { items, totalItems };
+  }
+
+  async mine(actor: AuthenticatedUser, slug: string): Promise<MyDiscussion> {
+    const postId = await this.posts.findPublishedId(slug);
+    const [rating, own] = await Promise.all([
+      this.ratings.findOne({ select: { value: true }, where: { postId, userId: actor.id } }),
+      this.comments.find({
+        select: { id: true },
+        where: { postId, userId: actor.id, status: 'visible' },
+        order: { createdAt: 'DESC', id: 'DESC' },
+        take: OWN_COMMENT_IDS_LIMIT,
+      }),
+    ]);
+    return { rating: rating?.value ?? null, ownCommentIds: own.map((comment) => comment.id) };
   }
 
   /** Missing, or on a post that isn't published → 404 (no existence leak); someone else's → 403. */

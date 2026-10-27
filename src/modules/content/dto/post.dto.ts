@@ -1,6 +1,7 @@
 import { ApiProperty, getSchemaPath } from '@nestjs/swagger';
 import type { PublicProfile } from '../../users/user-profiles.reader.js';
 import type { CategoryRef } from '../categories.service.js';
+import type { RatingSummary } from '../discussion/rating-summaries.js';
 import type { MediaImage } from '../media/media.service.js';
 import { PostImageDto } from './media.dto.js';
 import { PostCategoryRefDto } from './category.dto.js';
@@ -11,6 +12,12 @@ import type { Post } from '../post.entity.js';
 export class PostAuthorDto {
   @ApiProperty() displayName!: string;
   @ApiProperty({ type: String, nullable: true, format: 'uri' }) avatarUrl!: string | null;
+}
+
+export class RatingSummaryDto {
+  /** Rounded to 2 decimals; `null` without visible ratings. */
+  @ApiProperty({ type: Number, nullable: true, example: 4.33 }) average!: number | null;
+  @ApiProperty({ example: 3 }) count!: number;
 }
 
 /** A published post in the public list. */
@@ -27,6 +34,8 @@ export class PostSummaryDto {
   @ApiProperty({ type: PostCategoryRefDto, nullable: true }) category!: PostCategoryRefDto | null;
   /** Blog completion B3 (spec §5.4). */
   @ApiProperty({ type: PostImageDto, nullable: true }) coverImage!: PostImageDto | null;
+  /** Blog completion B4 (spec §6.2): visible ratings only. */
+  @ApiProperty({ type: RatingSummaryDto }) ratingSummary!: RatingSummaryDto;
 }
 
 /** A published post, read by slug. */
@@ -43,6 +52,7 @@ export class PostDto extends PostSummaryDto {
 }
 
 type Images = Readonly<{ cover: MediaImage | null; og: MediaImage | null }>;
+type PublicExtras = Images & Readonly<{ rating: RatingSummary }>;
 
 /** Whitelist by construction (I10). */
 export function toPostImageDto(image: MediaImage | null, alt: string): PostImageDto | null {
@@ -64,7 +74,7 @@ export function toPostSummaryDto(
   post: Post,
   author: PublicProfile,
   category: CategoryRef | null,
-  images: Images,
+  images: PublicExtras,
 ): PostSummaryDto {
   return {
     id: post.id,
@@ -76,6 +86,7 @@ export function toPostSummaryDto(
     author: { displayName: author.displayName, avatarUrl: author.avatarUrl },
     category: category?.status === 'active' ? { slug: category.slug, label: category.label } : null,
     coverImage: coverImageOf(post, images),
+    ratingSummary: { average: images.rating.average, count: images.rating.count },
   };
 }
 
@@ -83,7 +94,7 @@ export function toPostDto(
   post: Post,
   author: PublicProfile,
   category: CategoryRef | null,
-  images: Images,
+  images: PublicExtras,
 ): PostDto {
   const summary = toPostSummaryDto(post, author, category, images);
   return {
@@ -96,6 +107,7 @@ export function toPostDto(
     author: summary.author,
     category: summary.category,
     coverImage: summary.coverImage,
+    ratingSummary: summary.ratingSummary,
     language: post.language,
     body: post.body,
     bodyVersion: post.bodyVersion,

@@ -1,16 +1,31 @@
-import { Body, Controller, Delete, HttpCode, Param, Post, Put, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Put,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiNoContentResponse, ApiTags } from '@nestjs/swagger';
 import { baselineErrors } from '../../../errors/baseline-errors.js';
-import { CurrentUser } from '../../../http/auth/auth.decorators.js';
+import { CurrentUser, Public } from '../../../http/auth/auth.decorators.js';
 import type { AuthenticatedUser } from '../../../http/auth/role.js';
 import { ApiEnvelopeResponse } from '../../../http/openapi/api-envelope-response.js';
 import { ApiErrorResponses } from '../../../http/openapi/api-error-responses.js';
+import { ApiPaginatedEnvelopeResponse } from '../../../http/openapi/api-paginated-envelope-response.js';
 import { ApiSchemaParameters } from '../../../http/openapi/api-schema-parameters.js';
+import { type Page, toPageInfo } from '../../../http/pagination/page.js';
 import { contentErrors } from '../content.errors.js';
-import { PostCommentDto, toPostCommentDto } from '../dto/discussion.dto.js';
+import { MyPostDiscussionDto, PostCommentDto, toPostCommentDto } from '../dto/discussion.dto.js';
 import {
   type PostCommentIdParam,
   postCommentIdParamSchema,
+  type PostCommentsQuery,
+  postCommentsQuerySchema,
   type SavePostCommentInput,
   savePostCommentSchema,
   type SavePostRatingInput,
@@ -26,6 +41,33 @@ const { VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, RATE_LIMITED }
 @Controller('posts')
 export class DiscussionController {
   constructor(private readonly discussion: DiscussionService) {}
+
+  @Get(':slug/comments')
+  @Public()
+  @ApiSchemaParameters('query', postCommentsQuerySchema)
+  @ApiPaginatedEnvelopeResponse(PostCommentDto)
+  @ApiErrorResponses(VALIDATION_FAILED, NOT_FOUND)
+  async comments(
+    @Param('slug') slug: string,
+    @Query({ schema: postCommentsQuerySchema }) query: PostCommentsQuery,
+  ): Promise<Page<PostCommentDto>> {
+    const { items, totalItems } = await this.discussion.listVisible(slug, query);
+    return {
+      items: items.map(({ comment, author }) => toPostCommentDto(comment, author)),
+      pageInfo: toPageInfo(query.page, query.pageSize, totalItems),
+    };
+  }
+
+  @Get(':slug/discussion/me')
+  @ApiEnvelopeResponse(MyPostDiscussionDto)
+  @ApiErrorResponses(UNAUTHENTICATED, NOT_FOUND)
+  async mine(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('slug') slug: string,
+  ): Promise<MyPostDiscussionDto> {
+    const { rating, ownCommentIds } = await this.discussion.mine(actor, slug);
+    return { rating, ownCommentIds: [...ownCommentIds] };
+  }
 
   @Put(':slug/rating')
   @HttpCode(204)

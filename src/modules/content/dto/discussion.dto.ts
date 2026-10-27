@@ -13,6 +13,14 @@ export class PostCommentDto {
   @ApiProperty({ type: PostAuthorDto }) author!: PostAuthorDto;
 }
 
+/** The signed-in reader's own discussion on a post, so the web can show edit/delete (spec §6.2). */
+export class MyPostDiscussionDto {
+  /** Their rating in any status (a hidden one still shows to its author). */
+  @ApiProperty({ type: Number, nullable: true, example: 4 }) rating!: number | null;
+  /** Their visible comments, newest first, at most 500. */
+  @ApiProperty({ type: [String], format: 'uuid' }) ownCommentIds!: string[];
+}
+
 /** Whitelist by construction (I10). */
 export function toPostCommentDto(comment: PostComment, author: PublicProfile): PostCommentDto {
   return {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { pageQueryFields } from '../../../http/pagination/page.js';
 import { isStorableText, STORABLE_TEXT_MESSAGE } from '../../../http/validation/storable-text.js';
 
 /** A 1–5 star rating (blog completion spec §6.2). */
@@ -26,6 +27,15 @@ export const savePostCommentSchema = z
   .strictObject({ body: commentBody })
   .meta({ id: 'SavePostCommentDto' });
 export type SavePostCommentInput = z.infer<typeof savePostCommentSchema>;
+
+/** Readers page through a post's visible comments, 10 at a time by default (spec §6.2). */
+export const postCommentsQuerySchema = z
+  .strictObject({
+    page: pageQueryFields.page,
+    pageSize: z.coerce.number().int().min(1).max(50).default(10),
+  })
+  .meta({ id: 'PostCommentsQuery' });
+export type PostCommentsQuery = z.infer<typeof postCommentsQuerySchema>;
 
 export const postCommentIdParamSchema = z
   .strictObject({ commentId: z.uuid() })

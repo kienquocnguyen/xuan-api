@@ -21,6 +21,7 @@ import {
 } from './discussion/discussion.controller.js';
 import { DiscussionService } from './discussion/discussion.service.js';
 import { DISCUSSION_LIMITS } from './discussion/discussion-throttle.guard.js';
+import { RatingSummaries } from './discussion/rating-summaries.js';
 import { Post } from './post.entity.js';
 import { PostsController } from './posts.controller.js';
 import { PostsService } from './posts.service.js';
@@ -53,6 +54,7 @@ import { PostsService } from './posts.service.js';
   providers: [
     PostsService,
     DiscussionService,
+    RatingSummaries,
     CategoriesService,
     MediaService,
     // The storage gateway is chosen from config (C5, blog completion spec §5.3).
