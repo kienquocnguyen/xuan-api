@@ -244,6 +244,7 @@ The **actual, decided schema**, so the current database can be understood at a g
 | `lesson_progress` | **implemented** 2026-10-19 by migration `CreateLessonProgress1792393991146` (map owner-approved with the plan, Checkpoint M). Owner-approved runs: `xuan_test` (Checkpoint A: guarded run, revert/run round trip, empty second generate) and `xuan_dev` (Checkpoint D: empty second generate; the other tables' schema, rows and contents unchanged; no progress rows created); `\d+` matches this map on both, byte-identical; invariants proven by `test/courses-schema.e2e-spec.ts` | `courses` (entity `LessonProgress`) | `docs/superpowers/plans/2026-10-19-course-progress.md`, Task 1 |
 | `content_categories`, `content_category_translations` (+ `content_posts.category_id`) | migration `CreatePostCategories1792424947762` (blog completion B2, BD-3); map recorded under the bounded autonomous execution row (workflow §3.5). **Implemented on `xuan_test` only** (2026-10-19: guarded run, `\d+` matches this map, revert/run round trip, empty second generate); invariants proven by `test/content-categories-schema.e2e-spec.ts`. **`xuan_dev` pending in the consolidated owner packet** (protected: B1 is still pending there, and B2 adds an FK to an existing table) | `content` (entities `ContentCategory`, `ContentCategoryTranslation`) | `docs/superpowers/plans/2026-10-19-post-categories.md`, Task 1 |
 | `content_media` (+ `content_posts.cover_media_id`, `cover_alt`, `og_media_id`; `body_version` IN (1, 2)) | migration `AddPostMedia1792426532193` (blog completion B3, BD-4/5/10); map recorded under the bounded autonomous execution row (workflow §3.5). **Implemented on `xuan_test` only** (2026-10-27: guarded run, `\d+` matches this map, revert/run round trip, empty second generate); invariants proven by `test/content-media-schema.e2e-spec.ts` and `test/content-posts-schema.e2e-spec.ts`. **`xuan_dev` pending in the consolidated owner packet** (protected: B1 and B2 are still pending there, and B3 adds FKs and a CHECK to an existing table and widens one) | `content` (entity `ContentMedia`) | `docs/superpowers/plans/2026-10-19-post-media.md`, Task 1 |
+| `content_post_ratings`, `content_post_comments` | **decided** 2026-10-27 (blog completion B4, BD-6/7/8, Q2); map recorded under the bounded autonomous execution row (workflow §3.5) | `content` (entities `PostRating`, `PostComment`) | `docs/superpowers/plans/2026-10-27-post-discussion.md`, Task 1 |
 
 #### `services`
 
@@ -504,6 +505,79 @@ erDiagram
 | `variant_widths` | `smallint[]` | yes | — | **CK** `ck_content_media_variant_widths_not_empty`: `cardinality(variant_widths) >= 1` | Which `<key>-<width>.webp` files exist (640/1280/1920, or one smaller width) |
 | `byte_size` | `integer` | yes | — | **CK** `ck_content_media_byte_size_positive`: `byte_size > 0` | Total stored bytes, for a later cleanup or quota |
 | `created_at` | `timestamptz` | yes | `now()` | — | No `updated_at`: the row never changes (D27) |
+
+#### `content_post_ratings`, `content_post_comments`
+
+Reader discussion on published posts (blog completion spec §6, BD-6/7/8, Q2), owned by `content`. Ratings and comments are **independent**: either exists without the other. Rows are never hard-deleted in V1; moderation and the author's own deletion change `status`.
+
+**Invariants:** one rating per user per post, whatever its status; a rating is 1–5; a comment is never blank; moderation records who **and** when, or neither.
+
+```mermaid
+erDiagram
+    content_posts ||--o{ content_post_ratings : "rated"
+    content_posts ||--o{ content_post_comments : "discussed"
+    users ||--o{ content_post_ratings : "rates / moderates"
+    users ||--o{ content_post_comments : "writes / moderates"
+    content_post_ratings {
+        uuid id PK "pk_content_post_ratings · DEFAULT uuidv7()"
+        uuid post_id FK "fk_content_post_ratings_post_id → content_posts · RESTRICT"
+        uuid user_id FK "fk_content_post_ratings_user_id → users · RESTRICT"
+        smallint value "required · CK 1–5"
+        varchar_16 status "required · DEFAULT 'visible' · CK visible|hidden"
+        uuid moderated_by FK "nullable · fk_content_post_ratings_moderated_by → users · RESTRICT"
+        timestamptz moderated_at "nullable · CK pair with moderated_by"
+        timestamptz created_at "required · DEFAULT now()"
+        timestamptz updated_at "required · DEFAULT now()"
+    }
+    content_post_comments {
+        uuid id PK "pk_content_post_comments · DEFAULT uuidv7()"
+        uuid post_id FK "fk_content_post_comments_post_id → content_posts · RESTRICT"
+        uuid user_id FK "fk_content_post_comments_user_id → users · RESTRICT"
+        varchar_2000 body "required · CK not blank"
+        varchar_16 status "required · DEFAULT 'visible' · CK visible|hidden|deleted"
+        timestamptz edited_at "nullable"
+        uuid moderated_by FK "nullable · fk_content_post_comments_moderated_by → users · RESTRICT"
+        timestamptz moderated_at "nullable · CK pair with moderated_by"
+        timestamptz created_at "required · DEFAULT now()"
+        timestamptz updated_at "required · DEFAULT now()"
+    }
+```
+
+**`content_post_ratings`:**
+
+| Column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_content_post_ratings` | D26 |
+| `post_id` | `uuid` | yes | — | **FK** `fk_content_post_ratings_post_id` → `content_posts(id)` `ON DELETE RESTRICT`; served by the unique below | A post with discussion is never deleted (only never-published drafts are, §3.1) |
+| `user_id` | `uuid` | yes | — | **FK** `fk_content_post_ratings_user_id` → `users(id)` `ON DELETE RESTRICT` (by entity name, AD14); **IX** `ix_content_post_ratings_user_id` | The rater; "my rating" and a later account export |
+| `value` | `smallint` | yes | — | **CK** `ck_content_post_ratings_value`: `value BETWEEN 1 AND 5` | Stars |
+| `status` | `varchar(16)` | yes | `'visible'` | **CK** `ck_content_post_ratings_status`: `status IN ('visible', 'hidden')` | Ratings are hidden and restored, never deleted (Q2); hidden ones leave the summary |
+| `moderated_by` | `uuid` | no | — | **FK** `fk_content_post_ratings_moderated_by` → `users(id)` `ON DELETE RESTRICT` | The admin of the last real transition. No index: nothing queries by moderator, and users are never deleted in V1 |
+| `moderated_at` | `timestamptz` | no | — | **CK** `ck_content_post_ratings_moderation_pair`: `(moderated_by IS NULL) = (moderated_at IS NULL)` | Who and when travel together |
+| `created_at`, `updated_at` | `timestamptz` | yes | `now()` | — | D27; `updated_at` moves on a re-rating and on a real transition only |
+
+| Key | Kind | Columns | Why |
+|---|---|---|---|
+| `uq_content_post_ratings_post_id_user_id` | UNIQUE | `(post_id, user_id)` | One per user per post **regardless of status** (BD-6); the upsert's named target (D32); leads with `post_id`, so it serves the summary and the post FK |
+
+**`content_post_comments`:**
+
+| Column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_content_post_comments` | D26 |
+| `post_id` | `uuid` | yes | — | **FK** `fk_content_post_comments_post_id` → `content_posts(id)` `ON DELETE RESTRICT`; served by the list index below | As ratings |
+| `user_id` | `uuid` | yes | — | **FK** `fk_content_post_comments_user_id` → `users(id)` `ON DELETE RESTRICT`; **IX** `ix_content_post_comments_user_id` | The author; "my comments" |
+| `body` | `varchar(2000)` | yes | — | **CK** `ck_content_post_comments_body_not_blank`: `body ~ '[^[:space:]]'` (at least one non-whitespace character; `btrim()` alone strips spaces only, so a body of newlines would pass) | Plain text. The API trims, normalizes `\r\n` and counts code points; `varchar(n)` counts characters too |
+| `status` | `varchar(16)` | yes | `'visible'` | **CK** `ck_content_post_comments_status`: `status IN ('visible', 'hidden', 'deleted')` | `deleted` is terminal for everyone (Q2) |
+| `edited_at` | `timestamptz` | no | — | — | Set by the author's edit only, never by moderation |
+| `moderated_by`, `moderated_at` | `uuid`, `timestamptz` | no | — | **FK** `fk_content_post_comments_moderated_by` → `users(id)` `ON DELETE RESTRICT`; **CK** `ck_content_post_comments_moderation_pair` | As ratings |
+| `created_at`, `updated_at` | `timestamptz` | yes | `now()` | — | D27 |
+
+| Key | Kind | Columns | Why |
+|---|---|---|---|
+| `ix_content_post_comments_post_id_status_created_at_id` | INDEX | `(post_id, status, created_at, id)` | The public list: a post's visible comments, oldest first, with a stable tie-break; also the post FK index |
+
+**B4 migration safety:** two new tables and their indexes and FKs; no existing row or constraint changes. On `xuan_dev` it is still **protected** while B1–B3 are pending there (workflow §3.5). `down()` drops both tables, discarding any discussion (a deliberate, documented loss; roll forward once discussion exists, C9).
 
 #### `courses`, `course_sections`, `course_lessons`
 

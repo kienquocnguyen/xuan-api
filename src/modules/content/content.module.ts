@@ -12,6 +12,8 @@ import { ContentCategory, ContentCategoryTranslation } from './category.entity.j
 import { ContentMedia } from './media/media.entity.js';
 import { MediaService } from './media/media.service.js';
 import { createMediaStorage, MEDIA_STORAGE } from './media/media-storage.js';
+import { PostComment } from './discussion/post-comment.entity.js';
+import { PostRating } from './discussion/post-rating.entity.js';
 import { Post } from './post.entity.js';
 import { PostsController } from './posts.controller.js';
 import { PostsService } from './posts.service.js';
@@ -19,7 +21,14 @@ import { PostsService } from './posts.service.js';
 @Module({
   // The content tables' only registration (I1). UsersModule: for its exported UserProfilesReader (AD14).
   imports: [
-    TypeOrmModule.forFeature([Post, ContentCategory, ContentCategoryTranslation, ContentMedia]),
+    TypeOrmModule.forFeature([
+      Post,
+      ContentCategory,
+      ContentCategoryTranslation,
+      ContentMedia,
+      PostRating,
+      PostComment,
+    ]),
     UsersModule,
     AppConfigModule,
   ],
