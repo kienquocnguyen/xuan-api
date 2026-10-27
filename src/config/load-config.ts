@@ -71,7 +71,10 @@ type Env = z.infer<typeof envSchema>;
 
 function mediaConfig(env: Env): AppConfig['media'] {
   const storage = env.MEDIA_STORAGE ?? 'local'; // production always sets it (schema)
-  if (storage === 'disabled') return { storage, publicBaseUrl: null, localDir: null, r2: null };
+  if (storage === 'disabled') {
+    // Uploads stop, reading doesn't: a server switched off r2 keeps resolving the media its posts use.
+    return { storage, publicBaseUrl: env.MEDIA_PUBLIC_BASE_URL ?? null, localDir: null, r2: null };
+  }
   if (storage === 'r2') {
     return {
       storage,
