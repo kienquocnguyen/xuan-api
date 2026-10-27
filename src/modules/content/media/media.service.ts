@@ -54,17 +54,18 @@ export class MediaService {
       ),
     );
     const largest = variants[variants.length - 1];
-    const row = await this.media.save(
-      this.media.create({
-        uploaderId: actor.id,
-        storageKey,
-        width: largest.width,
-        height: largest.height,
-        variantWidths: variants.map((variant) => variant.width),
-        byteSize: variants.reduce((sum, variant) => sum + variant.data.length, 0),
-      }),
-    );
-    const image = this.toImage(row);
+    const row = {
+      storageKey,
+      width: largest.width,
+      height: largest.height,
+      variantWidths: variants.map((variant) => variant.width),
+    };
+    const result = await this.media.insert({
+      ...row,
+      uploaderId: actor.id,
+      byteSize: variants.reduce((sum, variant) => sum + variant.data.length, 0),
+    });
+    const image = this.toImage({ ...row, id: (result.identifiers[0] as { id: string }).id });
     if (!image) throw new Error('Stored media without a public base URL.');
     return image;
   }
