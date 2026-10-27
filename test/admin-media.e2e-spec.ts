@@ -142,6 +142,23 @@ describe('Uploading images (POST /admin/media/images, blog completion B3)', () =
     expect(await db.query('SELECT 1 FROM content_media')).toEqual([]);
   });
 
+  it('answers every upload of a concurrent burst predictably (bounded pipelines)', async () => {
+    const valid = await Promise.all(
+      [700, 800, 900, 1000, 1100].map((width) => solid(width, 600).jpeg().toBuffer()),
+    );
+    const responses = await Promise.all([
+      ...valid.map((file) => upload(file)),
+      upload(Buffer.from('hello'), editor.cookie, 'a.jpg'),
+      upload(await solid(7000, 10).png().toBuffer(), editor.cookie, 'big.png'),
+    ]);
+    expect(responses.map((res) => res.status)).toEqual([201, 201, 201, 201, 201, 400, 400]);
+    expect(responses.slice(5).map((res) => res.body)).toEqual([invalidFile, invalidFile]);
+    const ids = new Set(responses.slice(0, 5).map((res) => res.body.data.id as string));
+    expect(ids.size).toBe(5);
+    expect(await db.query('SELECT 1 FROM content_media')).toHaveLength(5);
+    expect(await storedFiles()).toHaveLength(5); // one 640 variant each
+  });
+
   it('answers 413 above 12 MiB', async () => {
     const res = await upload(Buffer.alloc(12 * 1024 * 1024 + 1, 0xff));
     expect(res.status).toBe(413);

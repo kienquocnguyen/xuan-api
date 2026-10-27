@@ -65,18 +65,64 @@ export async function toWebpVariants(input: Buffer): Promise<WebpVariant[]> {
   }
   const widths = VARIANT_WIDTHS.filter((candidate) => candidate <= width);
   const targets = widths.length > 0 ? widths : [width];
-  try {
-    return await Promise.all(
-      targets.map(async (target) => {
+  // Refusals above never wait; only the re-encode takes a slot, and its widths run one after another.
+  return imagePipelines.run(async () => {
+    const variants: WebpVariant[] = [];
+    try {
+      for (const target of targets) {
         const { data, info } = await open()
           .rotate()
           .resize({ width: target, withoutEnlargement: true })
           .webp({ quality: WEBP_QUALITY })
           .toBuffer({ resolveWithObject: true });
-        return { width: info.width, height: info.height, data };
-      }),
-    );
-  } catch {
-    throw new ImageRejectedError('Unreadable image.');
-  }
+        variants.push({ width: info.width, height: info.height, data });
+      }
+    } catch {
+      throw new ImageRejectedError('Unreadable image.');
+    }
+    return variants;
+  });
 }
+
+export type Limiter = Readonly<{
+  run<T>(task: () => Promise<T>): Promise<T>;
+  readonly active: number;
+  readonly waiting: number;
+}>;
+
+/** At most `max` tasks at once; the rest wait in arrival order. A failed task frees its slot like any other. */
+export function createLimiter(max: number): Limiter {
+  let active = 0;
+  const queue: (() => void)[] = [];
+  // A freed slot passes straight to the next waiter, so an arrival in between can't take it as well.
+  const release = () => {
+    const next = queue.shift();
+    if (next) next();
+    else active -= 1;
+  };
+  return {
+    async run<T>(task: () => Promise<T>): Promise<T> {
+      if (active >= max) await new Promise<void>((resolve) => queue.push(resolve));
+      else active += 1;
+      try {
+        return await task();
+      } finally {
+        release();
+      }
+    },
+    get active() {
+      return active;
+    },
+    get waiting() {
+      return queue.length;
+    },
+  };
+}
+
+/**
+ * Re-encodes running at once in this process. Peak memory grows with concurrent re-encodes, not with one upload:
+ * measured on a 36 MP noisy PNG, one upload's three widths took ~235 MB in parallel and ~87 MB one after another,
+ * and four parallel uploads ~300–350 MB either way. Two keeps the worst case near 175 MB.
+ */
+export const MAX_CONCURRENT_PIPELINES = 2;
+export const imagePipelines = createLimiter(MAX_CONCURRENT_PIPELINES);
