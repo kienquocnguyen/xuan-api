@@ -36,6 +36,12 @@ describe('loadConfig', () => {
         sessionTtlDays: 7,
         adminEmails: ['owner@example.com', 'second@example.com'],
       },
+      media: {
+        storage: 'local',
+        publicBaseUrl: 'http://localhost:4000/media',
+        localDir: 'storage/media',
+        r2: null,
+      },
     });
   });
 
@@ -106,5 +112,86 @@ describe('loadConfig', () => {
     rmSync('.env.precedence-probe');
     expect(process.env.PROBE_VAR).toBe('from-process'); // if this fails, the file overrides real env: record it in architecture.md §16
     delete process.env.PROBE_VAR;
+  });
+
+  describe('media storage (blog completion spec §5.3, owner Q1)', () => {
+    const production = {
+      ...valid,
+      NODE_ENV: 'production',
+      AUTH_COOKIE_SECURE: 'true',
+      GOOGLE_CALLBACK_URL: 'https://api.xuancreative.com/auth/google/callback',
+    };
+    const r2 = {
+      MEDIA_STORAGE: 'r2',
+      MEDIA_PUBLIC_BASE_URL: 'https://media.xuancreative.com',
+      R2_ACCOUNT_ID: 'account-id',
+      R2_ACCESS_KEY_ID: 'r2-key-id',
+      R2_SECRET_ACCESS_KEY: 'r2-s3cret-value',
+      R2_BUCKET: 'xuan-media',
+    };
+    const failureOf = (env: Record<string, string>) => {
+      try {
+        loadConfig(env);
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConfigError);
+        return (error as Error).message;
+      }
+      throw new Error('expected a ConfigError');
+    };
+
+    it('uses a separate local folder for tests', () => {
+      expect(loadConfig({ ...valid, NODE_ENV: 'test' }).media).toEqual({
+        storage: 'local',
+        publicBaseUrl: 'http://localhost:4000/media',
+        localDir: 'storage/media-test',
+        r2: null,
+      });
+    });
+
+    it('requires an explicit choice in production and never local disk', () => {
+      expect(failureOf(production)).toContain('MEDIA_STORAGE');
+      expect(failureOf({ ...production, MEDIA_STORAGE: 'local' })).toContain('MEDIA_STORAGE');
+    });
+
+    it('starts production with uploads switched off, needing no R2 values', () => {
+      expect(loadConfig({ ...production, MEDIA_STORAGE: 'disabled' }).media).toEqual({
+        storage: 'disabled',
+        publicBaseUrl: null,
+        localDir: null,
+        r2: null,
+      });
+    });
+
+    it('configures R2 with an https base URL and never prints a secret', () => {
+      expect(loadConfig({ ...production, ...r2 }).media).toEqual({
+        storage: 'r2',
+        publicBaseUrl: 'https://media.xuancreative.com',
+        localDir: null,
+        r2: {
+          accountId: 'account-id',
+          accessKeyId: 'r2-key-id',
+          secretAccessKey: 'r2-s3cret-value',
+          bucket: 'xuan-media',
+        },
+      });
+      const missing = failureOf({ ...production, MEDIA_STORAGE: 'r2', R2_SECRET_ACCESS_KEY: 'x' });
+      for (const name of [
+        'MEDIA_PUBLIC_BASE_URL',
+        'R2_ACCOUNT_ID',
+        'R2_ACCESS_KEY_ID',
+        'R2_BUCKET',
+      ]) {
+        expect(missing).toContain(name);
+      }
+      const insecure = failureOf({ ...production, ...r2, MEDIA_PUBLIC_BASE_URL: 'http://media.x' });
+      expect(insecure).toContain('MEDIA_PUBLIC_BASE_URL');
+      expect(insecure).not.toContain('r2-s3cret-value');
+    });
+
+    it('rejects a base URL with a trailing slash', () => {
+      expect(
+        failureOf({ ...valid, MEDIA_PUBLIC_BASE_URL: 'http://localhost:4000/media/' }),
+      ).toContain('MEDIA_PUBLIC_BASE_URL');
+    });
   });
 });

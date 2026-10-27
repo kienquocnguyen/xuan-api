@@ -62,4 +62,24 @@ export const contentErrors = {
     kind: 'conflict',
     message: 'A published post needs a category.',
   },
+  MEDIA_STORAGE_DISABLED: {
+    code: 'MEDIA_STORAGE_DISABLED',
+    kind: 'conflict',
+    message: 'Image uploads are switched off on this server.',
+  },
+  POST_MEDIA_NOT_FOUND: {
+    code: 'POST_MEDIA_NOT_FOUND',
+    kind: 'conflict',
+    message: "The chosen image doesn't exist.",
+  },
+  POST_MEDIA_INCOMPLETE: {
+    code: 'POST_MEDIA_INCOMPLETE',
+    kind: 'conflict',
+    message: 'Finish the before/after images first.',
+  },
+  POST_BODY_VERSION_UNSUPPORTED: {
+    code: 'POST_BODY_VERSION_UNSUPPORTED',
+    kind: 'conflict',
+    message: 'This post needs an editor that supports body version 2.',
+  },
 } as const satisfies Record<string, ErrorDefinition>;

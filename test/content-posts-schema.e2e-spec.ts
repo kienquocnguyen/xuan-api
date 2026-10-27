@@ -90,7 +90,7 @@ describe('content_posts invariants', () => {
     ['ck_content_posts_body_is_doc', { body: '[]' }],
     ['ck_content_posts_body_is_doc', { body: '"doc"' }],
     ['ck_content_posts_body_is_doc', { body: '{"type":"paragraph"}' }],
-    ['ck_content_posts_body_version', { body_version: 2 }],
+    ['ck_content_posts_body_version', { body_version: 3 }],
     ['ck_content_posts_status', { status: 'deleted' }],
     ['ck_content_posts_tags_count', { tags: Array.from({ length: 11 }, (_, i) => `t${i}`) }],
     ['ck_content_posts_published_has_date', { status: 'published' }],

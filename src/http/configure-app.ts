@@ -37,6 +37,33 @@ function parsePostWriteJson(req: Request, res: Response, next: NextFunction) {
   else next();
 }
 
+/** A stored variant's public path; anything else under /media falls through to the API's 404. */
+const MEDIA_VARIANT_PATH = /^\/blog\/[0-9a-f-]{36}-\d{1,4}\.webp$/;
+
+/**
+ * Local media (MEDIA_STORAGE=local, development and test; blog completion spec §5.3): stored WebP variants only,
+ * no index or dotfiles, `nosniff`, loadable from the web's origin (helmet's CORP is same-origin), cached forever
+ * (random keys never change). Production serves R2's own domain instead.
+ */
+function serveLocalMedia(app: NestExpressApplication, directory: string) {
+  const files = express.static(directory, {
+    index: false,
+    dotfiles: 'deny',
+    fallthrough: true,
+    immutable: true,
+    maxAge: '365d',
+    setHeaders: (res) => {
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    },
+  });
+  app.use('/media', (req: Request, res: Response, next: NextFunction) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+    if (!MEDIA_VARIANT_PATH.test(req.path)) return next();
+    return files(req, res, next);
+  });
+}
+
 /** App-level HTTP setup shared by main.ts and the e2e factory (D6). */
 export function configureApp(app: NestExpressApplication, config: AppConfig): void {
   // Security headers and CORS first, so error responses (e.g. a body-parser failure) carry them too.
@@ -46,6 +73,9 @@ export function configureApp(app: NestExpressApplication, config: AppConfig): vo
     credentials: true,
     allowedHeaders: ['Content-Type', 'X-Requested-With'],
   });
+  if (config.media.storage === 'local' && config.media.localDir) {
+    serveLocalMedia(app, config.media.localDir);
+  }
   app.use(parsePostWriteJson); // B15, before the global parser
   app.useBodyParser('json', { limit: '100kb' }); // JSON only (D21)
   app.use(keepJsonParseMarker);

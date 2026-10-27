@@ -1,4 +1,4 @@
-import { postBodyInputSchema } from './post-body.schema.js';
+import { postBodyInputSchema, postBodyV1DocumentSchema } from './post-body.schema.js';
 
 const text = (t: string, marks?: unknown[]) => ({
   type: 'text',
@@ -17,7 +17,11 @@ const tiptapLink = (href: string) => ({
 const link = (attrs: Record<string, unknown>) => ({ type: 'link', attrs });
 const withMark = (mark: unknown) => doc(p(text('a', [mark])));
 
-const parse = (value: unknown) => postBodyInputSchema.safeParse(value);
+// A version 1 request (blog completion spec §3.4): the limits and version 2 schema, then the version 1 gate.
+const parse = (value: unknown) => {
+  const result = postBodyInputSchema.safeParse(value);
+  return result.success ? postBodyV1DocumentSchema.safeParse(value) : result;
+};
 const pathsOf = (value: unknown) => {
   const result = parse(value);
   return result.success ? [] : result.error.issues.map((i) => i.path.join('.'));

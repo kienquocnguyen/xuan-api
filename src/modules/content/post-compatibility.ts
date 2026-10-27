@@ -7,7 +7,21 @@ import type { Post } from './post.entity.js';
 const GUARDED: readonly { field: string; hasData: (post: Post) => boolean }[] = [
   { field: 'tags', hasData: (post) => post.tags.length > 0 },
   { field: 'categoryId', hasData: (post) => post.categoryId !== null },
+  // coverAlt follows coverMediaId (the schema pairs them).
+  { field: 'coverMediaId', hasData: (post) => post.coverMediaId !== null },
+  { field: 'ogMediaId', hasData: (post) => post.ogMediaId !== null },
 ];
+
+/**
+ * The body contract version (spec §3.4): a client that declares version 1 (or nothing) can't have loaded a
+ * version 2 body's nodes, so its save would drop them.
+ */
+export function declaresOlderBody(
+  input: Readonly<{ bodyVersion?: 1 | 2 }>,
+  post: Pick<Post, 'bodyVersion'>,
+): boolean {
+  return post.bodyVersion === 2 && (input.bodyVersion ?? 1) === 1;
+}
 
 /** The guarded fields absent from `input` whose stored value isn't empty; empty means the request is safe. */
 export function omittedFieldsWithData(

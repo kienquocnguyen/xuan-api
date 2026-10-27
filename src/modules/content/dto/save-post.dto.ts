@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { postBodyInputSchema } from '../body/post-body.schema.js';
+import {
+  postBodyDocumentSchema,
+  postBodyInputSchema,
+  postBodyV1DocumentSchema,
+} from '../body/post-body.schema.js';
 import { isStorableText, STORABLE_TEXT_MESSAGE } from '../../../http/validation/storable-text.js';
 
 /** Same rule as ck_content_posts_slug_format (database.md §12). */
@@ -66,6 +70,38 @@ export const savePostSchema = z
     tags,
     /** One category (blog completion B2): `null` clears it; an omission is guarded (spec §3.4). */
     categoryId: z.uuid().nullable().optional(),
+    /**
+     * The body format the client's editor speaks (blog completion spec §3.4); omitted = 1. It gates what the
+     * body may contain; the stored version is still the lowest the document fits.
+     */
+    bodyVersion: z.union([z.literal(1), z.literal(2)]).optional(),
+    /** Blog completion B3 (spec §5.4): the cover needs alt text; the OG image overrides it for sharing. */
+    coverMediaId: z.uuid().nullable().optional(),
+    coverAlt: z
+      .string()
+      .trim()
+      .min(1)
+      .max(200)
+      .refine(isStorableText, STORABLE_TEXT_MESSAGE)
+      .nullable()
+      .optional(),
+    ogMediaId: z.uuid().nullable().optional(),
+  })
+  .superRefine((input, ctx) => {
+    // ck_content_posts_cover_alt: alt text exactly when there is a cover. Presence only: a blank alt already
+    // failed its length check, and Zod 4 still runs this refine after that issue.
+    if ((input.coverMediaId != null) !== (input.coverAlt != null)) {
+      ctx.addIssue({ code: 'custom', path: ['coverAlt'], message: 'Alt text goes with a cover.' });
+    }
+  })
+  .superRefine((input, ctx) => {
+    if ((input.bodyVersion ?? 1) !== 1) return;
+    // Zod 4 runs this even after a non-aborting body issue: only speak when version 2 accepted the body.
+    if (!postBodyDocumentSchema.safeParse(input.body).success) return;
+    // A version 1 client sends only version 1 nodes; anything newer is reported at its own path.
+    for (const issue of postBodyV1DocumentSchema.safeParse(input.body).error?.issues ?? []) {
+      ctx.addIssue({ ...issue, code: 'custom', path: ['body', ...issue.path] } as never);
+    }
   })
   .meta({ id: 'SavePostDto' });
 

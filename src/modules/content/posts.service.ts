@@ -7,17 +7,27 @@ import { baselineErrors } from '../../errors/baseline-errors.js';
 import { assertCanManageOwnedResource } from '../../http/auth/ownership.js';
 import type { AuthenticatedUser } from '../../http/auth/role.js';
 import { type PublicProfile, UserProfilesReader } from '../users/user-profiles.reader.js';
-import { canonicalizePostBody, hasMeaningfulText } from './body/post-body-content.js';
+import {
+  canonicalizePostBody,
+  collectMediaSources,
+  fitsBodyVersion1,
+  hasIncompleteMedia,
+  hasMeaningfulText,
+} from './body/post-body-content.js';
 import { CategoriesService, type CategoryRef } from './categories.service.js';
 import { contentErrors } from './content.errors.js';
 import { POST_SLUG_PATTERN, type SavePostInput } from './dto/save-post.dto.js';
-import { omittedFieldsWithData } from './post-compatibility.js';
+import { type MediaImage, MediaService } from './media/media.service.js';
+import { declaresOlderBody, omittedFieldsWithData } from './post-compatibility.js';
 import { POST_LANGUAGE, Post, type PostStatus } from './post.entity.js';
 
 export type AuthoredPost = Readonly<{
   post: Post;
   author: PublicProfile;
   category: CategoryRef | null;
+  /** `null` without one, or when this server can't build media URLs (storage disabled). */
+  cover: MediaImage | null;
+  og: MediaImage | null;
 }>;
 export type PostPage = Readonly<{ items: AuthoredPost[]; totalItems: number }>;
 type Paging = Readonly<{ page: number; pageSize: number }>;
@@ -32,6 +42,7 @@ export class PostsService {
     @InjectDataSource() private readonly dataSource: DataSource,
     private readonly profiles: UserProfilesReader,
     private readonly categories: CategoriesService,
+    private readonly media: MediaService,
   ) {}
 
   async listPublished({
@@ -120,16 +131,22 @@ export class PostsService {
     try {
       const categoryId = input.categoryId ?? null;
       await this.assertAssignable(this.dataSource.manager, categoryId, null);
+      await this.media.assertLibrarySources(collectMediaSources(input.body));
+      await this.media.assertExisting([input.coverMediaId, input.ogMediaId]);
       const result = await this.posts.insert({
         authorId: actor.id,
         slug: input.slug,
         title: input.title,
         excerpt: input.excerpt,
         body: canonicalizePostBody(input.body),
+        bodyVersion: fitsBodyVersion1(input.body) ? 1 : 2,
         seoTitle: input.seoTitle,
         seoDescription: input.seoDescription,
         tags: input.tags ?? [],
         categoryId,
+        coverMediaId: input.coverMediaId ?? null,
+        coverAlt: input.coverAlt ?? null,
+        ogMediaId: input.ogMediaId ?? null,
       });
       id = (result.identifiers[0] as { id: string }).id;
     } catch (error) {
@@ -146,6 +163,10 @@ export class PostsService {
         // Q3: an old client omits newer fields; never let its full replacement erase them (spec §3.4).
         const fields = omittedFieldsWithData(input, post);
         if (fields.length > 0) throw new AppError(contentErrors.POST_FIELDS_OMITTED, { fields });
+        // ...nor let an editor that can't load version 2 nodes overwrite them (spec §3.4).
+        if (declaresOlderBody(input, post)) {
+          throw new AppError(contentErrors.POST_BODY_VERSION_UNSUPPORTED);
+        }
         // B17: once ever published, the slug is the post's permanent URL.
         if (post.publishedAt !== null && input.slug !== post.slug) {
           throw new AppError(contentErrors.POST_SLUG_LOCKED);
@@ -154,6 +175,12 @@ export class PostsService {
         if (post.status === 'published' && !hasMeaningfulText(input.body)) {
           throw new AppError(contentErrors.POST_BODY_EMPTY);
         }
+        // Spec §5.5: a published post never shows an unfinished before/after block.
+        if (post.status === 'published' && hasIncompleteMedia(input.body)) {
+          throw new AppError(contentErrors.POST_MEDIA_INCOMPLETE);
+        }
+        await this.media.assertLibrarySources(collectMediaSources(input.body), manager);
+        await this.media.assertExisting([input.coverMediaId, input.ogMediaId], manager);
         // B2: an omitted categoryId reached here only if none is stored (the guard above), so `?? null` keeps it.
         const categoryId = input.categoryId ?? null;
         await this.assertAssignable(manager, categoryId, post.categoryId);
@@ -169,10 +196,14 @@ export class PostsService {
             title: input.title,
             excerpt: input.excerpt,
             body: canonicalizePostBody(input.body),
+            bodyVersion: fitsBodyVersion1(input.body) ? 1 : 2,
             seoTitle: input.seoTitle,
             seoDescription: input.seoDescription,
             tags: input.tags ?? [],
             categoryId,
+            coverMediaId: input.coverMediaId ?? null,
+            coverAlt: input.coverAlt ?? null,
+            ogMediaId: input.ogMediaId ?? null,
           },
         );
       });
@@ -189,6 +220,7 @@ export class PostsService {
       if (post.status === 'archived') throw new AppError(contentErrors.POST_ARCHIVED);
       if (post.status === 'published') return; // idempotent: no write
       if (!hasMeaningfulText(post.body)) throw new AppError(contentErrors.POST_BODY_EMPTY); // B18
+      if (hasIncompleteMedia(post.body)) throw new AppError(contentErrors.POST_MEDIA_INCOMPLETE);
       // BD-3: a new publication needs an active category.
       if (post.categoryId === null) throw new AppError(contentErrors.POST_CATEGORY_REQUIRED);
       const category = (await this.categories.findRefs([post.categoryId], manager)).get(
@@ -295,11 +327,12 @@ export class PostsService {
     return (await this.withAuthors([post]))[0];
   }
 
-  /** One profile query and one category query per page, not per post. */
+  /** One profile, one category and one media query per page, not per post. */
   private async withAuthors(rows: Post[]): Promise<AuthoredPost[]> {
-    const [profiles, categories] = await Promise.all([
+    const [profiles, categories, images] = await Promise.all([
       this.profiles.findPublicProfiles(rows.map((post) => post.authorId)),
       this.categories.findRefs(rows.flatMap((post) => (post.categoryId ? [post.categoryId] : []))),
+      this.media.findImages(rows.flatMap((post) => [post.coverMediaId, post.ogMediaId])),
     ]);
     const byId = new Map(profiles.map((profile) => [profile.id, profile]));
     return rows.map((post) => {
@@ -309,7 +342,9 @@ export class PostsService {
       if (post.categoryId && !category) {
         throw new Error('Post category missing despite fk_content_posts_category_id.');
       }
-      return { post, author, category };
+      const cover = post.coverMediaId ? (images.get(post.coverMediaId) ?? null) : null;
+      const og = post.ogMediaId ? (images.get(post.ogMediaId) ?? null) : null;
+      return { post, author, category, cover, og };
     });
   }
 
@@ -321,6 +356,12 @@ export class PostsService {
     // The category was deleted after the check (spec §4.4; the delete holds its row lock).
     if (isForeignKeyViolation(error, 'fk_content_posts_category_id')) {
       return new AppError(contentErrors.CATEGORY_NOT_FOUND);
+    }
+    if (
+      isForeignKeyViolation(error, 'fk_content_posts_cover_media_id') ||
+      isForeignKeyViolation(error, 'fk_content_posts_og_media_id')
+    ) {
+      return new AppError(contentErrors.POST_MEDIA_NOT_FOUND);
     }
     return error;
   }

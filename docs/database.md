@@ -243,6 +243,7 @@ The **actual, decided schema**, so the current database can be understood at a g
 | `course_access_grants` | **implemented** 2026-10-19 by migration `CreateCourseAccessGrants1792377789142` (map owner-approved with the plan, Checkpoint M). Owner-approved runs: `xuan_test` (Checkpoint A: guarded run, revert/run round trip, empty second generate) and `xuan_dev` (Checkpoint D: empty second generate; the other tables' schema, rows and contents unchanged; no grants created); `\d+` matches this map on both, including the partial unique's `WHERE`; invariants proven by `test/courses-schema.e2e-spec.ts` | `courses` (entity `CourseAccessGrant`) | `docs/superpowers/plans/2026-10-19-course-access.md`, Task 1 |
 | `lesson_progress` | **implemented** 2026-10-19 by migration `CreateLessonProgress1792393991146` (map owner-approved with the plan, Checkpoint M). Owner-approved runs: `xuan_test` (Checkpoint A: guarded run, revert/run round trip, empty second generate) and `xuan_dev` (Checkpoint D: empty second generate; the other tables' schema, rows and contents unchanged; no progress rows created); `\d+` matches this map on both, byte-identical; invariants proven by `test/courses-schema.e2e-spec.ts` | `courses` (entity `LessonProgress`) | `docs/superpowers/plans/2026-10-19-course-progress.md`, Task 1 |
 | `content_categories`, `content_category_translations` (+ `content_posts.category_id`) | migration `CreatePostCategories1792424947762` (blog completion B2, BD-3); map recorded under the bounded autonomous execution row (workflow §3.5). **Implemented on `xuan_test` only** (2026-10-19: guarded run, `\d+` matches this map, revert/run round trip, empty second generate); invariants proven by `test/content-categories-schema.e2e-spec.ts`. **`xuan_dev` pending in the consolidated owner packet** (protected: B1 is still pending there, and B2 adds an FK to an existing table) | `content` (entities `ContentCategory`, `ContentCategoryTranslation`) | `docs/superpowers/plans/2026-10-19-post-categories.md`, Task 1 |
+| `content_media` (+ `content_posts.cover_media_id`, `cover_alt`, `og_media_id`; `body_version` IN (1, 2)) | migration `AddPostMedia1792426532193` (blog completion B3, BD-4/5/10); map recorded under the bounded autonomous execution row (workflow §3.5). **Implemented on `xuan_test` only** (2026-10-27: guarded run, `\d+` matches this map, revert/run round trip, empty second generate); invariants proven by `test/content-media-schema.e2e-spec.ts` and `test/content-posts-schema.e2e-spec.ts`. **`xuan_dev` pending in the consolidated owner packet** (protected: B1 and B2 are still pending there, and B3 adds FKs and a CHECK to an existing table and widens one) | `content` (entity `ContentMedia`) | `docs/superpowers/plans/2026-10-19-post-media.md`, Task 1 |
 
 #### `services`
 
@@ -373,10 +374,13 @@ erDiagram
         varchar_200 title "required · CK ck_content_posts_title_not_blank"
         varchar_400 excerpt "nullable · CK not blank"
         jsonb body "required · CK ck_content_posts_body_is_doc"
-        smallint body_version "required · DEFAULT 1 · CK ck_content_posts_body_version"
+        smallint body_version "required · DEFAULT 1 · CK ck_content_posts_body_version (1, 2)"
         varchar_16 status "required · DEFAULT 'draft' · CK ck_content_posts_status (draft, published, archived)"
         varchar_40_array tags "required · DEFAULT '{}' · CK ck_content_posts_tags_count"
         uuid category_id FK "nullable · fk_content_posts_category_id → content_categories · ON DELETE RESTRICT"
+        uuid cover_media_id FK "nullable · fk_content_posts_cover_media_id → content_media · RESTRICT"
+        varchar_200 cover_alt "nullable · CK ck_content_posts_cover_alt (with a cover only, not blank)"
+        uuid og_media_id FK "nullable · fk_content_posts_og_media_id → content_media · RESTRICT"
         timestamptz published_at "nullable · CK ck_content_posts_published_has_date"
         varchar_200 seo_title "nullable · CK not blank"
         varchar_400 seo_description "nullable · CK not blank"
@@ -394,10 +398,13 @@ erDiagram
 | `title` | `varchar(200)` | yes | — | **CK** `ck_content_posts_title_not_blank` | The page's `<h1>` |
 | `excerpt` | `varchar(400)` | no | — | **CK** `ck_content_posts_excerpt_not_blank` | Optional summary; blank input is stored as `NULL`, never `''` |
 | `body` | `jsonb` | yes | — | **CK** `ck_content_posts_body_is_doc`: `jsonb_typeof(body) = 'object' AND body->>'type' = 'doc'` | The TipTap/ProseMirror document, validated against the version-1 allow-list by the API (spec §4); the CHECK guards the outer shape |
-| `body_version` | `smallint` | yes | `1` | **CK** `ck_content_posts_body_version`: `body_version IN (1)` | Which allow-list the body follows; a new version widens the CHECK |
+| `body_version` | `smallint` | yes | `1` | **CK** `ck_content_posts_body_version`: `body_version IN (1, 2)` | Which allow-list the body follows. Version 2 (blog completion B3, BD-10) adds images, before/after, rules, code blocks, embeds by id and more marks; the server stores the lowest version the document fits |
 | `status` | `varchar(16)` | yes | `'draft'` | **CK** `ck_content_posts_status`: `status IN ('draft','published','archived')` | Only published posts are public. `archived` (blog completion B1, BD-1) retires a post without deleting it; restore returns it to `draft` |
 | `tags` | `varchar(40)[]` | yes | `'{}'` | **CK** `ck_content_posts_tags_count`: `cardinality(tags) <= 10` | Up to 10 short labels in the author's order (BD-3). Element length 1–40 is checked by the API (trimmed, no comma, case-insensitive unique); the `varchar(40)` element type is the database backstop (spike S1). No index: V1 has no tag filter |
 | `category_id` | `uuid` | no | — | **FK** `fk_content_posts_category_id` → `content_categories(id)` `ON DELETE RESTRICT` | One category per post (BD-3). Nullable: drafts may lack one and legacy published posts keep none; publishing needs one (service rule). `RESTRICT`: a used category can't be deleted (its violation becomes `409 CATEGORY_IN_USE`) |
+| `cover_media_id` | `uuid` | no | — | **FK** `fk_content_posts_cover_media_id` → `content_media(id)` `ON DELETE RESTRICT`; `ix_content_posts_cover_media_id` | The cover image (B3). `RESTRICT`: media in use can't vanish (V1 never deletes media) |
+| `cover_alt` | `varchar(200)` | no | — | **CK** `ck_content_posts_cover_alt`: `(cover_media_id IS NULL AND cover_alt IS NULL) OR (cover_media_id IS NOT NULL AND cover_alt IS NOT NULL AND btrim(cover_alt) <> '')` (the `IS NOT NULL` matters: `btrim(NULL) <> ''` is NULL, which a CHECK accepts) | Alt text belongs to the placement; a cover always has one |
+| `og_media_id` | `uuid` | no | — | **FK** `fk_content_posts_og_media_id` → `content_media(id)` `ON DELETE RESTRICT`; `ix_content_posts_og_media_id` | The social-share image override; the web falls back to the cover |
 | `published_at` | `timestamptz` | no | — | **CK** `ck_content_posts_published_has_date`: `status <> 'published' OR published_at IS NOT NULL` | The original first-publish instant (spec B16): set once, kept across unpublish/republish |
 | `seo_title` | `varchar(200)` | no | — | **CK** `ck_content_posts_seo_title_not_blank` | Optional; the web falls back to the title |
 | `seo_description` | `varchar(400)` | no | — | **CK** `ck_content_posts_seo_description_not_blank` | Optional; the web falls back to the excerpt |
@@ -417,7 +424,9 @@ erDiagram
 
 **B2 migration safety:** two new tables, a nullable column with no default (every existing row stays `NULL`, so the new FK validates nothing) and an index; no existing row changes.
 
-**Not in this table (deferred decisions):** cover/OG images (blog completion B3), scheduled publishing, slug redirects, preview links.
+**B3 migration safety:** a new table, three nullable columns with no default, two FKs and a CHECK that every existing row satisfies (all three columns `NULL`), two indexes, and the `body_version` CHECK widened (every stored row is version 1). `down()` re-narrows `body_version`, so it fails while version-2 posts exist (roll forward, C9). A change of `MEDIA_PUBLIC_BASE_URL` after content exists needs a data migration rewriting the URL prefix in bodies (roll forward).
+
+**Not in this table (deferred decisions):** none of the blog completion items, scheduled publishing, slug redirects, preview links.
 
 #### `content_categories`, `content_category_translations`
 
@@ -463,6 +472,38 @@ erDiagram
 | `uq_content_categories_key` | UNIQUE | `(key)` | Its violation becomes `409 CATEGORY_KEY_TAKEN` |
 | `uq_content_category_translations_language_slug` | UNIQUE | `(language, slug)` | The public lookup; its violation becomes `409 CATEGORY_SLUG_TAKEN` |
 | `uq_content_category_translations_category_id_language` | UNIQUE | `(category_id, language)` | One name per language; also serves the FK |
+
+#### `content_media`
+
+Uploaded blog images (blog completion spec §5.2, BD-5), owned by `content`. One row per upload; the files are WebP variants at `<storage_key>-<width>.webp` in the configured storage (local folder in development, Cloudflare R2 in production). Rows never change and are never deleted in V1 (orphans kept, BD-5).
+
+```mermaid
+erDiagram
+    users ||--o{ content_media : "uploads"
+    content_media ||--o{ content_posts : "covers / OG"
+    content_media {
+        uuid id PK "pk_content_media · DEFAULT uuidv7()"
+        uuid uploader_id FK "fk_content_media_uploader_id → users · RESTRICT"
+        varchar_80 storage_key "required · UQ · CK ck_content_media_storage_key_format"
+        varchar_32 content_type "required · DEFAULT 'image/webp' · CK"
+        integer width "required · CK ck_content_media_dimensions"
+        integer height "required · CK ck_content_media_dimensions"
+        smallint_array variant_widths "required · CK not empty"
+        integer byte_size "required · CK positive"
+        timestamptz created_at "required · DEFAULT now()"
+    }
+```
+
+| Column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_content_media` | D26 |
+| `uploader_id` | `uuid` | yes | — | **FK** `fk_content_media_uploader_id` → `users(id)` `ON DELETE RESTRICT` (by entity name, AD14); `ix_content_media_uploader_id` | Who uploaded it (BD-11); a later media library applies ownership to management |
+| `storage_key` | `varchar(80)` | yes | — | **UQ** `uq_content_media_storage_key`; **CK** `ck_content_media_storage_key_format`: `storage_key ~ '^blog/[0-9a-f-]{36}$'` | A random key: the original filename never reaches storage or URLs |
+| `content_type` | `varchar(32)` | yes | `'image/webp'` | **CK** `ck_content_media_content_type`: `content_type IN ('image/webp')` | Every variant is re-encoded to WebP |
+| `width`, `height` | `integer` | yes | — | **CK** `ck_content_media_dimensions`: both 1–6000 | Of the largest variant (layout without shift) |
+| `variant_widths` | `smallint[]` | yes | — | **CK** `ck_content_media_variant_widths_not_empty`: `cardinality(variant_widths) >= 1` | Which `<key>-<width>.webp` files exist (640/1280/1920, or one smaller width) |
+| `byte_size` | `integer` | yes | — | **CK** `ck_content_media_byte_size_positive`: `byte_size > 0` | Total stored bytes, for a later cleanup or quota |
+| `created_at` | `timestamptz` | yes | `now()` | — | No `updated_at`: the row never changes (D27) |
 
 #### `courses`, `course_sections`, `course_lessons`
 

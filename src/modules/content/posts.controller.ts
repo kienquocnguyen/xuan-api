@@ -28,7 +28,9 @@ export class PostsController {
   ): Promise<Page<PostSummaryDto>> {
     const { items, totalItems } = await this.posts.listPublished(query);
     return {
-      items: items.map(({ post, author, category }) => toPostSummaryDto(post, author, category)),
+      items: items.map(({ post, author, category, cover, og }) =>
+        toPostSummaryDto(post, author, category, { cover, og }),
+      ),
       pageInfo: toPageInfo(query.page, query.pageSize, totalItems),
     };
   }
@@ -38,8 +40,8 @@ export class PostsController {
   @ApiErrorResponses(baselineErrors.NOT_FOUND)
   async related(@Param('slug') slug: string): Promise<PostSummaryDto[]> {
     // Same opaque slug key as GET /posts/:slug (D7 deviation).
-    return (await this.posts.listRelated(slug)).map(({ post, author, category }) =>
-      toPostSummaryDto(post, author, category),
+    return (await this.posts.listRelated(slug)).map(({ post, author, category, cover, og }) =>
+      toPostSummaryDto(post, author, category, { cover, og }),
     );
   }
 
@@ -48,7 +50,7 @@ export class PostsController {
   @ApiErrorResponses(baselineErrors.NOT_FOUND)
   async getBySlug(@Param('slug') slug: string): Promise<PostDto> {
     // D7 deviation (blog spec §5.1, as /services/:slug): the slug is an opaque lookup key.
-    const { post, author, category } = await this.posts.getPublishedBySlug(slug);
-    return toPostDto(post, author, category);
+    const { post, author, category, cover, og } = await this.posts.getPublishedBySlug(slug);
+    return toPostDto(post, author, category, { cover, og });
   }
 }

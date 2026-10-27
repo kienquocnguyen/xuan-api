@@ -727,7 +727,17 @@ describe('OpenAPI document', () => {
       ]);
       expect(JSON.stringify(schemaOf('AdminPostsQuery'))).toContain('archived');
       expect(propsOf('PostSummaryDto')).toEqual(
-        ['author', 'category', 'excerpt', 'id', 'publishedAt', 'slug', 'title', 'updatedAt'].sort(),
+        [
+          'author',
+          'category',
+          'coverImage', // B3
+          'excerpt',
+          'id',
+          'publishedAt',
+          'slug',
+          'title',
+          'updatedAt',
+        ].sort(),
       );
       expect(propsOf('PostDto')).toEqual(
         expect.arrayContaining(['tags', 'updatedAt', 'body', 'bodyVersion']),
@@ -737,8 +747,12 @@ describe('OpenAPI document', () => {
       expect(propsOf('SavePostDto')).toEqual(
         [
           'body',
+          'bodyVersion', // B3
           'categoryId',
+          'coverAlt', // B3
+          'coverMediaId', // B3
           'excerpt',
+          'ogMediaId', // B3
           'seoDescription',
           'seoTitle',
           'slug',
@@ -831,7 +845,13 @@ describe('OpenAPI document', () => {
 
     it('adds the category codes to the post writes (I18)', () => {
       expect(codes('/admin/posts', 'post')).toEqual(
-        sorted(input, ['POST_SLUG_TAKEN', 'CATEGORY_NOT_FOUND', 'CATEGORY_ARCHIVED']),
+        // + B3 media code
+        sorted(input, [
+          'POST_SLUG_TAKEN',
+          'CATEGORY_NOT_FOUND',
+          'CATEGORY_ARCHIVED',
+          'POST_MEDIA_NOT_FOUND',
+        ]),
       );
       expect(codes('/admin/posts/{id}', 'put')).toEqual(
         sorted(withId, [
@@ -842,6 +862,9 @@ describe('OpenAPI document', () => {
           'POST_CATEGORY_REQUIRED',
           'CATEGORY_NOT_FOUND',
           'CATEGORY_ARCHIVED',
+          'POST_MEDIA_NOT_FOUND', // B3
+          'POST_MEDIA_INCOMPLETE',
+          'POST_BODY_VERSION_UNSUPPORTED',
         ]),
       );
       expect(codes('/admin/posts/{id}/publish', 'post')).toEqual(
@@ -850,8 +873,92 @@ describe('OpenAPI document', () => {
           'POST_BODY_EMPTY',
           'POST_CATEGORY_REQUIRED',
           'CATEGORY_ARCHIVED',
+          'POST_MEDIA_INCOMPLETE', // B3
         ]),
       );
+    });
+  });
+
+  describe('blog media contract (blog completion B3)', () => {
+    const doc = () => createOpenApiDocument(app);
+    const schema = (name: string) =>
+      doc().components?.schemas?.[name] as
+        { properties?: Record<string, unknown>; required?: string[] } | undefined;
+    const propsOf = (name: string) => Object.keys(schema(name)?.properties ?? {}).sort();
+    const prop = (name: string, field: string) => JSON.stringify(schema(name)?.properties?.[field]);
+    const upload = () => doc().paths['/admin/media/images']?.post;
+    const uploadBody = () =>
+      (upload()?.requestBody as { content?: Record<string, { schema?: unknown }> } | undefined)
+        ?.content ?? {};
+
+    it('documents the upload as one required binary file part', () => {
+      expect(Object.keys(uploadBody())).toEqual(['multipart/form-data']);
+      expect(uploadBody()['multipart/form-data']?.schema).toEqual({
+        type: 'object',
+        required: ['file'],
+        properties: {
+          file: {
+            type: 'string',
+            format: 'binary',
+            description: expect.stringContaining('12 MiB') as string,
+          },
+        },
+      });
+      expect(Object.keys(upload()?.responses ?? {})).toContain('201');
+      expect(JSON.stringify(upload()?.responses['201'])).toContain('MediaImageDto');
+    });
+
+    it('documents exactly the codes the upload can return (I18)', () => {
+      const codes = Object.entries(upload()?.responses ?? {})
+        .filter(([status]) => Number(status) >= 400)
+        .flatMap(([, response]) =>
+          String((response as { description?: string }).description).split(' | '),
+        )
+        .sort();
+      expect(codes).toEqual(
+        [
+          'FORBIDDEN',
+          'INTERNAL_ERROR',
+          'MEDIA_STORAGE_DISABLED',
+          'PAYLOAD_TOO_LARGE',
+          'UNAUTHENTICATED',
+          'VALIDATION_FAILED',
+        ].sort(),
+      );
+    });
+
+    it('names every media component with its exact fields (I19)', () => {
+      expect(propsOf('MediaImageDto')).toEqual(['height', 'id', 'url', 'variants', 'width']);
+      expect(propsOf('MediaImageVariantDto')).toEqual(['height', 'url', 'width']);
+      expect(propsOf('PostImageDto')).toEqual(['alt', 'height', 'url', 'variants', 'width']);
+      expect(propsOf('AdminPostImageDto')).toEqual([
+        'alt',
+        'height',
+        'mediaId',
+        'url',
+        'variants',
+        'width',
+      ]);
+      expect(propsOf('PostDto')).toEqual(expect.arrayContaining(['coverImage', 'ogImage']));
+      expect(propsOf('AdminPostSummaryDto')).toEqual(
+        expect.arrayContaining(['coverImage', 'ogImage']),
+      );
+    });
+
+    it('marks every image ref and media field nullable on the wire', () => {
+      for (const [name, field] of [
+        ['PostSummaryDto', 'coverImage'],
+        ['PostDto', 'ogImage'],
+        ['AdminPostSummaryDto', 'coverImage'],
+        ['AdminPostSummaryDto', 'ogImage'],
+      ]) {
+        expect(prop(name, field)).toContain('"nullable":true');
+      }
+      for (const field of ['coverMediaId', 'coverAlt', 'ogMediaId']) {
+        expect(prop('SavePostDto', field)).toContain('null');
+        expect(schema('SavePostDto')?.required ?? []).not.toContain(field);
+      }
+      expect(prop('SavePostDto', 'bodyVersion')).toMatch(/1.*2|enum/);
     });
   });
 });
