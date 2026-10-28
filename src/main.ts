@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module.js';
@@ -13,4 +14,12 @@ async function bootstrap(): Promise<void> {
   await app.listen(config.port);
 }
 
-await bootstrap();
+// No top-level await: Vercel's launcher may require() this module, which Node refuses for an ESM graph with
+// top-level await (ERR_REQUIRE_ASYNC_MODULE). A failed start is logged, then the process exits.
+bootstrap().catch((error: unknown) => {
+  new Logger('Bootstrap').error(
+    'Startup failed.',
+    error instanceof Error ? error.stack : String(error),
+  );
+  process.exit(1);
+});
