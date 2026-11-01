@@ -1,7 +1,7 @@
 import sharp from 'sharp';
 
 /** Upload limits (blog completion spec §5.1). */
-export const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const MAX_INPUT_PIXELS = 36_000_000;
 const MAX_SIDE = 6000;
 const VARIANT_WIDTHS = [640, 1280, 1920] as const;

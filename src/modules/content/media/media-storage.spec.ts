@@ -36,6 +36,14 @@ describe('media storage adapters (blog completion spec §5.3)', () => {
   });
 
   describe('R2MediaStorage', () => {
+    it('propagates a failed provider write instead of reporting success', async () => {
+      const failure = new Error('Synthetic unavailable provider');
+      const send = vi.fn().mockRejectedValue(failure);
+      const storage = new R2MediaStorage({ send } as unknown as S3Client, 'xuan-media');
+      await expect(storage.put(KEY, Buffer.from('webp'), 'image/webp')).rejects.toBe(failure);
+      expect(send).toHaveBeenCalledTimes(1);
+    });
+
     it('puts one object with its type and an immutable cache header', async () => {
       const send = vi.fn().mockResolvedValue({});
       const storage = new R2MediaStorage({ send } as unknown as S3Client, 'xuan-media');
