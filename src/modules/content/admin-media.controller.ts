@@ -31,8 +31,7 @@ export class AdminMediaController {
         file: {
           type: 'string',
           format: 'binary',
-          description:
-            'JPEG, PNG, WebP or AVIF, at most 12 MiB and 6 000 px a side; never animated.',
+          description: `JPEG, PNG, WebP or AVIF, at most 2 MiB (${MAX_IMAGE_BYTES} bytes), inclusive, and 6 000 px a side; never animated.`,
         },
       },
     },

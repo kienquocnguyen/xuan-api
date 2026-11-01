@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs';
+import type { Server } from 'node:http';
 import { readdir, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -10,6 +11,9 @@ import type { AppConfig } from '../src/config/load-config.js';
 import { signInAs, type TestUser, XHR } from './support/auth.js';
 import { createTestApp } from './support/create-test-app.js';
 import { resetDatabase } from './support/reset-database.js';
+import { pngOfSize } from './support/image-fixture.js';
+import { MediaService } from '../src/modules/content/media/media.service.js';
+import { MEDIA_STORAGE, type MediaStorage } from '../src/modules/content/media/media-storage.js';
 
 const solid = (width: number, height: number) =>
   sharp({ create: { width, height, channels: 3, background: '#2a6' } });
@@ -46,6 +50,7 @@ describe('Uploading images (POST /admin/media/images, blog completion B3)', () =
   afterAll(async () => {
     await app.close();
   });
+  afterEach(() => vi.restoreAllMocks());
 
   const upload = (file: Buffer | null, cookie = editor.cookie, name = 'photo.jpg') => {
     const req = request(app.getHttpServer())
@@ -111,6 +116,11 @@ describe('Uploading images (POST /admin/media/images, blog completion B3)', () =
   it.each([
     ['a renamed text file', async () => Buffer.from('hello'), 'photo.jpg'],
     [
+      'a truncated JPEG',
+      async () => (await solid(64, 64).jpeg().toBuffer()).subarray(0, 40),
+      'bad.jpg',
+    ],
+    [
       'a sized SVG',
       async () =>
         Buffer.from(
@@ -134,6 +144,7 @@ describe('Uploading images (POST /admin/media/images, blog completion B3)', () =
       'a.webp',
     ],
     ['a 7000-pixel-wide PNG', () => solid(7000, 10).png().toBuffer(), 'big.png'],
+    ['a PNG above 36 million pixels', () => solid(6000, 6001).png().toBuffer(), 'pixels.png'],
   ])('rejects %s with 400 and writes nothing (Review Focus 2)', async (_name, make, filename) => {
     const res = await upload(await make(), editor.cookie, filename);
     expect(res.status).toBe(400);
@@ -159,10 +170,97 @@ describe('Uploading images (POST /admin/media/images, blog completion B3)', () =
     expect(await storedFiles()).toHaveLength(5); // one 640 variant each
   });
 
-  it('answers 413 above 12 MiB', async () => {
-    const res = await upload(Buffer.alloc(12 * 1024 * 1024 + 1, 0xff));
+  it.each([500 * 1024, Math.round(1.4 * 1024 * 1024), 2 * 1024 * 1024 - 1, 2 * 1024 * 1024])(
+    'processes and persists a valid %i-byte multipart image inclusively',
+    async (bytes) => {
+      const png = await pngOfSize(bytes);
+      expect(png.length).toBe(bytes);
+      expect(await sharp(png).raw().toBuffer()).toHaveLength(800 * 600 * 3);
+      let requestBytes = 0;
+      const server = app.getHttpServer() as Server;
+      server.once('request', (incoming) => {
+        requestBytes = Number(incoming.headers['content-length']);
+      });
+      const res = await upload(png, editor.cookie, 'boundary.png');
+      expect(res.status).toBe(201);
+      expect(requestBytes).toBeGreaterThan(bytes);
+      const [row] = await db.query<{ id: string; storage_key: string; byte_size: number }[]>(
+        'SELECT id, storage_key, byte_size FROM content_media',
+      );
+      expect(res.body).toEqual({
+        data: {
+          id: row.id,
+          url: `${config.media.publicBaseUrl}/${row.storage_key}-640.webp`,
+          width: 640,
+          height: 480,
+          variants: [
+            {
+              width: 640,
+              height: 480,
+              url: `${config.media.publicBaseUrl}/${row.storage_key}-640.webp`,
+            },
+          ],
+        },
+      });
+      const stored = await readFile(
+        join(config.media.localDir as string, `${row.storage_key}-640.webp`),
+      );
+      expect(await sharp(stored).raw().toBuffer()).toHaveLength(640 * 480 * 3);
+      expect(Number(row.byte_size)).toBe(stored.length);
+      expect(await storedFiles()).toHaveLength(1);
+    },
+  );
+
+  it('answers 413 above 2 MiB before processing, storage or persistence', async () => {
+    const service = vi.spyOn(app.get(MediaService), 'uploadImage');
+    const storage = vi.spyOn(app.get<MediaStorage>(MEDIA_STORAGE), 'put');
+    const res = await upload(await pngOfSize(2 * 1024 * 1024 + 1), editor.cookie, 'large.png');
     expect(res.status).toBe(413);
-    expect(res.body.error.code).toBe('PAYLOAD_TOO_LARGE');
+    expect(res.body).toEqual({
+      data: null,
+      error: {
+        code: 'PAYLOAD_TOO_LARGE',
+        message: 'The request body is too large.',
+        details: {},
+      },
+    });
+    expect(service).not.toHaveBeenCalled();
+    expect(storage).not.toHaveBeenCalled();
+    expect(await storedFiles()).toEqual([]);
+    expect(await db.query('SELECT 1 FROM content_media')).toEqual([]);
+  });
+
+  it('keeps provider failures generic and never persists a media record', async () => {
+    const storage = vi
+      .spyOn(app.get<MediaStorage>(MEDIA_STORAGE), 'put')
+      .mockRejectedValue(new Error('Synthetic provider failure'));
+    const res = await upload(await solid(800, 600).png().toBuffer());
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({
+      data: null,
+      error: {
+        code: 'INTERNAL_ERROR',
+        message: 'Something went wrong. Please try again.',
+        details: {},
+      },
+    });
+    expect(storage).toHaveBeenCalled();
+    expect(await db.query('SELECT 1 FROM content_media')).toEqual([]);
+    expect(await storedFiles()).toEqual([]);
+  });
+
+  it('uses actual image bytes rather than the declared filename or MIME type', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/admin/media/images')
+      .set(XHR)
+      .set('Cookie', editor.cookie)
+      .attach('file', await solid(800, 600).png().toBuffer(), {
+        filename: 'not-an-image.txt',
+        contentType: 'text/plain',
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.data.variants).toHaveLength(1);
+    expect(await db.query('SELECT 1 FROM content_media')).toHaveLength(1);
   });
 
   it('requires the file part and refuses any other part', async () => {

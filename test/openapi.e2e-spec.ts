@@ -902,7 +902,7 @@ describe('OpenAPI document', () => {
           file: {
             type: 'string',
             format: 'binary',
-            description: expect.stringContaining('12 MiB') as string,
+            description: expect.stringContaining('2 MiB (2097152 bytes), inclusive') as string,
           },
         },
       });
