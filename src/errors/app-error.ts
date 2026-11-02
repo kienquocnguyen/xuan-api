@@ -1,5 +1,12 @@
 export type ErrorKind =
-  'validation' | 'unauthenticated' | 'forbidden' | 'not_found' | 'conflict' | 'rate_limited';
+  | 'validation'
+  | 'unauthenticated'
+  | 'forbidden'
+  | 'not_found'
+  | 'conflict'
+  | 'rate_limited'
+  /** A dependency the request needs is down or not configured; retrying later may work (contact form CF-5). */
+  | 'unavailable';
 
 export type ErrorDefinition = Readonly<{ code: string; kind: ErrorKind; message: string }>;
 

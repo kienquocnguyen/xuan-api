@@ -7,6 +7,7 @@ export const statusForKind: Record<ErrorKind, number> = {
   not_found: 404,
   conflict: 409,
   rate_limited: 429,
+  unavailable: 503,
 };
 
 /** Codes the HTTP layer produces itself (not business definitions). */
