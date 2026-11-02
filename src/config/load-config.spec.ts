@@ -42,6 +42,12 @@ describe('loadConfig', () => {
         localDir: 'storage/media',
         r2: null,
       },
+      trustProxyHops: 0,
+      contact: {
+        recaptcha: { mode: 'bypass' },
+        email: { provider: 'disabled' },
+        cronSecret: null,
+      },
     });
   });
 
@@ -214,6 +220,105 @@ describe('loadConfig', () => {
       expect(
         failureOf({ ...valid, MEDIA_PUBLIC_BASE_URL: 'http://localhost:4000/media/' }),
       ).toContain('MEDIA_PUBLIC_BASE_URL');
+    });
+  });
+
+  describe('contact form (contact form design §5)', () => {
+    const production = {
+      ...valid,
+      NODE_ENV: 'production',
+      AUTH_COOKIE_SECURE: 'true',
+      GOOGLE_CALLBACK_URL: 'https://api.xuancreative.com/auth/google/callback',
+      MEDIA_STORAGE: 'disabled',
+    };
+    const recaptcha = {
+      RECAPTCHA_SECRET_KEY: 'recaptcha-s3cret',
+      RECAPTCHA_ALLOWED_HOSTNAMES: ' XuanCreative.com , www.xuancreative.com ',
+    };
+    const resend = {
+      RESEND_API_KEY: 're_s3cret',
+      CONTACT_EMAIL_FROM: 'XuanCreative <contact@mail.xuancreative.com>',
+      CONTACT_NOTIFICATION_TO: 'business@example.com',
+    };
+    const failureOf = (env: Record<string, string | undefined>) => {
+      try {
+        loadConfig(env);
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConfigError);
+        return (error as Error).message;
+      }
+      throw new Error('expected a ConfigError');
+    };
+
+    it('verifies tokens once a secret is set, with lowercased hostnames and a 0.5 default score', () => {
+      expect(loadConfig({ ...valid, ...recaptcha }).contact.recaptcha).toEqual({
+        mode: 'verify',
+        secretKey: 'recaptcha-s3cret',
+        allowedHostnames: ['xuancreative.com', 'www.xuancreative.com'],
+        minScore: 0.5,
+      });
+      expect(
+        loadConfig({ ...valid, ...recaptcha, RECAPTCHA_MIN_SCORE: '0.7' }).contact.recaptcha,
+      ).toMatchObject({ minScore: 0.7 });
+    });
+
+    it('bypasses verification without a secret outside production, and is unconfigured in production', () => {
+      expect(loadConfig({ ...valid, NODE_ENV: 'test' }).contact.recaptcha).toEqual({
+        mode: 'bypass',
+      });
+      expect(loadConfig(production).contact.recaptcha).toEqual({ mode: 'unconfigured' });
+      expect(loadConfig({ ...production, ...recaptcha }).contact.recaptcha.mode).toBe('verify');
+    });
+
+    it('needs hostnames with a secret and refuses them without one', () => {
+      expect(failureOf({ ...valid, RECAPTCHA_SECRET_KEY: 'x' })).toContain(
+        'RECAPTCHA_ALLOWED_HOSTNAMES',
+      );
+      expect(failureOf({ ...valid, RECAPTCHA_ALLOWED_HOSTNAMES: 'a.com' })).toContain(
+        'RECAPTCHA_SECRET_KEY',
+      );
+      expect(failureOf({ ...valid, ...recaptcha, RECAPTCHA_MIN_SCORE: '1.5' })).toContain(
+        'RECAPTCHA_MIN_SCORE',
+      );
+    });
+
+    it('configures Resend only with all three values, never printing the key', () => {
+      expect(loadConfig({ ...valid, ...resend }).contact.email).toEqual({
+        provider: 'resend',
+        apiKey: 're_s3cret',
+        from: 'XuanCreative <contact@mail.xuancreative.com>',
+        to: 'business@example.com',
+      });
+      expect(
+        loadConfig({ ...valid, ...resend, CONTACT_EMAIL_FROM: 'contact@mail.xuancreative.com' })
+          .contact.email,
+      ).toMatchObject({ from: 'contact@mail.xuancreative.com' });
+      const partial = failureOf({ ...valid, RESEND_API_KEY: 're_s3cret' });
+      expect(partial).toContain('CONTACT_EMAIL_FROM');
+      expect(partial).toContain('CONTACT_NOTIFICATION_TO');
+      expect(partial).not.toContain('re_s3cret');
+      expect(failureOf({ ...valid, ...resend, CONTACT_EMAIL_FROM: 'Bad\r\nBcc: x@y.z' })).toContain(
+        'CONTACT_EMAIL_FROM',
+      );
+      expect(failureOf({ ...valid, ...resend, CONTACT_NOTIFICATION_TO: 'nope' })).toContain(
+        'CONTACT_NOTIFICATION_TO',
+      );
+    });
+
+    it('enables the cron route only with a long enough secret', () => {
+      expect(loadConfig({ ...valid, CRON_SECRET: 'c'.repeat(16) }).contact.cronSecret).toBe(
+        'c'.repeat(16),
+      );
+      expect(failureOf({ ...valid, CRON_SECRET: 'short' })).toBe(
+        'Invalid configuration: CRON_SECRET',
+      );
+    });
+
+    it('trusts one proxy hop by default in production only (CF-8)', () => {
+      expect(loadConfig(production).trustProxyHops).toBe(1);
+      expect(loadConfig(valid).trustProxyHops).toBe(0);
+      expect(loadConfig({ ...production, TRUST_PROXY_HOPS: '0' }).trustProxyHops).toBe(0);
+      expect(failureOf({ ...valid, TRUST_PROXY_HOPS: '9' })).toContain('TRUST_PROXY_HOPS');
     });
   });
 });
