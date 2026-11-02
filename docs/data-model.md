@@ -73,8 +73,8 @@ erDiagram
 | **Building project** ("Đang xây") | Something Xuân is building, with a status | NEEDS PRODUCT DESIGN, and only if it ever becomes database-managed (it's static copy today) | — | — |
 | **Order** | A record of a purchase | DEFERRED | user; course access grants (purchase source) | — |
 | **Payment** | Money movement for an order | DEFERRED | order | — |
-| **Inquiry** | A message sent through a contact form | DEFERRED while collaboration enquiries stay `mailto` | — | — |
-| **External providers** | Email, payment, calendar or newsletter services we integrate with | Google Calendar / Meet and applicant email notifications: CONFIRMED future integrations of the application/booking slice (§3.1). The others: DEFERRED | appointments; applications | — |
+| **Contact submission** (was *Inquiry*) | A visitor's message from the public contact form (`/lien-he`): name, email, one of four subjects (the editing course, the Kickstart session, 3-month coaching, general/collaboration) and the message. No account needed. Admins read and archive it; the business inbox gets one email per submission | CONFIRMED, implemented 2026-11-03 (contact form design `2026-11-03-contact-form-design.md`) | none (visitors aren't users) | `contact` (table `contact_submissions`) |
+| **External providers** | Email, payment, calendar or newsletter services we integrate with | Google Calendar / Meet and applicant email notifications: CONFIRMED future integrations of the application/booking slice (§3.1). **Transactional email (Resend) and Google reCAPTCHA v3: implemented 2026-11-03 for the contact form.** The others: DEFERRED | appointments; applications | — |
 | **Support / donation** ("Arabica") | Supporting Xuân | DEFERRED while it's handled externally | — | — |
 
 ### 3.1 Service offerings, applications and appointments
