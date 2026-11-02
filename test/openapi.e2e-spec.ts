@@ -168,6 +168,7 @@ describe('OpenAPI document', () => {
       'get /post-categories',
       'get /courses',
       'get /courses/{slug}',
+      'post /contact-submissions', // contact form: public, CSRF-checked
     ]);
     const methods = ['get', 'post', 'put', 'patch', 'delete'] as const;
     const missing: string[] = [];
@@ -1107,6 +1108,115 @@ describe('OpenAPI document', () => {
         expect(Object.keys(responses)).toContain('204');
         expect(JSON.stringify(responses['204'])).not.toContain('content');
       }
+    });
+  });
+
+  describe('contact form contract (contact form design)', () => {
+    const doc = () => createOpenApiDocument(app);
+    const schema = (name: string) =>
+      doc().components?.schemas?.[name] as
+        { properties?: Record<string, unknown>; required?: string[] } | undefined;
+    const propsOf = (name: string) => Object.keys(schema(name)?.properties ?? {}).sort();
+    const prop = (name: string, field: string) => JSON.stringify(schema(name)?.properties?.[field]);
+    const codes = (path: string, method: 'get' | 'post') =>
+      Object.values(doc().paths[path]?.[method]?.responses ?? {})
+        .flatMap((response) =>
+          String((response as { description?: string }).description).split(' | '),
+        )
+        .filter((code) => /^[A-Z_]+$/.test(code))
+        .sort();
+    const admin = [
+      'FORBIDDEN',
+      'INTERNAL_ERROR',
+      'PAYLOAD_TOO_LARGE',
+      'UNAUTHENTICATED',
+      'VALIDATION_FAILED',
+    ];
+
+    it('names every contact component (I19)', () => {
+      expect(Object.keys(doc().components?.schemas ?? {})).toEqual(
+        expect.arrayContaining([
+          'CreateContactSubmissionDto',
+          'ContactSubmissionReceiptDto',
+          'AdminContactSubmissionsQuery',
+          'ContactSubmissionIdParam',
+          'AdminContactSubmissionDto',
+          'AdminContactNotificationDto',
+        ]),
+      );
+    });
+
+    it('documents the DTO fields exactly, the subject and status enums included', () => {
+      expect(propsOf('CreateContactSubmissionDto')).toEqual([
+        'email',
+        'message',
+        'name',
+        'recaptchaToken',
+        'subject',
+      ]);
+      expect(propsOf('ContactSubmissionReceiptDto')).toEqual(['receivedAt']);
+      expect(propsOf('AdminContactSubmissionDto')).toEqual([
+        'createdAt',
+        'email',
+        'id',
+        'message',
+        'name',
+        'notification',
+        'status',
+        'subject',
+        'updatedAt',
+      ]);
+      expect(propsOf('AdminContactNotificationDto')).toEqual([
+        'attempts',
+        'lastError',
+        'nextAttemptAt',
+        'sentAt',
+        'status',
+      ]);
+      const subjects =
+        '["youtube_editing_course","channel_kickstart_session","youtube_coaching_3_months","general"]';
+      expect(prop('CreateContactSubmissionDto', 'subject')).toContain(subjects);
+      expect(prop('AdminContactSubmissionDto', 'subject')).toContain(subjects);
+      expect(prop('AdminContactSubmissionDto', 'status')).toContain('["new","read","archived"]');
+      expect(prop('AdminContactNotificationDto', 'status')).toContain(
+        '["pending","sent","failed"]',
+      );
+    });
+
+    it('documents the submission as 202 with its body and exact codes (I18)', () => {
+      const submit = doc().paths['/contact-submissions']?.post;
+      expect(Object.keys(submit?.responses ?? {})).toContain('202');
+      expect(JSON.stringify(submit?.requestBody)).toContain(
+        '#/components/schemas/CreateContactSubmissionDto',
+      );
+      expect(codes('/contact-submissions', 'post')).toEqual(
+        [
+          'CONTACT_FORM_UNAVAILABLE',
+          'FORBIDDEN',
+          'INTERNAL_ERROR',
+          'PAYLOAD_TOO_LARGE',
+          'RATE_LIMITED',
+          'RECAPTCHA_VERIFICATION_FAILED',
+          'VALIDATION_FAILED',
+        ].sort(),
+      );
+      expect(JSON.stringify(submit?.responses['503'])).toContain('CONTACT_FORM_UNAVAILABLE');
+    });
+
+    it('documents exactly the codes of each inbox route (I18)', () => {
+      expect(codes('/admin/contact-submissions', 'get')).toEqual(admin.sort());
+      expect(codes('/admin/contact-submissions/{submissionId}', 'get')).toEqual(
+        [...admin, 'NOT_FOUND'].sort(),
+      );
+      for (const action of ['read', 'archive', 'notification/retry']) {
+        expect(codes(`/admin/contact-submissions/{submissionId}/${action}`, 'post')).toEqual(
+          [...admin, 'NOT_FOUND'].sort(),
+        );
+      }
+    });
+
+    it('keeps the scheduled delivery route out of the document', () => {
+      expect(Object.keys(doc().paths).filter((path) => path.startsWith('/internal'))).toEqual([]);
     });
   });
 });
