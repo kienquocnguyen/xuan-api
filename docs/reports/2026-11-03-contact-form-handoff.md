@@ -67,7 +67,8 @@ The values are contract identifiers and won't change. The backend uses the same 
 | `message` | line endings → `\n`; trimmed; 10–5 000 characters; newlines kept | `REQUIRED`, `TOO_SHORT`, `TOO_LONG`, `INVALID` |
 | `recaptchaToken` | non-empty string, ≤ 4 096; never stored | `REQUIRED`, `TOO_SHORT`, `TOO_LONG` |
 
-- Characters are counted as Unicode code points (an emoji is one), after trimming.
+- Characters are counted as Unicode code points (an emoji is one), after trimming. A value that is blank after trimming answers `TOO_SHORT` (not `REQUIRED`); `REQUIRED` means the field is missing or `null`.
+- A value of the wrong JSON type (e.g. `"name": 123`) answers `INVALID_TYPE` at that field.
 - Unknown fields → `UNKNOWN_FIELD` at that name.
 - `details.fields[].field` is the property name, so it maps straight onto React Hook Form.
 - Plain text only. The server stores the text as typed, never interprets HTML, and the admin UI must render it escaped.
@@ -171,7 +172,7 @@ The inbox is the source of truth for messages; the email is only a heads-up. One
 | `failed` | The attempt failed, or no email provider is configured (`lastError`) | "Gửi email lỗi" + retry button |
 | `pending` | An attempt is running right now, or it was interrupted (the request died). `retryable` turns `true` 10 minutes after `lastAttemptAt` | "Đang gửi…"; if `retryable`, show the retry button |
 
-`lastError` (a category, never provider text): `NOT_CONFIGURED` (no provider; `attempts` is 0), `TIMEOUT`, `NETWORK_ERROR`, `PROVIDER_REJECTED`, `PROVIDER_UNAVAILABLE`, `INVALID_RESPONSE`. It's cleared once sent.
+`lastError` (a category, never provider text): `NOT_CONFIGURED` (no provider; `attempts` is 0), `TIMEOUT`, `NETWORK_ERROR`, `PROVIDER_REJECTED`, `PROVIDER_UNAVAILABLE`, `INVALID_RESPONSE`. It's cleared when a retry starts and once sent, so a `pending` notification has `lastError: null`.
 
 `attempts`: 1 after the submission's own attempt, +1 per admin retry; 0 when nothing was attempted. `lastAttemptAt`: when the latest attempt started (`null` if none).
 
@@ -183,6 +184,7 @@ The inbox is the source of truth for messages; the email is only a heads-up. One
 - The same `Idempotency-Key` is used on every attempt for a submission, so a retry within 24 hours after Resend silently accepted the first one doesn't deliver a second email.
 - Errors: `401`, `403`, `404 NOT_FOUND` (unknown id), `400 VALIDATION_FAILED` (malformed id, `details.fields[0].code = INVALID_FORMAT`), and **`503 CONTACT_NOTIFICATIONS_UNAVAILABLE`** "Notification email is not configured." when the server has no email provider. Show "Email chưa được cấu hình" and keep the button. Nothing changes on a 503.
 - The request waits for the provider (up to about 8 seconds). Show a spinner and disable the button meanwhile.
+- A `500 INTERNAL_ERROR` from the retry means the attempt broke unexpectedly: reload the submission; it shows `pending` and becomes `retryable` again after 10 minutes.
 
 All admin routes: `400`, `401`, `403`, `404` (not on the list), `413`, `500`; the retry adds `503`.
 
@@ -266,5 +268,6 @@ Before steps 1–3 a deployed form answers `503` (safe). Without step 5 the cont
 - Not exactly-once: a retry more than 24 hours after an attempt whose acceptance was lost (a timeout after Resend accepted) can deliver a second copy. Within 24 hours the idempotency key prevents it.
 - No automatic retry: a failed email stays failed until an admin retries it. An interrupted attempt stays `pending` and becomes retryable after 10 minutes.
 - The submit request waits for the email attempt (up to about 8 s) when Resend is slow.
-- Limits are per email and per IP only; a flood of invalid tokens is bounded by Google's quota and the CSRF/Origin checks.
+- Limits are per email and per IP only; a flood of invalid tokens is bounded by Google's quota and the CSRF/Origin checks. The per-email limit is exact (serialized by a lock); the per-IP limit can be exceeded by the number of submissions from one IP with **different** emails running at the same instant.
+- Changing `CONTACT_EMAIL_FROM` or `CONTACT_NOTIFICATION_TO` changes the email payload. Resend may then refuse a retry of an attempt made in the previous 24 hours under the same idempotency key (shown as `PROVIDER_REJECTED`); retrying after 24 hours works.
 - No unarchive, delete, search or retention policy yet.

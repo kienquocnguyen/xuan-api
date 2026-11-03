@@ -103,9 +103,9 @@ src/
     courses/         courses, course_sections, course_lessons, course_access_grants, lesson_progress · public catalog, admin curriculum,
                      admin access and learner controllers · courses / course-access / learning services ·
                      course lock rule L1 (AD15) · grant upsert (AD16) · imports UsersModule for UserProfilesReader
-    contact/         contact_submissions · public form, admin inbox and scheduled-delivery controllers · submissions /
-                     inbox / notifications services · recaptcha/ (Google gateway + policy) · notifications/ (Resend
-                     gateway, email builder, retry schedule) (AD20)
+    contact/         contact_submissions · public form and admin inbox controllers · submissions / inbox /
+                     notifications services · recaptcha/ (Google gateway + policy) · notifications/ (Resend gateway,
+                     email builder, one-attempt delivery and manual retry) (AD20)
 test/                e2e specs, test-only fixture controller, test support (development-workflow.md: Testing)
 ```
 
@@ -443,7 +443,7 @@ Each entry ends with *revisit when*. The full reasoning and the rejected alterna
   - **reCAPTCHA v3:** the `RecaptchaVerifier` gateway (C5) plus a pure policy: success, action `contact_submit`, an allowed hostname, a score above the threshold, and a challenge ≤ 180 s old. Without a secret: bypass outside production, and `503 CONTACT_FORM_UNAVAILABLE` in production, so the API still boots. This adds the error kind **`unavailable` → 503**.
   - **Notifications:** the `ContactNotifier` gateway (C5) sends through Resend with `fetch` (no SDK) and `Idempotency-Key` `contact-submission-<id>`. The insert claims **one** attempt (`pending`, `attempted_at`) in the transaction that commits the submission; the request then **awaits** it (no detached promise) and records `sent` (only after a 2xx carrying a message id) or `failed` with a category. Without a provider the row is stored `failed` / `NOT_CONFIGURED`. There is **no automatic retry** (owner decision, 2026-11-03): no schedule, no cron route, no `CRON_SECRET`.
   - **Manual retry:** an admin's `POST …/notification/retry` claims an attempt with one conditional `UPDATE` (`failed`, or `pending` older than 10 minutes, i.e. interrupted), so concurrent retries send once. No provider → `503 CONTACT_NOTIFICATIONS_UNAVAILABLE`.
-  - **Limits, honestly:** not exactly-once. The idempotency key prevents a second email for a retry within Resend's 24-hour window; later, a retry of an email whose acceptance was lost can deliver a copy. `sent` means accepted by Resend, not delivered.
+  - **Limits, honestly:** the per-email limit is exact (the advisory lock); the per-IP limit isn't serialized, so concurrent submissions from one IP with different emails can exceed it by their number. Notifications are not exactly-once. The idempotency key prevents a second email for a retry within Resend's 24-hour window; later, a retry of an email whose acceptance was lost can deliver a copy. `sent` means accepted by Resend, not delivered.
   - *Why no queue:* durability is the row itself. Redis, a broker, a worker or a cron would add infrastructure for a handful of messages a day.
   - *Revisit when* manual retries become a burden, delivery tracking (webhooks) is wanted, or a second email use appears (then the gateway moves out of `contact`).
 
