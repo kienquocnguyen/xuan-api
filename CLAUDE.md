@@ -6,7 +6,7 @@ Backend for **Xuan Creative**: NestJS 12 · REST · PostgreSQL 18 · TypeORM 1.x
 - Done: the NestJS 12 application, config, PostgreSQL 18 + TypeORM, the HTTP contract platform, and the public Services catalog.
 - Done also: users, Google sign-in and role-based access; text-first blog posts; the course platform backend, non-payment V1 (catalog, access grants and gated playback, progress and resume; design `docs/superpowers/specs/2026-10-17-course-platform-design.md`).
 - Done also: blog completion B1–B4 (lifecycle and tags, categories, media and body version 2, discussion and moderation), delivered under **bounded autonomous execution** (`docs/development-workflow.md` §3.5), which ends with B4's merge. Their `xuan_dev` migrations wait in one consolidated owner packet; until it's approved, `dev` code is ahead of the local `xuan_dev` schema.
-- Current slice: none started; the next one is the owner's call.
+- Current slice: the contact form backend (`feat/contact-submissions-and-notifications`; design `docs/superpowers/specs/2026-11-03-contact-form-design.md`; one notification attempt per submission plus a manual admin retry). Delegated by the owner on 2026-11-03 up to an open PR (`xuan_test` migration and e2e runs approved for it); merging, other database runs and provider setup are still owner approvals.
 - Git: `main` is production; `dev` is the default integration branch (see "Git workflow" below).
 
 ## Working mode: LEARNING-FIRST (active)

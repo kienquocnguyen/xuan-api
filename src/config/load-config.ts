@@ -33,6 +33,27 @@ export type AppConfig = Readonly<{
       bucket: string;
     }> | null;
   }>;
+  /** Express `trust proxy` hops, so `req.ip` is the client behind them (contact form design CF-8). */
+  trustProxyHops: number;
+  /** The contact form (contact form design §5). */
+  contact: Readonly<{
+    /**
+     * `verify` checks every token with Google. Without a secret: `bypass` (development, test) skips the check;
+     * `unconfigured` (production) refuses submissions with 503 (CF-5).
+     */
+    recaptcha:
+      | Readonly<{
+          mode: 'verify';
+          secretKey: string;
+          allowedHostnames: readonly string[];
+          minScore: number;
+        }>
+      | Readonly<{ mode: 'bypass' | 'unconfigured' }>;
+    /** `disabled`: submissions are stored, their notifications `failed` with `NOT_CONFIGURED` (CF-10). */
+    email:
+      | Readonly<{ provider: 'resend'; apiKey: string; from: string; to: string }>
+      | Readonly<{ provider: 'disabled' }>;
+  }>;
 }>;
 
 export class ConfigError extends Error {}
@@ -64,10 +85,34 @@ export function loadConfig(source: NodeJS.ProcessEnv = readEnvironment()): AppCo
       adminEmails: Object.freeze([...env.AUTH_ADMIN_EMAILS]),
     }),
     media: Object.freeze(mediaConfig(env)),
+    // Production runs behind exactly one proxy (Vercel's edge) unless told otherwise.
+    trustProxyHops: env.TRUST_PROXY_HOPS ?? (env.NODE_ENV === 'production' ? 1 : 0),
+    contact: Object.freeze(contactConfig(env)),
   });
 }
 
 type Env = z.infer<typeof envSchema>;
+
+function contactConfig(env: Env): AppConfig['contact'] {
+  const recaptcha: AppConfig['contact']['recaptcha'] = env.RECAPTCHA_SECRET_KEY
+    ? {
+        mode: 'verify',
+        secretKey: env.RECAPTCHA_SECRET_KEY,
+        allowedHostnames: Object.freeze([...(env.RECAPTCHA_ALLOWED_HOSTNAMES ?? [])]),
+        minScore: env.RECAPTCHA_MIN_SCORE,
+      }
+    : { mode: env.NODE_ENV === 'production' ? 'unconfigured' : 'bypass' };
+  // The schema guarantees all three or none.
+  const email: AppConfig['contact']['email'] = env.RESEND_API_KEY
+    ? {
+        provider: 'resend',
+        apiKey: env.RESEND_API_KEY,
+        from: env.CONTACT_EMAIL_FROM as string,
+        to: env.CONTACT_NOTIFICATION_TO as string,
+      }
+    : { provider: 'disabled' };
+  return { recaptcha: Object.freeze(recaptcha), email: Object.freeze(email) };
+}
 
 function mediaConfig(env: Env): AppConfig['media'] {
   const storage = env.MEDIA_STORAGE ?? 'local'; // production always sets it (schema)

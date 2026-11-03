@@ -66,6 +66,8 @@ function serveLocalMedia(app: NestExpressApplication, directory: string) {
 
 /** App-level HTTP setup shared by main.ts and the e2e factory (D6). */
 export function configureApp(app: NestExpressApplication, config: AppConfig): void {
+  // `req.ip` is the client behind this many proxies (contact form design CF-8); 0 trusts no forwarded header.
+  app.set('trust proxy', config.trustProxyHops);
   // Security headers and CORS first, so error responses (e.g. a body-parser failure) carry them too.
   app.use(helmet({ contentSecurityPolicy: config.docs.enabled ? false : undefined })); // Swagger UI needs inline scripts (§16)
   app.enableCors({

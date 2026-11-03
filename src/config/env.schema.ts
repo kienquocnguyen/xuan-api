@@ -42,6 +42,24 @@ export const envSchema = z
     R2_ACCESS_KEY_ID: z.string().min(1).optional(),
     R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
     R2_BUCKET: z.string().min(1).optional(),
+
+    // Proxies in front of the API (contact form design CF-8); defaults to 1 in production (loadConfig).
+    TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).optional(),
+
+    // Contact form (contact form design §5). Secrets are never printed (I5).
+    RECAPTCHA_SECRET_KEY: z.string().min(1).optional(),
+    RECAPTCHA_ALLOWED_HOSTNAMES: z
+      .string()
+      .transform((raw) => commaList(raw).map((host) => host.toLowerCase()))
+      .optional(),
+    RECAPTCHA_MIN_SCORE: z.coerce.number().min(0).max(1).default(0.5),
+    RESEND_API_KEY: z.string().min(1).optional(),
+    // `address` or `Name <address>`, one line (no header injection through the variable).
+    CONTACT_EMAIL_FROM: z
+      .string()
+      .regex(/^(?:[^<>\r\n]+ )?<[^\s<>@]+@[^\s<>@]+>$|^[^\s<>@]+@[^\s<>@]+$/)
+      .optional(),
+    CONTACT_NOTIFICATION_TO: z.email().optional(),
   })
   .superRefine((env, ctx) => {
     const issue = (variable: string, message: string) =>
@@ -82,6 +100,20 @@ export const envSchema = z
         'R2_BUCKET',
       ] as const) {
         if (!env[name]) issue(name, 'Required with r2.');
+      }
+    }
+    // reCAPTCHA: a secret always comes with the hostnames it accepts, and hostnames never without a secret.
+    if (env.RECAPTCHA_SECRET_KEY && !env.RECAPTCHA_ALLOWED_HOSTNAMES?.length) {
+      issue('RECAPTCHA_ALLOWED_HOSTNAMES', 'Required with RECAPTCHA_SECRET_KEY.');
+    }
+    if (!env.RECAPTCHA_SECRET_KEY && env.RECAPTCHA_ALLOWED_HOSTNAMES !== undefined) {
+      issue('RECAPTCHA_SECRET_KEY', 'Required with RECAPTCHA_ALLOWED_HOSTNAMES.');
+    }
+    // Contact notifications: all three or none (a half-configured provider is a typo, not a choice).
+    const email = ['RESEND_API_KEY', 'CONTACT_EMAIL_FROM', 'CONTACT_NOTIFICATION_TO'] as const;
+    if (email.some((name) => env[name] !== undefined)) {
+      for (const name of email) {
+        if (env[name] === undefined) issue(name, 'Set all three contact email variables, or none.');
       }
     }
     if (env.NODE_ENV === 'production') {
