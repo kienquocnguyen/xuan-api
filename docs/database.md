@@ -244,7 +244,7 @@ The **actual, decided schema**, so the current database can be understood at a g
 | `lesson_progress` | **implemented** 2026-10-19 by migration `CreateLessonProgress1792393991146` (map owner-approved with the plan, Checkpoint M). Owner-approved runs: `xuan_test` (Checkpoint A: guarded run, revert/run round trip, empty second generate) and `xuan_dev` (Checkpoint D: empty second generate; the other tables' schema, rows and contents unchanged; no progress rows created); `\d+` matches this map on both, byte-identical; invariants proven by `test/courses-schema.e2e-spec.ts` | `courses` (entity `LessonProgress`) | `docs/superpowers/plans/2026-10-19-course-progress.md`, Task 1 |
 | `content_categories`, `content_category_translations` (+ `content_posts.category_id`) | migration `CreatePostCategories1792424947762` (blog completion B2, BD-3); map recorded under the bounded autonomous execution row (workflow §3.5). **Implemented on `xuan_test` only** (2026-10-19: guarded run, `\d+` matches this map, revert/run round trip, empty second generate); invariants proven by `test/content-categories-schema.e2e-spec.ts`. **`xuan_dev` pending in the consolidated owner packet** (protected: B1 is still pending there, and B2 adds an FK to an existing table) | `content` (entities `ContentCategory`, `ContentCategoryTranslation`) | `docs/superpowers/plans/2026-10-19-post-categories.md`, Task 1 |
 | `content_media` (+ `content_posts.cover_media_id`, `cover_alt`, `og_media_id`; `body_version` IN (1, 2)) | migration `AddPostMedia1792426532193` (blog completion B3, BD-4/5/10); map recorded under the bounded autonomous execution row (workflow §3.5). **Implemented on `xuan_test` only** (2026-10-27: guarded run, `\d+` matches this map, revert/run round trip, empty second generate); invariants proven by `test/content-media-schema.e2e-spec.ts` and `test/content-posts-schema.e2e-spec.ts`. **`xuan_dev` pending in the consolidated owner packet** (protected: B1 and B2 are still pending there, and B3 adds FKs and a CHECK to an existing table and widens one) | `content` (entity `ContentMedia`) | `docs/superpowers/plans/2026-10-19-post-media.md`, Task 1 |
-| `contact_submissions` | **decided** 2026-11-03 (contact form design, delegated slice); migration `CreateContactSubmissions1793750400000`, written by hand to the generated format and read against this map. **Not run anywhere yet**: the `xuan_test` run, revert/run, the empty second `migration:generate` and the `\d+` check wait for the owner's database approval (workflow §3.5, last row), and `xuan_dev`/Neon after that | `contact` (entity `ContactSubmission`) | `docs/superpowers/specs/2026-11-03-contact-form-design.md` |
+| `contact_submissions` | **implemented** 2026-11-03 (contact form design, delegated slice; notification columns simplified the same day before any run); migration `CreateContactSubmissions1793750400000`, written by hand to the generated format and read against this map. **Run on `xuan_test` only** (owner-approved): run → `\d+` matched this map → revert → run → second `migration:generate` empty → e2e green. `xuan_dev` and Neon: not run, owner approval needed | `contact` (entity `ContactSubmission`) | `docs/superpowers/specs/2026-11-03-contact-form-design.md` |
 | `content_post_ratings`, `content_post_comments` | migration `CreatePostDiscussion1793089452033` (blog completion B4, BD-6/7/8, Q2); map recorded under the bounded autonomous execution row (workflow §3.5). **Implemented on `xuan_test` only** (2026-10-27: guarded run, `\d+` matches this map, revert/run round trip, empty second generate, the other tables' schema unchanged); invariants proven by `test/content-discussion-schema.e2e-spec.ts`. **`xuan_dev` pending in the consolidated owner packet** (only new tables, but protected while B1–B3 are pending there) | `content` (entities `PostRating`, `PostComment`) | `docs/superpowers/plans/2026-10-27-post-discussion.md`, Task 1 |
 
 #### `services`
@@ -769,7 +769,7 @@ erDiagram
 
 A message sent through the public contact form (`/lien-he`), together with its inbox status and the delivery state of its notification email (contact form design `docs/superpowers/specs/2026-11-03-contact-form-design.md`, CF-6 to CF-14). Owned by `contact`. It has no foreign keys: the sender is a visitor, not a user. Rows are never deleted in V1.
 
-**Invariants:** the email is stored lowercase; the subject and both statuses come from closed lists; name and message are never blank; a `pending` notification always has a next attempt time; `sent` and `sent_at` go together.
+**Invariants:** the email is stored lowercase; the subject and both statuses come from closed lists; name and message are never blank; a `pending` notification always has the start time of its attempt; a `failed` one always has a reason; `sent` and `sent_at` go together. There is no retry schedule: one attempt per submission, then only an admin's manual retry (CF-11 to CF-13).
 
 ```mermaid
 erDiagram
@@ -781,10 +781,10 @@ erDiagram
         varchar_5000 message "required · CK not blank"
         varchar_16 status "required · DEFAULT 'new' · CK new|read|archived"
         varchar_64 client_ip_hash "nullable · HMAC-SHA256 hex"
-        varchar_16 notification_status "required · DEFAULT 'pending' · CK pending|sent|failed"
+        varchar_16 notification_status "required · no default · CK pending|sent|failed"
         smallint notification_attempts "required · DEFAULT 0 · CK >= 0"
-        timestamptz notification_next_attempt_at "nullable · CK required while pending"
-        varchar_32 notification_last_error "nullable · CK 5 categories"
+        timestamptz notification_attempted_at "nullable · CK required while pending"
+        varchar_32 notification_last_error "nullable · CK 6 categories · CK required when failed"
         timestamptz notification_sent_at "nullable · CK pair with sent"
         varchar_200 notification_provider_message_id "nullable"
         timestamptz created_at "required · DEFAULT now()"
@@ -801,10 +801,10 @@ erDiagram
 | `message` | `varchar(5000)` | yes | — | **CK** `ck_contact_submissions_message_not_blank`: `message ~ '[^[:space:]]'` | Plain text; the API counts code points, as `varchar(n)` does |
 | `status` | `varchar(16)` | yes | `'new'` | **CK** `ck_contact_submissions_status`: `status IN ('new', 'read', 'archived')` | The minimal inbox model (CF-14) |
 | `client_ip_hash` | `varchar(64)` | no | — | — | HMAC-SHA256 of the client IP (CF-6), only for the per-IP limit; never on the wire. `NULL` when the address is unknown |
-| `notification_status` | `varchar(16)` | yes | `'pending'` | **CK** `ck_contact_submissions_notification_status`: `notification_status IN ('pending', 'sent', 'failed')` | CF-10. `sent` only after the provider accepted |
-| `notification_attempts` | `smallint` | yes | `0` | **CK** `ck_contact_submissions_notification_attempts`: `notification_attempts >= 0` | Incremented when an attempt is claimed (CF-12) |
-| `notification_next_attempt_at` | `timestamptz` | no | — | **CK** `ck_contact_submissions_notification_pending_schedule`: `notification_status <> 'pending' OR notification_next_attempt_at IS NOT NULL` | When the next attempt is due; during an attempt it's the lease end. `NULL` once sent or failed |
-| `notification_last_error` | `varchar(32)` | no | — | **CK** `ck_contact_submissions_notification_last_error`: `IN ('TIMEOUT', 'NETWORK_ERROR', 'PROVIDER_REJECTED', 'PROVIDER_UNAVAILABLE', 'INVALID_RESPONSE')` | A category, never a provider response (I16, I17) |
+| `notification_status` | `varchar(16)` | yes | — | **CK** `ck_contact_submissions_notification_status`: `notification_status IN ('pending', 'sent', 'failed')` | CF-10. `pending` while the attempt runs (or if it was interrupted); `sent` only after the provider accepted; `failed` after a failed attempt or without a provider. No default: the insert decides it |
+| `notification_attempts` | `smallint` | yes | `0` | **CK** `ck_contact_submissions_notification_attempts`: `notification_attempts >= 0` | 1 for the submission's own attempt, +1 per admin retry; 0 when no provider was configured |
+| `notification_attempted_at` | `timestamptz` | no | — | **CK** `ck_contact_submissions_notification_pending_attempt`: `notification_status <> 'pending' OR notification_attempted_at IS NOT NULL` | When the latest attempt started. A `pending` row older than 10 minutes was interrupted, so an admin may retry it (CF-12). `NULL` only when nothing was ever attempted |
+| `notification_last_error` | `varchar(32)` | no | — | **CK** `ck_contact_submissions_notification_last_error`: `IN ('NOT_CONFIGURED', 'TIMEOUT', 'NETWORK_ERROR', 'PROVIDER_REJECTED', 'PROVIDER_UNAVAILABLE', 'INVALID_RESPONSE')`; **CK** `ck_contact_submissions_notification_failed_error`: `notification_status <> 'failed' OR notification_last_error IS NOT NULL` | A category, never a provider response (I16, I17). Cleared once sent |
 | `notification_sent_at` | `timestamptz` | no | — | **CK** `ck_contact_submissions_notification_sent_pair`: `(notification_status = 'sent') = (notification_sent_at IS NOT NULL)` | When the provider accepted |
 | `notification_provider_message_id` | `varchar(200)` | no | — | — | Resend's id, for tracing a delivery in its dashboard |
 | `created_at` | `timestamptz` | yes | `now()` | — | D27; the inbox order and the "creation timestamp" in the email |
@@ -815,8 +815,7 @@ erDiagram
 | `ix_contact_submissions_status_created_at_id` | `(status, created_at, id)` | The inbox filtered by status, newest first, with a stable tie-break |
 | `ix_contact_submissions_email_created_at` | `(email, created_at)` | The per-email limit and the duplicate check (last hour or 24 hours for one email) |
 | `ix_contact_submissions_client_ip_hash_created_at` | `(client_ip_hash, created_at)` | The per-IP limit |
-| `ix_contact_submissions_notification_due` | `(notification_next_attempt_at)` `WHERE notification_status = 'pending'` | The retry sweep reads only pending rows, ordered by due time; the partial index stays tiny |
 
 The unfiltered inbox (newest first over every status) sorts the table, which stays small (a contact form). An index for it is added when a plan shows the need.
 
-**Migration safety:** one new table and its indexes; no existing table, row or constraint changes. `down()` drops the table, discarding any submissions (a deliberate, documented loss; once submissions exist, roll forward instead, C9). TypeORM's schema diff doesn't compare a partial index's `WHERE` (`architecture.md` §16, S8), so changing that predicate later needs a hand-checked migration.
+**Migration safety:** one new table and its indexes; no existing table, row or constraint changes. `down()` drops the table, discarding any submissions (a deliberate, documented loss; once submissions exist, roll forward instead, C9). The migration was rewritten in place on 2026-11-03 to drop the retry schedule (`notification_next_attempt_at`, its CHECK and the partial due index); that was allowed because it had never run on any database (`xuan_test` showed it pending before its first run).
