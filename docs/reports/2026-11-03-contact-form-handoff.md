@@ -1,7 +1,7 @@
 # Contact form: frontend handoff and activation checklist
 
 **For:** the xuan-web implementer (sections 1–12) and the owner (sections 13–15).
-**Backend:** PR #31, branch `feat/contact-submissions-and-notifications`. Design: `docs/superpowers/specs/2026-11-03-contact-form-design.md` (CF-1…CF-15, notification delivery revised the same day). Contract: `docs/api-contract.md` §11 "Contact form". The OpenAPI document is authoritative; this page explains it.
+**Backend:** PR #31 (branch `feat/contact-submissions-and-notifications`), merged into `dev` as `4f93d38` and deployed to production on 2026-11-03. Production API: `https://api.xuancreative.com`. Design: `docs/superpowers/specs/2026-11-03-contact-form-design.md` (CF-1…CF-15, notification delivery revised the same day). Contract: `docs/api-contract.md` §11 "Contact form". The OpenAPI document is authoritative; this page explains it.
 **The `/lien-he` design stays as it is.** Only the submit logic and a new admin inbox are added.
 
 ## 0. Status at a glance
@@ -9,9 +9,9 @@
 | Question | Answer |
 |---|---|
 | Is the backend contract final for FE? | **Yes.** Request/response shapes, enums and error codes below are stable contract identifiers (I19) |
-| Is it on production? | **No.** PR #31 is open, not merged, not deployed. Production does not expose these routes yet |
-| Can FE build now? | Yes, against this document and a locally generated snapshot (§11). Test end to end against a local xuan-api (`yarn start:dev`), where reCAPTCHA is skipped and no email is sent unless configured |
-| What does production need first? | Owner steps in §13–§15: reCAPTCHA keys, Resend domain + key, Vercel variables, the Neon migration, then the merge |
+| Is it on production? | **Yes** (2026-11-03): migrated on Neon, merged, deployed. Routes, validation, CSRF and admin auth were checked with safe requests (§16) |
+| Can FE build now? | Yes, against this document and a snapshot generated from a local xuan-api on `dev` (§11). Test end to end against the local API, where reCAPTCHA is skipped and no email is sent unless configured |
+| What is still unverified? | A real submission: reCAPTCHA verification with Google and the Resend email have not been exercised in production. That is the owner's smoke test (§15) |
 
 ## 1. Public submit
 
@@ -63,7 +63,7 @@ The values are contract identifiers and won't change. The backend uses the same 
 |---|---|---|
 | `name` | trimmed; 1–100 characters; one line (no line breaks or control characters) | `REQUIRED`, `TOO_SHORT`, `TOO_LONG`, `INVALID` |
 | `email` | trimmed; valid email; ≤ 254; the server lowercases it | `REQUIRED`, `INVALID_FORMAT`, `TOO_LONG` |
-| `subject` | one of the four values | `REQUIRED`, `INVALID` |
+| `subject` | one of the four values | `INVALID` (also when missing: an enum answers `INVALID`, not `REQUIRED`) |
 | `message` | line endings → `\n`; trimmed; 10–5 000 characters; newlines kept | `REQUIRED`, `TOO_SHORT`, `TOO_LONG`, `INVALID` |
 | `recaptchaToken` | non-empty string, ≤ 4 096; never stored | `REQUIRED`, `TOO_SHORT`, `TOO_LONG` |
 
@@ -192,10 +192,10 @@ All admin routes: `400`, `401`, `403`, `404` (not on the list), `413`, `500`; th
 
 The canonical workflow (`docs/api-contract.md` §0, §5): xuan-api produces the document; xuan-web commits a snapshot and generates its types.
 
-1. Pull: `yarn api:pull` in xuan-web (→ `openapi/openapi.json`). Before the deployment, run xuan-api locally (`yarn start:dev` on this branch, with docs enabled) and pull from it.
-2. Generate: `yarn api:generate` (→ `src/generated/api-schema.ts`). Never edit the generated files by hand.
-3. New components: `CreateContactSubmissionDto`, `ContactSubmissionReceiptDto`, `AdminContactSubmissionDto`, `AdminContactNotificationDto`, `AdminContactSubmissionsQuery`, `ContactSubmissionIdParam`. New codes: `RECAPTCHA_VERIFICATION_FAILED`, `CONTACT_FORM_UNAVAILABLE`, `CONTACT_NOTIFICATIONS_UNAVAILABLE`. New status: **503** (an exhaustive `switch` on statuses needs one case).
-4. After production deploys, pull again from production and commit the snapshot.
+1. Run xuan-api locally on the latest `dev` (it contains this feature since `4f93d38`) with `DOCS_ENABLED=true`: `yarn start:dev`, serving `http://localhost:4000/docs-json`.
+2. Pull: `yarn api:pull` in xuan-web. The script reads `http://localhost:4000/docs-json` (→ `openapi/openapi.json`). **Production does not serve the document** (`DOCS_ENABLED` is off there; `/docs-json` answers 404), so never point the pull at production.
+3. Generate: `yarn api:generate` (→ `src/generated/api-schema.ts`). Never edit the generated files by hand. Commit the snapshot and the generated file together.
+4. New components: `CreateContactSubmissionDto`, `ContactSubmissionReceiptDto`, `AdminContactSubmissionDto`, `AdminContactNotificationDto`, `AdminContactSubmissionsQuery`, `ContactSubmissionIdParam`. New codes: `RECAPTCHA_VERIFICATION_FAILED`, `CONTACT_FORM_UNAVAILABLE`, `CONTACT_NOTIFICATIONS_UNAVAILABLE`. New status: **503** (an exhaustive `switch` on statuses needs one case).
 
 ## 12. Frontend environment variables
 
@@ -203,9 +203,9 @@ The canonical workflow (`docs/api-contract.md` §0, §5): xuan-api produces the 
 |---|---|---|
 | `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` | xuan-web (all environments that show `/lien-he`) | The reCAPTCHA v3 **site** key (public). The secret never goes to the web |
 
-No other new web variable. The API base URL is unchanged.
+No other new web variable. The API base URL is unchanged (`https://api.xuancreative.com` in production). A token only passes if the page's hostname is in the backend's `RECAPTCHA_ALLOWED_HOSTNAMES`: `/lien-he` on a preview URL or `localhost` gets `403 RECAPTCHA_VERIFICATION_FAILED` from production. Production CORS allows `https://xuancreative.com` (preflight checked).
 
-## 13. Owner setup: Google reCAPTCHA v3 (not done yet)
+## 13. Owner setup: Google reCAPTCHA v3 (owner reports done, 2026-11-03)
 
 1. Google reCAPTCHA admin console → create a key of type **score-based (v3)**. Labels and the Google Cloud project are your choice.
 2. Domains: `xuancreative.com`, `www.xuancreative.com` (add `localhost` or a preview domain only if you want real verification there).
@@ -213,7 +213,7 @@ No other new web variable. The API base URL is unchanged.
 4. Backend variables: `RECAPTCHA_SECRET_KEY`, `RECAPTCHA_ALLOWED_HOSTNAMES=xuancreative.com,www.xuancreative.com`, optional `RECAPTCHA_MIN_SCORE` (0–1, default 0.5; raise it later only if spam gets through). The action is fixed in code: `contact_submit`.
 5. Without the secret, production refuses every submission with `503 CONTACT_FORM_UNAVAILABLE` (fail closed). The rest of the API works.
 
-## 14. Owner setup: Resend (not done yet)
+## 14. Owner setup: Resend (owner reports done, 2026-11-03: domain `xuancreative.com` verified; sender `XuanCreative <contact@xuancreative.com>`)
 
 1. Create a Resend account.
 2. **Add and verify a sending domain**, ideally a subdomain such as `mail.xuancreative.com`. Resend shows the exact DNS records to add at your DNS host (Cloudflare): typically a DKIM TXT record (`resend._domainkey…`) and, for the bounce subdomain (`send…`), an SPF TXT and an MX record. A DMARC TXT record (`_dmarc`) is recommended. Wait until Resend shows the domain as **Verified**.
@@ -233,16 +233,16 @@ No other new web variable. The API base URL is unchanged.
 | 2 | Resend domain + key (§14) | DNS changes are yours |
 | 3 | Vercel → xuan-api → Production env: `RECAPTCHA_SECRET_KEY`, `RECAPTCHA_ALLOWED_HOSTNAMES`, (`RECAPTCHA_MIN_SCORE`), `RESEND_API_KEY`, `CONTACT_EMAIL_FROM`, `CONTACT_NOTIFICATION_TO` | `TRUST_PROXY_HOPS` can stay unset (production default 1, Vercel's edge). **No `CRON_SECRET` and no `vercel.json` cron**: scheduled retries were removed |
 | 4 | Vercel → xuan-web: `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` | Public |
-| 5 | Neon production (`xuan_staging`): run `CreateContactSubmissions1793750400000` **before** the merge | The 2026-10-31 procedure: verified identity, a clean `git archive` of the commit being merged, DIRECT URL with `sslmode=verify-full`, a backup branch first. Additive: one new table, 3 indexes, no FK, no change to existing rows. `down()` drops the table (only safe while it's empty) |
-| 6 | Merge PR #31 into `dev` | Vercel's production branch is `dev`, so this deploys |
-| 7 | Production smoke test | below |
-| 8 | xuan-web: pull the production snapshot, ship the form and the inbox | — |
+| 5 | Neon production: run `CreateContactSubmissions1793750400000` **before** the merge | **Done 2026-11-03** (see §16): Neon project `long-resonance-70772970`, branch `br-crimson-meadow-b3ha4tcy`, database `xuan_staging`. Additive: one new table, 3 indexes, no FK, no change to existing rows. `down()` drops the table (only safe while it's empty) |
+| 6 | Merge PR #31 into `dev` | **Done**: merge commit `4f93d38`; Vercel deployed it to production |
+| 7 | Production smoke test | below; **pending (owner)** |
+| 8 | xuan-web: regenerate the snapshot (§11), ship the form and the inbox | — |
 
 Before steps 1–3 a deployed form answers `503` (safe). Without step 5 the contact routes answer `500` (table missing); nothing else breaks.
 
 **Production smoke test (owner, after step 6):**
 
-- [ ] `GET /docs` (if enabled) or the OpenAPI JSON lists `/contact-submissions` and the five admin routes.
+- [x] The contact routes are deployed (checked 2026-11-03 with safe requests, §16). OpenAPI isn't served in production; the contract is checked locally (§11).
 - [ ] Submit the real `/lien-he` form once → thank-you state; the request shows `202`.
 - [ ] `business.xuanpham@gmail.com` receives "[Liên hệ] … — <name>"; "Reply" addresses the visitor.
 - [ ] Resend dashboard shows the email as delivered.
@@ -258,9 +258,12 @@ Before steps 1–3 a deployed form answers `503` (safe). Without step 5 the cont
 | Unit tests, lint, typecheck, format, build | Pass (see the PR for the exact run) |
 | E2E on `xuan_test` (submission, reCAPTCHA, limits, duplicates and concurrency, notification sent/failed/not configured/lost response, inbox, retry and concurrent retry, constraints, OpenAPI) | Pass |
 | Migration run → `\d+` → revert → run → second `migration:generate` empty, on `xuan_test` | Pass |
-| `xuan_dev`, Neon | **Not run** |
-| Google reCAPTCHA, Resend, Vercel variables | **Not configured, not verified** |
-| Production | **Not deployed, not verified** |
+| Neon production | **Migrated** 2026-11-03. Identity: `current_database() = xuan_staging`, role `xuan_staging_owner`, PostgreSQL 18.6; its published posts matched the live `/posts` id for id. Preflight: migrations 1–10 applied, this one the only pending one, table absent. `yarn migration:run` once: committed; the schema matches the §12 map (15 columns, 11 CHECKs, PK, 3 indexes); nothing pending; the other tables' row counts unchanged; 0 contact rows. No Neon backup branch was taken (additive migration) |
+| `xuan_dev` | **Not run** (waits with the consolidated owner packet) |
+| Vercel variables | The five names exist in xuan-api Production (`vercel env ls`). Values not inspected; the owner reports them set. `RECAPTCHA_MIN_SCORE` and `TRUST_PROXY_HOPS` unset (defaults 0.5 and 1) |
+| Production deployment | `dpl_8tXvYDScSc91VRY4QESSfRTZgmoW`, from merge commit `4f93d38`, Ready, aliased to `api.xuancreative.com` |
+| Safe production requests | `/services`, `/posts` 200. `POST /contact-submissions`: `{}` → 400 `VALIDATION_FAILED` with field codes; invalid values → `TOO_SHORT`/`INVALID_FORMAT`/`INVALID`; unknown field → `UNKNOWN_FIELD`; no `X-Requested-With` or a foreign `Origin` → 403 `FORBIDDEN`. All five admin routes anonymous → 401 `UNAUTHENTICATED`. CORS preflight from `https://xuancreative.com` → 204 with credentials |
+| Real submission (reCAPTCHA with Google, row stored, Resend email) | **Not verified**: owner smoke test |
 
 ## 17. Known limitations
 
