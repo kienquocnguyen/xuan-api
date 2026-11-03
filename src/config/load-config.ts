@@ -49,12 +49,10 @@ export type AppConfig = Readonly<{
           minScore: number;
         }>
       | Readonly<{ mode: 'bypass' | 'unconfigured' }>;
-    /** `disabled`: submissions are stored and their notifications wait as pending (CF-9). */
+    /** `disabled`: submissions are stored, their notifications `failed` with `NOT_CONFIGURED` (CF-10). */
     email:
       | Readonly<{ provider: 'resend'; apiKey: string; from: string; to: string }>
       | Readonly<{ provider: 'disabled' }>;
-    /** Bearer secret of the scheduled delivery route; `null` keeps the route 404 (CF-13). */
-    cronSecret: string | null;
   }>;
 }>;
 
@@ -113,11 +111,7 @@ function contactConfig(env: Env): AppConfig['contact'] {
         to: env.CONTACT_NOTIFICATION_TO as string,
       }
     : { provider: 'disabled' };
-  return {
-    recaptcha: Object.freeze(recaptcha),
-    email: Object.freeze(email),
-    cronSecret: env.CRON_SECRET ?? null,
-  };
+  return { recaptcha: Object.freeze(recaptcha), email: Object.freeze(email) };
 }
 
 function mediaConfig(env: Env): AppConfig['media'] {

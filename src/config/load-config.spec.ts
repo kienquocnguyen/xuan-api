@@ -46,7 +46,6 @@ describe('loadConfig', () => {
       contact: {
         recaptcha: { mode: 'bypass' },
         email: { provider: 'disabled' },
-        cronSecret: null,
       },
     });
   });
@@ -302,15 +301,6 @@ describe('loadConfig', () => {
       );
       expect(failureOf({ ...valid, ...resend, CONTACT_NOTIFICATION_TO: 'nope' })).toContain(
         'CONTACT_NOTIFICATION_TO',
-      );
-    });
-
-    it('enables the cron route only with a long enough secret', () => {
-      expect(loadConfig({ ...valid, CRON_SECRET: 'c'.repeat(16) }).contact.cronSecret).toBe(
-        'c'.repeat(16),
-      );
-      expect(failureOf({ ...valid, CRON_SECRET: 'short' })).toBe(
-        'Invalid configuration: CRON_SECRET',
       );
     });
 

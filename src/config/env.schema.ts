@@ -60,7 +60,6 @@ export const envSchema = z
       .regex(/^(?:[^<>\r\n]+ )?<[^\s<>@]+@[^\s<>@]+>$|^[^\s<>@]+@[^\s<>@]+$/)
       .optional(),
     CONTACT_NOTIFICATION_TO: z.email().optional(),
-    CRON_SECRET: z.string().min(16).optional(),
   })
   .superRefine((env, ctx) => {
     const issue = (variable: string, message: string) =>

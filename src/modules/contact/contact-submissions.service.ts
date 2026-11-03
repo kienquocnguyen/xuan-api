@@ -37,7 +37,7 @@ type Limits = {
 
 /**
  * The public contact form (contact form design §3): duplicates answer like a success with nothing written, limits
- * and reCAPTCHA guard the insert, and the notification is attempted after the submission has committed.
+ * and reCAPTCHA guard the insert, and the one notification attempt runs after the submission has committed.
  */
 @Injectable()
 export class ContactSubmissionsService {
@@ -69,26 +69,45 @@ export class ContactSubmissionsService {
       throw new AppError(contactErrors.RECAPTCHA_VERIFICATION_FAILED);
     }
 
+    const notify = this.notifications.enabled;
     const stored = await this.dataSource.transaction(async (tx) => {
       // Serializes submissions for one email, so check-then-insert can't race (CF-7). I8: `tx` only.
       await tx.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [
         `contact_submissions:${input.email}`,
       ]);
       const duplicate = await this.findDuplicate(tx, input);
-      if (duplicate) return { id: null, ...duplicate };
+      if (duplicate) return { id: null, ...duplicate }; // no second row, no second email
       await this.assertWithinLimits(tx, input.email, ipHash);
-      // Fields assigned explicitly (I9); the notification is due at once.
+      // Fields assigned explicitly (I9). With a provider, the one attempt is claimed with the insert (CF-11);
+      // without one, nothing will be attempted, so the notification is `failed` from the start (CF-10).
       const [row] = await tx.query<{ id: string; receivedAt: Date }[]>(
         `INSERT INTO contact_submissions
-           (name, email, subject, message, client_ip_hash, notification_next_attempt_at)
-         VALUES ($1, $2, $3, $4, $5, now())
+           (name, email, subject, message, client_ip_hash,
+            notification_status, notification_attempts, notification_attempted_at, notification_last_error)
+         VALUES ($1, $2, $3, $4, $5,
+                 CASE WHEN $6::boolean THEN 'pending' ELSE 'failed' END, CASE WHEN $6 THEN 1 ELSE 0 END,
+                 CASE WHEN $6 THEN now() END, CASE WHEN $6 THEN NULL ELSE 'NOT_CONFIGURED' END)
          RETURNING id, created_at AS "receivedAt"`,
-        [input.name, input.email, input.subject, input.message, ipHash],
+        [input.name, input.email, input.subject, input.message, ipHash, notify],
       );
       return row;
     });
 
-    if (stored.id) await this.notifications.deliverNew(stored.id); // awaited, never detached (CF-11)
+    if (stored.id === null) return { receivedAt: stored.receivedAt };
+    if (notify) {
+      // Awaited, never detached (CF-11): the submission has committed, so this can't undo it.
+      const { name, email, subject, message } = input;
+      await this.notifications.deliverNew({
+        id: stored.id,
+        name,
+        email,
+        subject,
+        message,
+        createdAt: stored.receivedAt,
+      });
+    } else {
+      this.logger.warn(`Contact notification ${stored.id} not sent: no email provider configured.`);
+    }
     return { receivedAt: stored.receivedAt };
   }
 

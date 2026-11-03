@@ -26,7 +26,8 @@ describe('contact_submissions invariants', () => {
       email: 'a@example.com',
       subject: 'general',
       message: 'Xin chào bạn',
-      notification_next_attempt_at: new Date(),
+      notification_status: 'pending',
+      notification_attempted_at: new Date(),
       ...columns,
     };
     const names = Object.keys(row);
@@ -47,22 +48,27 @@ describe('contact_submissions invariants', () => {
     await app.close();
   });
 
-  it('fills a uuid v7 id, the new/pending statuses, zero attempts and timestamps by default', async () => {
+  it('fills a uuid v7 id, the new status, zero attempts and timestamps by default', async () => {
     const [{ id }] = await insert();
     const [row] = await db.query(
-      `SELECT id, status, notification_status, notification_attempts, created_at, updated_at, client_ip_hash
+      `SELECT id, status, notification_attempts, created_at, updated_at, client_ip_hash
          FROM contact_submissions WHERE id = $1`,
       [id],
     );
     expect(row).toEqual({
       id: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-7/),
       status: 'new',
-      notification_status: 'pending',
       notification_attempts: 0,
       created_at: expect.any(Date),
       updated_at: expect.any(Date),
       client_ip_hash: null,
     });
+  });
+
+  it('has no default notification status: every insert decides it', async () => {
+    const failure = await insert({ notification_status: undefined }).catch((error) => error);
+    expect(failure).toBeInstanceOf(QueryFailedError);
+    expect((failure.driverError as { code: string }).code).toBe('23502'); // not_null_violation
   });
 
   it.each([
@@ -73,49 +79,46 @@ describe('contact_submissions invariants', () => {
     ['ck_contact_submissions_status', { status: 'spam' }],
     ['ck_contact_submissions_notification_status', { notification_status: 'queued' }],
     ['ck_contact_submissions_notification_attempts', { notification_attempts: -1 }],
+    ['ck_contact_submissions_notification_pending_attempt', { notification_attempted_at: null }],
     [
-      'ck_contact_submissions_notification_pending_schedule',
-      { notification_next_attempt_at: null },
+      'ck_contact_submissions_notification_failed_error',
+      { notification_status: 'failed', notification_last_error: null },
     ],
     ['ck_contact_submissions_notification_last_error', { notification_last_error: 'boom' }],
-    [
-      'ck_contact_submissions_notification_sent_pair',
-      { notification_status: 'sent', notification_next_attempt_at: null },
-    ],
+    ['ck_contact_submissions_notification_sent_pair', { notification_status: 'sent' }],
     ['ck_contact_submissions_notification_sent_pair', { notification_sent_at: new Date() }],
   ])('rejects a row breaking %s', async (constraint, columns) => {
     expect(await constraintOf(insert(columns))).toBe(constraint);
   });
 
-  it('accepts a sent or failed notification without a next attempt', async () => {
+  it('accepts sent, failed and never-attempted (NOT_CONFIGURED) notifications', async () => {
     await insert({
       notification_status: 'sent',
       notification_sent_at: new Date(),
-      notification_next_attempt_at: null,
       notification_provider_message_id: 'msg',
     });
+    await insert({ notification_status: 'failed', notification_last_error: 'PROVIDER_REJECTED' });
     await insert({
       notification_status: 'failed',
-      notification_next_attempt_at: null,
-      notification_last_error: 'PROVIDER_REJECTED',
+      notification_attempts: 0,
+      notification_attempted_at: null,
+      notification_last_error: 'NOT_CONFIGURED',
     });
     const [{ n }] = await db.query<{ n: number }[]>(
       'SELECT count(*)::int AS n FROM contact_submissions',
     );
-    expect(n).toBe(2);
+    expect(n).toBe(3);
   });
 
-  it('declares the four named indexes, the due one partial on pending', async () => {
-    const rows = await db.query<{ indexname: string; indexdef: string }[]>(
-      `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'contact_submissions' ORDER BY indexname`,
+  it('declares the three named indexes and the primary key, with no retry-schedule index', async () => {
+    const rows = await db.query<{ indexname: string }[]>(
+      `SELECT indexname FROM pg_indexes WHERE tablename = 'contact_submissions' ORDER BY indexname`,
     );
     expect(rows.map((row) => row.indexname)).toEqual([
       'ix_contact_submissions_client_ip_hash_created_at',
       'ix_contact_submissions_email_created_at',
-      'ix_contact_submissions_notification_due',
       'ix_contact_submissions_status_created_at_id',
       'pk_contact_submissions',
     ]);
-    expect(rows[2].indexdef).toContain(`WHERE ((notification_status)::text = 'pending'::text)`);
   });
 });

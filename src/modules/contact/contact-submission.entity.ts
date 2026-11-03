@@ -14,7 +14,10 @@ import type { NotificationErrorCategory } from './notifications/contact-notifier
 export const CONTACT_SUBMISSION_STATUSES = ['new', 'read', 'archived'] as const;
 export type ContactSubmissionStatus = (typeof CONTACT_SUBMISSION_STATUSES)[number];
 
-/** `sent` only once the provider accepted the email (CF-10). */
+/**
+ * `pending` while an attempt runs (or if it was interrupted), `sent` only once the provider accepted the email,
+ * `failed` when the attempt failed or no provider is configured (contact form design CF-10).
+ */
 export const NOTIFICATION_STATUSES = ['pending', 'sent', 'failed'] as const;
 export type NotificationStatus = (typeof NOTIFICATION_STATUSES)[number];
 
@@ -26,9 +29,6 @@ export type NotificationStatus = (typeof NOTIFICATION_STATUSES)[number];
 @Index('ix_contact_submissions_status_created_at_id', ['status', 'createdAt', 'id'])
 @Index('ix_contact_submissions_email_created_at', ['email', 'createdAt'])
 @Index('ix_contact_submissions_client_ip_hash_created_at', ['clientIpHash', 'createdAt'])
-@Index('ix_contact_submissions_notification_due', ['notificationNextAttemptAt'], {
-  where: `"notification_status" = 'pending'`,
-})
 @Check('ck_contact_submissions_name_not_blank', `"name" ~ '[^[:space:]]'`)
 @Check('ck_contact_submissions_email_lowercase', `"email" = lower("email")`)
 @Check(
@@ -43,12 +43,16 @@ export type NotificationStatus = (typeof NOTIFICATION_STATUSES)[number];
 )
 @Check('ck_contact_submissions_notification_attempts', `"notification_attempts" >= 0`)
 @Check(
-  'ck_contact_submissions_notification_pending_schedule',
-  `"notification_status" <> 'pending' OR "notification_next_attempt_at" IS NOT NULL`,
+  'ck_contact_submissions_notification_pending_attempt',
+  `"notification_status" <> 'pending' OR "notification_attempted_at" IS NOT NULL`,
+)
+@Check(
+  'ck_contact_submissions_notification_failed_error',
+  `"notification_status" <> 'failed' OR "notification_last_error" IS NOT NULL`,
 )
 @Check(
   'ck_contact_submissions_notification_last_error',
-  `"notification_last_error" IN ('TIMEOUT', 'NETWORK_ERROR', 'PROVIDER_REJECTED', 'PROVIDER_UNAVAILABLE', 'INVALID_RESPONSE')`,
+  `"notification_last_error" IN ('NOT_CONFIGURED', 'TIMEOUT', 'NETWORK_ERROR', 'PROVIDER_REJECTED', 'PROVIDER_UNAVAILABLE', 'INVALID_RESPONSE')`,
 )
 @Check(
   'ck_contact_submissions_notification_sent_pair',
@@ -82,15 +86,16 @@ export class ContactSubmission {
   @Column({ name: 'client_ip_hash', type: 'varchar', length: 64, nullable: true })
   clientIpHash!: string | null;
 
-  @Column({ name: 'notification_status', type: 'varchar', length: 16, default: 'pending' })
+  /** No default: every insert decides it (`pending` with an attempt, or `failed` without a provider). */
+  @Column({ name: 'notification_status', type: 'varchar', length: 16 })
   notificationStatus!: NotificationStatus;
 
   @Column({ name: 'notification_attempts', type: 'smallint', default: 0 })
   notificationAttempts!: number;
 
-  /** When the next attempt is due; during an attempt, the end of its lease (CF-12). */
-  @Column({ name: 'notification_next_attempt_at', type: 'timestamptz', nullable: true })
-  notificationNextAttemptAt!: Date | null;
+  /** When the latest attempt started; a `pending` row older than the retry window was interrupted (CF-12). */
+  @Column({ name: 'notification_attempted_at', type: 'timestamptz', nullable: true })
+  notificationAttemptedAt!: Date | null;
 
   @Column({ name: 'notification_last_error', type: 'varchar', length: 32, nullable: true })
   notificationLastError!: NotificationErrorCategory | null;

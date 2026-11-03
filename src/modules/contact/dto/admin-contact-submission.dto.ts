@@ -13,6 +13,7 @@ import {
   NOTIFICATION_ERROR_CATEGORIES,
   type NotificationErrorCategory,
 } from '../notifications/contact-notifier.js';
+import { STALE_ATTEMPT_SECONDS } from '../notifications/contact-notifications.service.js';
 
 export const adminContactSubmissionsQuerySchema = z
   .strictObject({
@@ -30,12 +31,16 @@ export type ContactSubmissionIdParam = z.infer<typeof contactSubmissionIdParamSc
 /** The delivery state of the business-inbox email (CF-10). */
 export class AdminContactNotificationDto {
   @ApiProperty({ enum: NOTIFICATION_STATUSES }) status!: NotificationStatus;
+  /** Attempts made: 1 after the submission, +1 per admin retry; 0 when no provider was configured. */
   @ApiProperty({ example: 1 }) attempts!: number;
   @ApiProperty({ type: String, format: 'date-time', nullable: true })
-  nextAttemptAt!: string | null;
+  lastAttemptAt!: string | null;
+  /** Why it isn't sent: set when `failed`, cleared once `sent`. */
   @ApiProperty({ type: String, enum: NOTIFICATION_ERROR_CATEGORIES, nullable: true })
   lastError!: NotificationErrorCategory | null;
   @ApiProperty({ type: String, format: 'date-time', nullable: true }) sentAt!: string | null;
+  /** Whether POST …/notification/retry would attempt now: `failed`, or `pending` with a stale attempt. */
+  @ApiProperty() retryable!: boolean;
 }
 
 /** A submission as the admin inbox shows it (CF-14, CF-15): never the client IP hash. */
@@ -53,8 +58,21 @@ export class AdminContactSubmissionDto {
 
 const iso = (instant: Date | null) => (instant ? instant.toISOString() : null);
 
+/** Same rule as the retry claim (ContactNotificationsService.retry). */
+function isRetryable(row: ContactSubmission, now: Date): boolean {
+  if (row.notificationStatus === 'failed') return true;
+  return (
+    row.notificationStatus === 'pending' &&
+    row.notificationAttemptedAt !== null &&
+    now.getTime() - row.notificationAttemptedAt.getTime() > STALE_ATTEMPT_SECONDS * 1000
+  );
+}
+
 /** Whitelist by construction (I10). */
-export function toAdminContactSubmissionDto(row: ContactSubmission): AdminContactSubmissionDto {
+export function toAdminContactSubmissionDto(
+  row: ContactSubmission,
+  now: Date = new Date(),
+): AdminContactSubmissionDto {
   return {
     id: row.id,
     name: row.name,
@@ -65,9 +83,10 @@ export function toAdminContactSubmissionDto(row: ContactSubmission): AdminContac
     notification: {
       status: row.notificationStatus,
       attempts: row.notificationAttempts,
-      nextAttemptAt: iso(row.notificationNextAttemptAt),
+      lastAttemptAt: iso(row.notificationAttemptedAt),
       lastError: row.notificationLastError,
       sentAt: iso(row.notificationSentAt),
+      retryable: isRetryable(row, now),
     },
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
 import { AppError } from '../../errors/app-error.js';
 import { baselineErrors } from '../../errors/baseline-errors.js';
+import { contactErrors } from './contact.errors.js';
 import { ContactSubmission, type ContactSubmissionStatus } from './contact-submission.entity.js';
 import { ContactNotificationsService } from './notifications/contact-notifications.service.js';
 
@@ -55,9 +56,14 @@ export class ContactInboxService {
     return this.get(id);
   }
 
-  /** One delivery attempt now (CF-13c); a sent notification is returned unchanged. */
+  /**
+   * One delivery attempt now for a failed (or stale pending) notification (CF-13). A sent notification, or one whose
+   * attempt is still running, is returned unchanged: the answer always shows the current state.
+   */
   async retryNotification(id: string): Promise<ContactSubmission> {
     await this.get(id);
+    if (!this.notifications.enabled)
+      throw new AppError(contactErrors.CONTACT_NOTIFICATIONS_UNAVAILABLE);
     await this.notifications.retry(id);
     return this.get(id);
   }

@@ -1,12 +1,109 @@
-import { NotificationDeliveryError } from './contact-notifier.js';
+import type { DataSource } from 'typeorm';
+import type { ContactSubmission } from '../contact-submission.entity.js';
+import { toAdminContactSubmissionDto } from '../dto/admin-contact-submission.dto.js';
+import { type ContactNotifier, NotificationDeliveryError } from './contact-notifier.js';
+import {
+  ContactNotificationsService,
+  STALE_ATTEMPT_SECONDS,
+} from './contact-notifications.service.js';
 import { buildNotificationEmail } from './notification-email.js';
-import { MAX_AUTOMATIC_ATTEMPTS, retryDelaySeconds } from './notification-schedule.js';
 import { ResendContactNotifier } from './resend-contact-notifier.js';
 
-describe('retryDelaySeconds (contact form design CF-12)', () => {
-  it('backs off after each failed automatic attempt, then gives up after the fifth', () => {
-    expect([1, 2, 3, 4, 5, 6].map(retryDelaySeconds)).toEqual([60, 300, 1800, 7200, null, null]);
-    expect(MAX_AUTOMATIC_ATTEMPTS).toBe(5);
+describe('ContactNotificationsService (contact form design CF-10 to CF-13)', () => {
+  const submission = {
+    id: '01900000-0000-7000-8000-000000000001',
+    name: 'A',
+    email: 'a@example.com',
+    subject: 'general' as const,
+    message: 'Xin chào bạn',
+    createdAt: new Date('2026-11-03T07:00:00Z'),
+  };
+  const setup = (send: ContactNotifier['send'], claimed: unknown[] = [submission]) => {
+    const query = vi.fn(async (sql: string, _params?: unknown[]) =>
+      sql.includes('RETURNING') ? [claimed, 1] : [],
+    );
+    const notifier = { enabled: true, send: vi.fn(send) };
+    const service = new ContactNotificationsService({ query } as unknown as DataSource, notifier);
+    const writes = () => query.mock.calls.map(([sql, params]) => ({ sql, params }));
+    return { service, notifier, writes };
+  };
+
+  it('makes one attempt for a new submission and records sent with the provider id', async () => {
+    const { service, notifier, writes } = setup(async () => ({ providerMessageId: 'msg_1' }));
+    await service.deliverNew(submission);
+
+    expect(notifier.send).toHaveBeenCalledTimes(1);
+    expect(notifier.send.mock.calls[0][1]).toBe(`contact-submission-${submission.id}`);
+    const [write] = writes();
+    expect(write.sql).toContain(`notification_status = 'sent'`);
+    expect(write.params).toEqual([submission.id, 'msg_1']);
+    expect(writes()).toHaveLength(1);
+  });
+
+  it('records failed with the category when the provider fails, and never sent', async () => {
+    const { service, writes } = setup(async () => {
+      throw new NotificationDeliveryError('TIMEOUT');
+    });
+    await service.deliverNew(submission);
+
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0].sql).toContain(`notification_status = 'failed'`);
+    expect(writes()[0].sql).toContain(`notification_status = 'pending'`); // never downgrades a sent one
+    expect(writes()[0].params).toEqual([submission.id, 'TIMEOUT']);
+  });
+
+  it('never throws from the inline attempt, leaving the row pending on an unexpected error', async () => {
+    const { service, writes } = setup(async () => {
+      throw new Error('bug');
+    });
+    await expect(service.deliverNew(submission)).resolves.toBeUndefined();
+    expect(writes()).toEqual([]);
+  });
+
+  it('retries only what the conditional claim returned', async () => {
+    const claimedNothing = setup(async () => ({ providerMessageId: 'msg_2' }), []);
+    expect(await claimedNothing.service.retry(submission.id)).toBe('not_retryable');
+    expect(claimedNothing.notifier.send).not.toHaveBeenCalled();
+
+    const claimed = setup(async () => ({ providerMessageId: 'msg_2' }));
+    expect(await claimed.service.retry(submission.id)).toBe('sent');
+    const [claim] = claimed.writes();
+    expect(claim.sql).toContain(`notification_status = 'failed'`);
+    expect(claim.sql).toContain('notification_attempted_at < now() - make_interval');
+    expect(claim.params).toEqual([submission.id, STALE_ATTEMPT_SECONDS]);
+  });
+});
+
+describe('notification.retryable (CF-13)', () => {
+  const now = new Date('2026-11-03T10:00:00Z');
+  const row = (fields: Partial<ContactSubmission>) =>
+    ({
+      id: 'x',
+      name: 'A',
+      email: 'a@example.com',
+      subject: 'general',
+      message: 'Xin chào bạn',
+      status: 'new',
+      clientIpHash: null,
+      notificationStatus: 'pending',
+      notificationAttempts: 1,
+      notificationAttemptedAt: now,
+      notificationLastError: null,
+      notificationSentAt: null,
+      notificationProviderMessageId: null,
+      createdAt: now,
+      updatedAt: now,
+      ...fields,
+    }) as ContactSubmission;
+  const ago = (seconds: number) => new Date(now.getTime() - seconds * 1000);
+
+  it.each([
+    ['failed', { notificationStatus: 'failed', notificationLastError: 'TIMEOUT' }, true],
+    ['sent', { notificationStatus: 'sent', notificationSentAt: now }, false],
+    ['pending, attempt running', { notificationAttemptedAt: ago(STALE_ATTEMPT_SECONDS) }, false],
+    ['pending, attempt stale', { notificationAttemptedAt: ago(STALE_ATTEMPT_SECONDS + 1) }, true],
+  ] as const)('%s → %s', (_name, fields, retryable) => {
+    expect(toAdminContactSubmissionDto(row(fields), now).notification.retryable).toBe(retryable);
   });
 });
 
@@ -22,7 +119,9 @@ describe('buildNotificationEmail', () => {
 
   it('carries sender, subject label, message and creation time as plain text, replying to the sender', () => {
     const email = buildNotificationEmail(submission);
-    expect(email.subject).toBe('[Liên hệ] Coaching 1:1 YouTube 3 tháng — Nguyễn Văn A');
+    expect(email.subject).toBe(
+      '[Liên hệ] Hỏi về chương trình 3-Month 1:1 YouTube Coaching — Nguyễn Văn A',
+    );
     expect(email.replyTo).toBe('a@example.com');
     expect(email.text).toBe(
       [
@@ -30,7 +129,7 @@ describe('buildNotificationEmail', () => {
         '',
         'Họ tên: Nguyễn Văn A',
         'Email: a@example.com',
-        'Chủ đề: Coaching 1:1 YouTube 3 tháng',
+        'Chủ đề: Hỏi về chương trình 3-Month 1:1 YouTube Coaching',
         'Thời gian: 14:05:09 03/11/2026 (giờ Việt Nam) · 2026-11-03T07:05:09.123Z',
         'Mã liên hệ: 01900000-0000-7000-8000-000000000001',
         '',

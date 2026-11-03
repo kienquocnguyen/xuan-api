@@ -1168,8 +1168,9 @@ describe('OpenAPI document', () => {
       ]);
       expect(propsOf('AdminContactNotificationDto')).toEqual([
         'attempts',
+        'lastAttemptAt',
         'lastError',
-        'nextAttemptAt',
+        'retryable',
         'sentAt',
         'status',
       ]);
@@ -1180,6 +1181,9 @@ describe('OpenAPI document', () => {
       expect(prop('AdminContactSubmissionDto', 'status')).toContain('["new","read","archived"]');
       expect(prop('AdminContactNotificationDto', 'status')).toContain(
         '["pending","sent","failed"]',
+      );
+      expect(prop('AdminContactNotificationDto', 'lastError')).toContain(
+        '["NOT_CONFIGURED","TIMEOUT","NETWORK_ERROR","PROVIDER_REJECTED","PROVIDER_UNAVAILABLE","INVALID_RESPONSE"]',
       );
     });
 
@@ -1208,14 +1212,17 @@ describe('OpenAPI document', () => {
       expect(codes('/admin/contact-submissions/{submissionId}', 'get')).toEqual(
         [...admin, 'NOT_FOUND'].sort(),
       );
-      for (const action of ['read', 'archive', 'notification/retry']) {
+      for (const action of ['read', 'archive']) {
         expect(codes(`/admin/contact-submissions/{submissionId}/${action}`, 'post')).toEqual(
           [...admin, 'NOT_FOUND'].sort(),
         );
       }
+      expect(codes('/admin/contact-submissions/{submissionId}/notification/retry', 'post')).toEqual(
+        [...admin, 'CONTACT_NOTIFICATIONS_UNAVAILABLE', 'NOT_FOUND'].sort(),
+      );
     });
 
-    it('keeps the scheduled delivery route out of the document', () => {
+    it('has no internal or scheduled-delivery route', () => {
       expect(Object.keys(doc().paths).filter((path) => path.startsWith('/internal'))).toEqual([]);
     });
   });

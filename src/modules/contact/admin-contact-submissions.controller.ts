@@ -7,6 +7,7 @@ import { ApiErrorResponses } from '../../http/openapi/api-error-responses.js';
 import { ApiPaginatedEnvelopeResponse } from '../../http/openapi/api-paginated-envelope-response.js';
 import { ApiSchemaParameters } from '../../http/openapi/api-schema-parameters.js';
 import { type Page, toPageInfo } from '../../http/pagination/page.js';
+import { contactErrors } from './contact.errors.js';
 import { ContactInboxService } from './contact-inbox.service.js';
 import {
   AdminContactSubmissionDto,
@@ -35,7 +36,7 @@ export class AdminContactSubmissionsController {
   ): Promise<Page<AdminContactSubmissionDto>> {
     const { items, totalItems } = await this.inbox.list(query);
     return {
-      items: items.map(toAdminContactSubmissionDto),
+      items: items.map((row) => toAdminContactSubmissionDto(row)),
       pageInfo: toPageInfo(query.page, query.pageSize, totalItems),
     };
   }
@@ -73,11 +74,18 @@ export class AdminContactSubmissionsController {
     return toAdminContactSubmissionDto(await this.inbox.archive(params.submissionId));
   }
 
+  // One attempt now when `notification.retryable`; otherwise the submission comes back unchanged (CF-13).
   @Post(':submissionId/notification/retry')
   @HttpCode(200)
   @ApiSchemaParameters('path', contactSubmissionIdParamSchema)
   @ApiEnvelopeResponse(AdminContactSubmissionDto)
-  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND)
+  @ApiErrorResponses(
+    VALIDATION_FAILED,
+    UNAUTHENTICATED,
+    FORBIDDEN,
+    NOT_FOUND,
+    contactErrors.CONTACT_NOTIFICATIONS_UNAVAILABLE,
+  )
   async retryNotification(
     @Param({ schema: contactSubmissionIdParamSchema }) params: ContactSubmissionIdParam,
   ): Promise<AdminContactSubmissionDto> {

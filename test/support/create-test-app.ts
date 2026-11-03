@@ -52,7 +52,6 @@ export async function createTestApp(
         minScore: 0.5,
       },
       email: { provider: 'disabled' }, // the fake notifier below replaces any provider
-      cronSecret: null,
       ...options.contact,
     },
   };

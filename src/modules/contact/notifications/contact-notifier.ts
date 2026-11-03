@@ -1,8 +1,12 @@
 import type { AppConfig } from '../../../config/load-config.js';
 import { ResendContactNotifier } from './resend-contact-notifier.js';
 
-/** Why an attempt failed; stored in `notification_last_error` (a category, never a provider body). */
+/**
+ * Why a notification isn't sent; stored in `notification_last_error` (a category, never a provider body).
+ * `NOT_CONFIGURED`: no provider, so nothing was attempted. The others are failed attempts.
+ */
 export const NOTIFICATION_ERROR_CATEGORIES = [
+  'NOT_CONFIGURED',
   'TIMEOUT',
   'NETWORK_ERROR',
   'PROVIDER_REJECTED',
@@ -11,8 +15,11 @@ export const NOTIFICATION_ERROR_CATEGORIES = [
 ] as const;
 export type NotificationErrorCategory = (typeof NOTIFICATION_ERROR_CATEGORIES)[number];
 
+/** The categories of a failed attempt. */
+export type DeliveryErrorCategory = Exclude<NotificationErrorCategory, 'NOT_CONFIGURED'>;
+
 export class NotificationDeliveryError extends Error {
-  constructor(readonly category: NotificationErrorCategory) {
+  constructor(readonly category: DeliveryErrorCategory) {
     super(`Notification delivery failed: ${category}`);
     this.name = 'NotificationDeliveryError';
   }
@@ -28,7 +35,7 @@ export const CONTACT_NOTIFIER = Symbol('CONTACT_NOTIFIER');
  * provider accepted the message, and throws NotificationDeliveryError otherwise. E2E tests replace it with a fake.
  */
 export interface ContactNotifier {
-  /** `false` without provider configuration: notifications stay pending, nothing is attempted. */
+  /** `false` without provider configuration: new notifications are stored `failed` (`NOT_CONFIGURED`). */
   readonly enabled: boolean;
   send(email: NotificationEmail, idempotencyKey: string): Promise<{ providerMessageId: string }>;
 }

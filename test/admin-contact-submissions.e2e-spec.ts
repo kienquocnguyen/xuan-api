@@ -29,7 +29,11 @@ describe('Admin contact inbox (contact form design CF-14)', () => {
       subject: 'general',
       message: 'Xin chào, mình muốn hợp tác.',
       client_ip_hash: 'f'.repeat(64),
-      notification_next_attempt_at: new Date('2026-11-03T10:00:00Z'),
+      // The common case needing attention: the one attempt failed.
+      notification_status: 'failed',
+      notification_attempts: 1,
+      notification_attempted_at: new Date('2026-11-03T09:00:01Z'),
+      notification_last_error: 'PROVIDER_UNAVAILABLE',
       created_at: new Date('2026-11-03T09:00:00Z'),
       updated_at: new Date('2026-11-03T09:00:00Z'),
       ...columns,
@@ -49,11 +53,12 @@ describe('Admin contact inbox (contact form design CF-14)', () => {
     message: 'Xin chào, mình muốn hợp tác.',
     status: 'new',
     notification: {
-      status: 'pending',
-      attempts: 0,
-      nextAttemptAt: '2026-11-03T10:00:00.000Z',
-      lastError: null,
+      status: 'failed',
+      attempts: 1,
+      lastAttemptAt: '2026-11-03T09:00:01.000Z',
+      lastError: 'PROVIDER_UNAVAILABLE',
       sentAt: null,
+      retryable: true,
     },
     createdAt: '2026-11-03T09:00:00.000Z',
     updatedAt: '2026-11-03T09:00:00.000Z',
@@ -116,8 +121,7 @@ describe('Admin contact inbox (contact form design CF-14)', () => {
     it('returns the submission without marking it read', async () => {
       const id = await insert({
         notification_status: 'sent',
-        notification_attempts: 1,
-        notification_next_attempt_at: null,
+        notification_last_error: null,
         notification_sent_at: new Date('2026-11-03T09:00:05Z'),
         notification_provider_message_id: 'msg_1',
       });
@@ -128,9 +132,10 @@ describe('Admin contact inbox (contact form design CF-14)', () => {
           notification: {
             status: 'sent',
             attempts: 1,
-            nextAttemptAt: null,
+            lastAttemptAt: '2026-11-03T09:00:01.000Z',
             lastError: null,
             sentAt: '2026-11-03T09:00:05.000Z',
+            retryable: false,
           },
         }),
       });
@@ -183,61 +188,152 @@ describe('Admin contact inbox (contact form design CF-14)', () => {
     });
   });
 
-  describe('POST …/notification/retry (CF-13c)', () => {
-    it('sends a failed notification now, after automatic attempts ran out', async () => {
-      const id = await insert({
-        notification_status: 'failed',
-        notification_attempts: 5,
-        notification_next_attempt_at: null,
-        notification_last_error: 'PROVIDER_REJECTED',
-      });
-      const res = await post(`/${id}/notification/retry`);
+  describe('POST …/notification/retry (CF-13)', () => {
+    const retry = (id: string, cookie = admin) => post(`/${id}/notification/retry`, cookie);
+    const unavailable = {
+      data: null,
+      error: {
+        code: 'CONTACT_NOTIFICATIONS_UNAVAILABLE',
+        message: 'Notification email is not configured.',
+        details: {},
+      },
+    };
+
+    it('sends a failed notification now: one attempt, then sent', async () => {
+      const id = await insert();
+      const res = await retry(id);
       expect(res.status).toBe(200);
       expect(res.body.data.notification).toEqual({
         status: 'sent',
-        attempts: 6,
-        nextAttemptAt: null,
+        attempts: 2,
+        lastAttemptAt: expect.any(String),
         lastError: null,
         sentAt: expect.any(String),
+        retryable: false,
       });
-      expect(fakeNotifier(app).sent).toHaveLength(1);
+      expect(res.body.data.notification.lastAttemptAt).not.toBe('2026-11-03T09:00:01.000Z');
+      expect(fakeNotifier(app).attempts).toBe(1);
+      expect(fakeNotifier(app).sent.map((sent) => sent.idempotencyKey)).toEqual([
+        `contact-submission-${id}`,
+      ]);
+      const [row] = await db.query(
+        'SELECT notification_provider_message_id FROM contact_submissions',
+      );
+      expect(row.notification_provider_message_id).toBe('fake-1');
     });
 
-    it('keeps a failed notification failed when the retry fails too', async () => {
-      const id = await insert({
-        notification_status: 'failed',
-        notification_attempts: 5,
-        notification_next_attempt_at: null,
-      });
+    it('keeps it failed, with the new category, when the retry fails too', async () => {
+      const id = await insert();
       fakeNotifier(app).willFail('TIMEOUT');
-      const res = await post(`/${id}/notification/retry`);
+      const res = await retry(id);
+      expect(res.status).toBe(200);
       expect(res.body.data.notification).toMatchObject({
         status: 'failed',
-        attempts: 6,
-        nextAttemptAt: null,
+        attempts: 2,
         lastError: 'TIMEOUT',
+        sentAt: null,
+        retryable: true,
       });
     });
 
     it('leaves a sent notification alone', async () => {
       const id = await insert({
         notification_status: 'sent',
-        notification_attempts: 1,
-        notification_next_attempt_at: null,
+        notification_last_error: null,
         notification_sent_at: new Date('2026-11-03T09:00:05Z'),
       });
-      expect((await post(`/${id}/notification/retry`)).body.data.notification.attempts).toBe(1);
+      const res = await retry(id);
+      expect(res.status).toBe(200);
+      expect(res.body.data.notification).toMatchObject({ status: 'sent', attempts: 1 });
       expect(fakeNotifier(app).attempts).toBe(0);
     });
 
-    it('changes nothing without a configured provider', async () => {
+    it('leaves a running attempt alone, and retries one that was interrupted', async () => {
+      const running = await insert({
+        notification_status: 'pending',
+        notification_last_error: null,
+        notification_attempted_at: new Date(Date.now() - 60_000),
+      });
+      const res = await retry(running);
+      expect(res.status).toBe(200);
+      expect(res.body.data.notification).toMatchObject({
+        status: 'pending',
+        attempts: 1,
+        retryable: false,
+      });
+      expect(fakeNotifier(app).attempts).toBe(0);
+
+      const interrupted = await insert({
+        email: 'b@example.com',
+        notification_status: 'pending',
+        notification_last_error: null,
+        notification_attempted_at: new Date(Date.now() - 11 * 60_000),
+      });
+      expect((await get(`/${interrupted}`)).body.data.notification.retryable).toBe(true);
+      expect((await retry(interrupted)).body.data.notification).toMatchObject({
+        status: 'sent',
+        attempts: 2,
+      });
+    });
+
+    it('sends once when two retries arrive together', async () => {
+      const id = await insert();
+      fakeNotifier(app).slowDown(200);
+      const results = await Promise.all([retry(id), retry(id)]);
+      expect(results.map((res) => res.status)).toEqual([200, 200]);
+      expect(fakeNotifier(app).attempts).toBe(1);
+      const [row] = await db.query(
+        'SELECT notification_status, notification_attempts FROM contact_submissions',
+      );
+      expect(row).toEqual({ notification_status: 'sent', notification_attempts: 2 });
+    });
+
+    it('delivers no second email when the provider accepted but its answer was lost', async () => {
+      fakeNotifier(app).willFail('lost_response');
+      const submitted = await server().post('/contact-submissions').set(XHR).send({
+        name: 'B',
+        email: 'b@example.com',
+        subject: 'general',
+        message: 'Xin chào, mình có câu hỏi.',
+        recaptchaToken: 'lost-response-token',
+      });
+      expect(submitted.status).toBe(202);
+      const [{ id }] = await db.query<{ id: string }[]>('SELECT id FROM contact_submissions');
+      expect((await get(`/${id}`)).body.data.notification).toMatchObject({
+        status: 'failed',
+        lastError: 'TIMEOUT',
+      });
+
+      const res = await retry(id);
+      expect(res.body.data.notification).toMatchObject({ status: 'sent', attempts: 2 });
+      expect(fakeNotifier(app).attempts).toBe(2);
+      expect(fakeNotifier(app).sent).toHaveLength(1); // same Idempotency-Key: one email
+    });
+
+    it('answers 503 CONTACT_NOTIFICATIONS_UNAVAILABLE without a provider, changing nothing', async () => {
       fakeNotifier(app).enabled = false;
       const id = await insert();
-      expect((await post(`/${id}/notification/retry`)).body).toEqual({ data: dto(id) });
+      const res = await retry(id);
+      expect(res.status).toBe(503);
+      expect(res.body).toEqual(unavailable);
+      expect((await get(`/${id}`)).body).toEqual({ data: dto(id) });
     });
 
     it('answers 404 for an unknown submission', async () => {
-      expect((await post(`/${UNKNOWN_ID}/notification/retry`)).body).toEqual(notFound);
+      expect((await retry(UNKNOWN_ID)).body).toEqual(notFound);
+    });
+
+    it('is for admins only, and never sends for anyone else', async () => {
+      const id = await insert();
+      const anonymous = await server()
+        .post(`/admin/contact-submissions/${id}/notification/retry`)
+        .set(XHR);
+      expect(anonymous.status).toBe(401);
+      for (const role of ['user', 'editor'] as const) {
+        const { cookie } = await signInAs(app, { role });
+        expect((await retry(id, cookie)).status).toBe(403);
+      }
+      expect(fakeNotifier(app).attempts).toBe(0);
     });
   });
 

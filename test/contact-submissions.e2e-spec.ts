@@ -38,7 +38,7 @@ type StoredRow = {
   client_ip_hash: string | null;
   notification_status: string;
   notification_attempts: number;
-  notification_next_attempt_at: Date | null;
+  notification_attempted_at: Date | null;
   notification_last_error: string | null;
   notification_sent_at: Date | null;
   notification_provider_message_id: string | null;
@@ -92,7 +92,7 @@ describe('POST /contact-submissions (contact form design §3)', () => {
         client_ip_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
         notification_status: 'sent',
         notification_attempts: 1,
-        notification_next_attempt_at: null,
+        notification_attempted_at: expect.any(Date),
         notification_last_error: null,
         notification_sent_at: expect.any(Date),
         notification_provider_message_id: 'fake-1',
@@ -106,7 +106,10 @@ describe('POST /contact-submissions (contact form design §3)', () => {
       const [sent] = fakeNotifier(app).sent;
       expect(sent.idempotencyKey).toBe(`contact-submission-${row.id}`);
       expect(sent.email.replyTo).toBe('a.person@example.com');
-      expect(sent.email.subject).toBe('[Liên hệ] Khóa học YouTube Editing Workflow — Nguyễn Văn A');
+      expect(fakeNotifier(app).attempts).toBe(1);
+      expect(sent.email.subject).toBe(
+        '[Liên hệ] Hỏi về khóa học YouTube Editing Workflow — Nguyễn Văn A',
+      );
       expect(sent.email.text).toContain('Mình muốn hỏi về khóa học.\nCảm ơn!');
       expect(sent.email.text).toContain(row.created_at.toISOString());
     });
@@ -118,50 +121,73 @@ describe('POST /contact-submissions (contact form design §3)', () => {
       expect(JSON.stringify(res.body)).not.toContain(row.id);
     });
 
-    it('stores the submission and answers 202 when the email provider fails, scheduling a retry (CF-11)', async () => {
-      fakeNotifier(app).willFail('PROVIDER_UNAVAILABLE');
+    it.each([['PROVIDER_UNAVAILABLE'], ['PROVIDER_REJECTED'], ['TIMEOUT']] as const)(
+      'stores the submission and answers 202 when the provider fails (%s), recording failed after one attempt (CF-11)',
+      async (category) => {
+        fakeNotifier(app).willFail(category);
+        const res = await submit();
+
+        expect(res.status).toBe(202);
+        expect(res.body).toEqual({ data: { receivedAt: expect.stringMatching(ISO) } });
+        expect(await rows()).toEqual([
+          expect.objectContaining({
+            notification_status: 'failed',
+            notification_attempts: 1,
+            notification_attempted_at: expect.any(Date),
+            notification_last_error: category,
+            notification_sent_at: null,
+            notification_provider_message_id: null,
+          }),
+        ]);
+        expect(fakeNotifier(app).attempts).toBe(1); // no automatic retry
+        expect(fakeNotifier(app).sent).toEqual([]);
+      },
+    );
+
+    it('stores the submission and answers 202 when the delivery step breaks unexpectedly, leaving it pending', async () => {
+      fakeNotifier(app).willFail('unexpected');
       const res = await submit();
 
       expect(res.status).toBe(202);
-      const [row] = await rows();
-      expect(row).toMatchObject({
-        notification_status: 'pending',
-        notification_attempts: 1,
-        notification_last_error: 'PROVIDER_UNAVAILABLE',
-        notification_sent_at: null,
-        notification_provider_message_id: null,
-      });
-      const [{ delay }] = await db.query<{ delay: number }[]>(
-        `SELECT extract(epoch FROM notification_next_attempt_at - now())::int AS delay FROM contact_submissions`,
-      );
-      expect(delay).toBeGreaterThan(50);
-      expect(delay).toBeLessThanOrEqual(60);
-      expect(fakeNotifier(app).sent).toEqual([]);
+      expect(await rows()).toEqual([
+        expect.objectContaining({
+          notification_status: 'pending',
+          notification_attempts: 1,
+          notification_attempted_at: expect.any(Date),
+          notification_last_error: null,
+        }),
+      ]);
     });
 
-    it('keeps the notification pending, with no attempt, when no provider is configured', async () => {
+    it('records the notification failed (NOT_CONFIGURED), with no attempt, when no provider is configured', async () => {
       fakeNotifier(app).enabled = false;
-      expect((await submit()).status).toBe(202);
+      const res = await submit();
+
+      expect(res.status).toBe(202);
+      expect(res.body).toEqual({ data: { receivedAt: expect.stringMatching(ISO) } });
       expect(await rows()).toEqual([
-        expect.objectContaining({ notification_status: 'pending', notification_attempts: 0 }),
+        expect.objectContaining({
+          notification_status: 'failed',
+          notification_attempts: 0,
+          notification_attempted_at: null,
+          notification_last_error: 'NOT_CONFIGURED',
+          notification_sent_at: null,
+        }),
       ]);
       expect(fakeNotifier(app).attempts).toBe(0);
     });
 
-    it('sends up to two other due notifications after a successful one (CF-13a)', async () => {
-      for (const email of ['b@example.com', 'c@example.com', 'd@example.com']) {
-        await db.query(
-          `INSERT INTO contact_submissions (name, email, subject, message, notification_attempts, notification_next_attempt_at, notification_last_error)
-           VALUES ('B', $1, 'general', 'Tin nhắn cũ hơn', 1, now() - interval '1 minute', 'TIMEOUT')`,
-          [email],
-        );
-      }
-      expect((await submit()).status).toBe(202);
-      const statuses = await db.query<{ email: string; notification_status: string }[]>(
-        `SELECT email, notification_status FROM contact_submissions ORDER BY email`,
+    it('sends nothing for other submissions: only its own notification is attempted', async () => {
+      await db.query(
+        `INSERT INTO contact_submissions (name, email, subject, message, notification_status, notification_attempts, notification_attempted_at, notification_last_error)
+         VALUES ('B', 'b@example.com', 'general', 'Tin nhắn cũ hơn', 'failed', 1, now() - interval '1 minute', 'TIMEOUT')`,
       );
-      expect(statuses.filter((row) => row.notification_status === 'sent')).toHaveLength(3);
-      expect(fakeNotifier(app).sent).toHaveLength(3);
+      expect((await submit()).status).toBe(202);
+      expect(fakeNotifier(app).attempts).toBe(1);
+      const [{ notification_status }] = await db.query<{ notification_status: string }[]>(
+        `SELECT notification_status FROM contact_submissions WHERE email = 'b@example.com'`,
+      );
+      expect(notification_status).toBe('failed');
     });
   });
 
@@ -177,12 +203,22 @@ describe('POST /contact-submissions (contact form design §3)', () => {
       expect(fakeRecaptcha(app).calls).toHaveLength(1);
     });
 
-    it('stores one row for identical submissions sent at the same time', async () => {
+    it('stores one row and sends one email for identical submissions sent at the same time', async () => {
+      fakeNotifier(app).slowDown(100);
       const results = await Promise.all(Array.from({ length: 5 }, () => submit()));
       expect(results.map((res) => res.status)).toEqual([202, 202, 202, 202, 202]);
       expect(new Set(results.map((res) => res.body.data.receivedAt)).size).toBe(1);
       expect(await rows()).toHaveLength(1);
+      expect(fakeNotifier(app).attempts).toBe(1);
       expect(fakeNotifier(app).sent).toHaveLength(1);
+    });
+
+    it('sends no email for a duplicate of a submission whose notification failed', async () => {
+      fakeNotifier(app).willFail('PROVIDER_UNAVAILABLE');
+      await submit();
+      expect((await submit()).status).toBe(202);
+      expect(fakeNotifier(app).attempts).toBe(1);
+      expect(await rows()).toEqual([expect.objectContaining({ notification_status: 'failed' })]);
     });
 
     it('treats another subject or message as a new submission', async () => {
@@ -315,7 +351,6 @@ describe('POST /contact-submissions in production without reCAPTCHA (CF-5)', () 
       contact: {
         recaptcha: { mode: 'unconfigured' },
         email: { provider: 'disabled' },
-        cronSecret: null,
       },
     });
   });
