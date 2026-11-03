@@ -64,7 +64,11 @@ export class ContactSubmissionsService {
     await this.assertWithinLimits(manager, input.email, ipHash);
     if (!(await this.isHuman(input.recaptchaToken, clientIp))) {
       // A double click sends one token twice and Google refuses the second (CF-7): answer it like the first.
-      const first = await this.findDuplicate(manager, input);
+      // Under the email's lock, so a first request still inserting has committed before the check.
+      const first = await this.dataSource.transaction(async (tx) => {
+        await this.lockEmail(tx, input.email);
+        return this.findDuplicate(tx, input);
+      });
       if (first) return first;
       throw new AppError(contactErrors.RECAPTCHA_VERIFICATION_FAILED);
     }
@@ -72,9 +76,7 @@ export class ContactSubmissionsService {
     const notify = this.notifications.enabled;
     const stored = await this.dataSource.transaction(async (tx) => {
       // Serializes submissions for one email, so check-then-insert can't race (CF-7). I8: `tx` only.
-      await tx.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [
-        `contact_submissions:${input.email}`,
-      ]);
+      await this.lockEmail(tx, input.email);
       const duplicate = await this.findDuplicate(tx, input);
       if (duplicate) return { id: null, ...duplicate }; // no second row, no second email
       await this.assertWithinLimits(tx, input.email, ipHash);
@@ -109,6 +111,13 @@ export class ContactSubmissionsService {
       this.logger.warn(`Contact notification ${stored.id} not sent: no email provider configured.`);
     }
     return { receivedAt: stored.receivedAt };
+  }
+
+  /** Held until the transaction ends. */
+  private async lockEmail(tx: EntityManager, email: string): Promise<void> {
+    await tx.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [
+      `contact_submissions:${email}`,
+    ]);
   }
 
   /** Same email, subject and message within 24 hours (CF-7). */

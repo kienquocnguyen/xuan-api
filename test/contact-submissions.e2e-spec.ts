@@ -221,6 +221,18 @@ describe('POST /contact-submissions (contact form design §3)', () => {
       expect(await rows()).toEqual([expect.objectContaining({ notification_status: 'failed' })]);
     });
 
+    it('answers a true double click (one token, sent twice at once) with 202 twice and one row', async () => {
+      fakeNotifier(app).slowDown(100);
+      const results = await Promise.all([
+        submit({ recaptchaToken: 'double-click' }),
+        submit({ recaptchaToken: 'double-click' }),
+      ]);
+      expect(results.map((res) => res.status)).toEqual([202, 202]);
+      expect(results[1].body).toEqual(results[0].body);
+      expect(await rows()).toHaveLength(1);
+      expect(fakeNotifier(app).sent).toHaveLength(1);
+    });
+
     it('treats another subject or message as a new submission', async () => {
       await submit();
       await submit({ subject: 'general' });

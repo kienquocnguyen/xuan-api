@@ -10,7 +10,8 @@ import { buildNotificationEmail, type NotifiedSubmission } from './notification-
 
 /**
  * A `pending` attempt older than this was interrupted (the request died, or the outcome couldn't be written), so an
- * admin may retry it. Well above the longest request (Vercel's function limit), so a live attempt is never retried.
+ * admin may retry it. An attempt lasts at most the 8 s provider timeout plus two short writes, so a live attempt is
+ * never retried.
  */
 export const STALE_ATTEMPT_SECONDS = 600;
 
@@ -58,7 +59,7 @@ export class ContactNotificationsService {
     const [rows] = await this.dataSource.query<[NotifiedSubmission[], number]>(
       `UPDATE contact_submissions
           SET notification_status = 'pending', notification_attempts = notification_attempts + 1,
-              notification_attempted_at = now(), updated_at = now()
+              notification_attempted_at = now(), notification_last_error = NULL, updated_at = now()
         WHERE id = $1
           AND (notification_status = 'failed'
                OR (notification_status = 'pending'

@@ -236,6 +236,20 @@ describe('Admin contact inbox (contact form design CF-14)', () => {
       });
     });
 
+    it('clears the old error when it claims, so an interrupted retry shows pending without a stale reason', async () => {
+      const id = await insert();
+      fakeNotifier(app).willFail('unexpected');
+      const res = await retry(id);
+      expect(res.status).toBe(500);
+      expect(res.body.error.code).toBe('INTERNAL_ERROR');
+      expect((await get(`/${id}`)).body.data.notification).toMatchObject({
+        status: 'pending',
+        attempts: 2,
+        lastError: null,
+        retryable: false,
+      });
+    });
+
     it('leaves a sent notification alone', async () => {
       const id = await insert({
         notification_status: 'sent',

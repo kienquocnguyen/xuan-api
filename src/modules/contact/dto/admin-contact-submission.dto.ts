@@ -58,7 +58,10 @@ export class AdminContactSubmissionDto {
 
 const iso = (instant: Date | null) => (instant ? instant.toISOString() : null);
 
-/** Same rule as the retry claim (ContactNotificationsService.retry). */
+/**
+ * Same rule as the retry claim (ContactNotificationsService.retry), on the app's clock rather than the database's:
+ * near the boundary a retry may claim nothing, and its answer shows the state as it is.
+ */
 function isRetryable(row: ContactSubmission, now: Date): boolean {
   if (row.notificationStatus === 'failed') return true;
   return (

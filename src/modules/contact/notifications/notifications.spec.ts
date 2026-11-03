@@ -70,6 +70,7 @@ describe('ContactNotificationsService (contact form design CF-10 to CF-13)', () 
     const [claim] = claimed.writes();
     expect(claim.sql).toContain(`notification_status = 'failed'`);
     expect(claim.sql).toContain('notification_attempted_at < now() - make_interval');
+    expect(claim.sql).toContain('notification_last_error = NULL');
     expect(claim.params).toEqual([submission.id, STALE_ATTEMPT_SECONDS]);
   });
 });
