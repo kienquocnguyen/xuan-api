@@ -227,7 +227,7 @@ any unexpected error → ROLLBACK                       → 99 Unknown error (VN
 
 - **Concurrency:** `FOR UPDATE` serializes duplicate IPNs. The second sees `paid` and answers `02`. The partial UQ on `order_id` is the backstop. If it ever fires, the transaction rolls back and the answer is `99`; the state stays consistent.
 - **Logging (I17):** reference, `RspCode`, `vnp_ResponseCode` and `vnp_TransactionStatus` only. Never the query, the signature or the secret.
-- **OpenAPI:** the route is documented with a hand-written `VnpayIpnAckDto { RspCode, Message }` 200 response and a description that it isn't enveloped. Its query is VNPAY's, not a consumer contract, so it has no request component.
+- **OpenAPI:** the route is **excluded** (`@ApiExcludeEndpoint`), like Google's sign-in callback, the other provider-to-API redirect target. VNPAY's query and the `{ RspCode, Message }` answer aren't a xuan-web contract; this spec and `api-contract.md` document them instead.
 
 ### 5.7 Config (I4, I5)
 

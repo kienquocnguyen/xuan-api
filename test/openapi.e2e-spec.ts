@@ -1234,4 +1234,84 @@ describe('OpenAPI document', () => {
       expect(Object.keys(doc().paths).filter((path) => path.startsWith('/internal'))).toEqual([]);
     });
   });
+
+  describe('course sales contract (course sales spec §5.4)', () => {
+    const doc = () => createOpenApiDocument(app);
+    const schema = (name: string) =>
+      doc().components?.schemas?.[name] as
+        { properties?: Record<string, unknown>; required?: string[] } | undefined;
+    const propsOf = (name: string) => Object.keys(schema(name)?.properties ?? {}).sort();
+    const codes = (path: string, method: 'get' | 'post') =>
+      Object.values(doc().paths[path]?.[method]?.responses ?? {})
+        .flatMap((response) =>
+          String((response as { description?: string }).description).split(' | '),
+        )
+        .filter((code) => /^[A-Z_]+$/.test(code))
+        .sort();
+    const input = ['INTERNAL_ERROR', 'PAYLOAD_TOO_LARGE', 'UNAUTHENTICATED', 'VALIDATION_FAILED'];
+
+    it('names every orders component (I19)', () => {
+      expect(Object.keys(doc().components?.schemas ?? {})).toEqual(
+        expect.arrayContaining([
+          'CreateOrderDto',
+          'OrderReferenceParam',
+          'AdminOrdersQuery',
+          'CheckoutDto',
+          'OrderDto',
+          'OrderCourseDto',
+          'AdminOrderDto',
+          'OrderUserDto',
+        ]),
+      );
+    });
+
+    it('documents the DTO fields exactly', () => {
+      expect(propsOf('CheckoutDto')).toEqual(['order', 'paymentUrl']);
+      expect(propsOf('OrderDto')).toEqual([
+        'amountVnd',
+        'course',
+        'createdAt',
+        'expiresAt',
+        'failureCode',
+        'id',
+        'paidAt',
+        'reference',
+        'status',
+      ]);
+      expect(propsOf('OrderCourseDto')).toEqual(['id', 'slug', 'title']);
+      expect(propsOf('AdminOrderDto')).toEqual(
+        [
+          ...propsOf('OrderDto'),
+          'user',
+          'vnpBankCode',
+          'vnpCardType',
+          'vnpPayDate',
+          'vnpTransactionNo',
+        ].sort(),
+      );
+      expect(propsOf('OrderUserDto')).toEqual(['avatarUrl', 'displayName', 'id']);
+      expect(propsOf('CreateOrderDto')).toEqual(['courseId']);
+      expect(JSON.stringify(schema('OrderDto')?.properties?.status)).toContain('"failed"');
+    });
+
+    it('documents exactly the codes of each orders route (I18)', () => {
+      expect(codes('/orders', 'post')).toEqual(
+        [
+          ...input,
+          'FORBIDDEN',
+          'NOT_FOUND',
+          'COURSE_NOT_FOR_SALE',
+          'COURSE_ALREADY_OWNED',
+          'RATE_LIMITED',
+          'PAYMENTS_UNAVAILABLE',
+        ].sort(),
+      );
+      expect(codes('/orders/{reference}', 'get')).toEqual([...input, 'NOT_FOUND'].sort());
+      expect(codes('/admin/orders', 'get')).toEqual([...input, 'FORBIDDEN'].sort());
+    });
+
+    it('leaves the VNPAY IPN out: it is VNPAY’s contract, not xuan-web’s (S5)', () => {
+      expect(Object.keys(doc().paths).filter((path) => path.startsWith('/payments'))).toEqual([]);
+    });
+  });
 });
