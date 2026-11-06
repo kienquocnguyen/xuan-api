@@ -112,6 +112,7 @@ describe('Learner courses and gated playback (/learn/courses…)', () => {
     title: `Khóa ${slug}`,
     summary: `Tóm tắt ${slug}`,
     publishedAt,
+    priceVnd: null,
   });
 
   describe('GET /learn/courses', () => {

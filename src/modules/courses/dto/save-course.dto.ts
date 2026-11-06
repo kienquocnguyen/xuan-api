@@ -26,6 +26,17 @@ export const saveCourseSchema = z
   })
   .meta({ id: 'SaveCourseDto' });
 
+/** Same range as ck_courses_price_vnd_range. `null` = not for sale (course sales spec §4). */
+export const COURSE_PRICE_MIN_VND = 1_000;
+export const COURSE_PRICE_MAX_VND = 100_000_000;
+
+/** The course price, its own route so SaveCourseDto keeps its full-replacement semantics. The key is required. */
+export const saveCoursePriceSchema = z
+  .strictObject({
+    priceVnd: z.int().min(COURSE_PRICE_MIN_VND).max(COURSE_PRICE_MAX_VND).nullable(),
+  })
+  .meta({ id: 'SaveCoursePriceDto' });
+
 export const saveCourseSectionSchema = z
   .strictObject({ title: requiredText(200) })
   .meta({ id: 'SaveCourseSectionDto' });
@@ -82,6 +93,7 @@ export const courseLessonIdParamSchema = z
   .meta({ id: 'CourseLessonIdParam' });
 
 export type SaveCourseInput = z.infer<typeof saveCourseSchema>;
+export type SaveCoursePriceInput = z.infer<typeof saveCoursePriceSchema>;
 export type SaveCourseSectionInput = z.infer<typeof saveCourseSectionSchema>;
 export type SaveCourseLessonInput = z.infer<typeof saveCourseLessonSchema>;
 export type CurriculumOrderInput = z.infer<typeof curriculumOrderSchema>;

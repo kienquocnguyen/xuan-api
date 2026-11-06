@@ -293,6 +293,7 @@ describe('OpenAPI document', () => {
           'SaveCourseDto',
           'SaveCourseSectionDto',
           'SaveCourseLessonDto',
+          'SaveCoursePriceDto',
           'CurriculumOrderDto',
           'CourseIdParam',
           'CourseSectionIdParam',
@@ -304,6 +305,7 @@ describe('OpenAPI document', () => {
     it('documents the DTO fields exactly', () => {
       expect(propsOf('CourseSummaryDto')).toEqual([
         'id',
+        'priceVnd',
         'publishedAt',
         'slug',
         'summary',
@@ -311,6 +313,7 @@ describe('OpenAPI document', () => {
       ]);
       expect(propsOf('CourseDto')).toEqual([
         'id',
+        'priceVnd',
         'publishedAt',
         'sections',
         'slug',
@@ -322,6 +325,7 @@ describe('OpenAPI document', () => {
       expect(propsOf('AdminCourseSummaryDto')).toEqual([
         'id',
         'lessonCount',
+        'priceVnd',
         'publishedAt',
         'publishedLessonCount',
         'slug',
@@ -404,6 +408,7 @@ describe('OpenAPI document', () => {
           [...input, 'NOT_FOUND', 'COURSE_NEEDS_PUBLISHED_LESSON'],
         ],
         ['/admin/courses/{courseId}/unpublish', 'post', [...input, 'NOT_FOUND']],
+        ['/admin/courses/{courseId}/price', 'put', [...input, 'NOT_FOUND']],
         ['/admin/courses/{courseId}/sections', 'post', [...input, 'NOT_FOUND']],
         ['/admin/course-sections/{sectionId}', 'put', [...input, 'NOT_FOUND']],
         [

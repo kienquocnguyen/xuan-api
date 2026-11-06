@@ -188,6 +188,7 @@ describe('Admin course authoring (/admin/courses…)', () => {
           summary: 'Quy trình dựng video từ A đến Z.',
           status: 'draft',
           publishedAt: null,
+          priceVnd: null,
           updatedAt: expect.stringMatching(ISO),
           publishedLessonCount: 0,
           lessonCount: 0,
@@ -225,6 +226,7 @@ describe('Admin course authoring (/admin/courses…)', () => {
           summary: 'Quy trình dựng video từ A đến Z.',
           status: 'draft',
           publishedAt: null,
+          priceVnd: null,
           updatedAt: expect.stringMatching(ISO),
           publishedLessonCount: 1,
           lessonCount: 2,
@@ -451,6 +453,48 @@ describe('Admin course authoring (/admin/courses…)', () => {
       const res = await renameSection('nope', { title: 'Phần' });
       expect(res.status).toBe(400);
       expect(res.body).toEqual(invalid(['sectionId', 'INVALID_FORMAT']));
+    });
+  });
+
+  describe('price (course sales spec §4)', () => {
+    const setPrice = (courseId: string, body: unknown, cookie = admin.cookie) =>
+      server().put(`/admin/courses/${courseId}/price`).set(XHR).set('Cookie', cookie).send(body);
+
+    it('sets, keeps and clears the price; the public outline shows it once published', async () => {
+      const id = await createdId();
+      await addPublishedLesson(id);
+      await courseAction(id, 'publish');
+
+      const set = await setPrice(id, { priceVnd: 499_000 });
+      expect(set.status).toBe(200);
+      expect(set.body.data.priceVnd).toBe(499_000);
+      const pub = await server().get('/courses/workflow-edit-video-youtube');
+      expect(pub.body.data.priceVnd).toBe(499_000);
+      expect((await server().get('/courses')).body.data[0].priceVnd).toBe(499_000);
+
+      // The same value is a no-op: updatedAt stays.
+      const again = await setPrice(id, { priceVnd: 499_000 });
+      expect(again.body.data.updatedAt).toBe(set.body.data.updatedAt);
+
+      const cleared = await setPrice(id, { priceVnd: null });
+      expect(cleared.status).toBe(200);
+      expect(cleared.body.data.priceVnd).toBeNull();
+    });
+
+    it('validates the body, and answers 404 for an unknown course and 403 for an editor', async () => {
+      const id = await createdId();
+      const low = await setPrice(id, { priceVnd: 999 });
+      expect(low.status).toBe(400);
+      expect(low.body.error.details.fields).toEqual([
+        { field: 'priceVnd', message: expect.any(String), code: 'TOO_SMALL' },
+      ]);
+      const missing = await setPrice(id, {});
+      expect(missing.body.error.details.fields).toEqual([
+        { field: 'priceVnd', message: expect.any(String), code: 'REQUIRED' },
+      ]);
+      expect((await setPrice(UNKNOWN_ID, { priceVnd: 499_000 })).status).toBe(404);
+      const editor = await signInAs(app, { role: 'editor' });
+      expect((await setPrice(id, { priceVnd: 499_000 }, editor.cookie)).status).toBe(403);
     });
   });
 

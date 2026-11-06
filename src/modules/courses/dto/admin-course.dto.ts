@@ -11,6 +11,13 @@ export class AdminCourseSummaryDto {
   @ApiProperty() summary!: string;
   @ApiProperty({ enum: COURSE_STATUSES }) status!: CourseStatus;
   @ApiProperty({ type: String, nullable: true, format: 'date-time' }) publishedAt!: string | null;
+  @ApiProperty({
+    type: 'integer',
+    nullable: true,
+    example: 499000,
+    description: 'Whole VND; null when not for sale.',
+  })
+  priceVnd!: number | null;
   @ApiProperty({ format: 'date-time' }) updatedAt!: string;
   @ApiProperty({ example: 3 }) publishedLessonCount!: number;
   @ApiProperty({ example: 5 }) lessonCount!: number;
@@ -63,6 +70,7 @@ export function toAdminCourseDto(tree: CourseTree): AdminCourseDto {
     summary: summary.summary,
     status: summary.status,
     publishedAt: summary.publishedAt,
+    priceVnd: summary.priceVnd,
     updatedAt: summary.updatedAt,
     publishedLessonCount: summary.publishedLessonCount,
     lessonCount: summary.lessonCount,
@@ -98,6 +106,7 @@ function summaryOf(
     summary: course.summary,
     status: course.status,
     publishedAt: course.publishedAt ? course.publishedAt.toISOString() : null,
+    priceVnd: course.priceVnd,
     updatedAt: course.updatedAt.toISOString(),
     publishedLessonCount,
     lessonCount,

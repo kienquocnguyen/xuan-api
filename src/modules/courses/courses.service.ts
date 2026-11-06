@@ -152,6 +152,15 @@ export class CoursesService {
     return this.getForAdmin(courseId);
   }
 
+  /** Sets or clears the price under the course lock; the same value is a no-op (course sales spec §4). */
+  async setPrice(courseId: string, priceVnd: number | null): Promise<CourseTree> {
+    await this.withCourseLock(courseId, async (manager, course) => {
+      if (course.priceVnd === priceVnd) return; // no write, so updated_at stays
+      await manager.update(Course, { id: courseId }, { priceVnd });
+    });
+    return this.getForAdmin(courseId);
+  }
+
   async publish(courseId: string): Promise<CourseTree> {
     await this.withCourseLock(courseId, async (manager, course) => {
       if (course.status === 'published') return; // idempotent: no write
