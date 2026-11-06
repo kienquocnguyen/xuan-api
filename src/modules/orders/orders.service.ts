@@ -58,16 +58,18 @@ export class OrdersService {
     const payments = this.config.payments;
     if (payments.provider !== 'vnpay') throw new AppError(ordersErrors.PAYMENTS_UNAVAILABLE);
 
-    const order = await this.orders.save(
-      this.orders.create({
-        // Random, so a buyer can't guess another order's URL; hex, because vnp_TxnRef is alphanumeric.
-        reference: randomUUID().replaceAll('-', ''),
-        userId,
-        courseId,
-        amountVnd: course.priceVnd,
-        expiresAt: new Date(Date.now() + PAYMENT_WINDOW_MS),
-      }),
-    );
+    const result = await this.orders.insert({
+      // Random, so a buyer can't guess another order's URL; hex, because vnp_TxnRef is alphanumeric.
+      reference: randomUUID().replaceAll('-', ''),
+      userId,
+      courseId,
+      amountVnd: course.priceVnd,
+      expiresAt: new Date(Date.now() + PAYMENT_WINDOW_MS),
+    });
+    // Re-read the whole row: insert returns only defaulted columns, and the DTO reads every one.
+    const order = await this.orders.findOneByOrFail({
+      id: (result.identifiers[0] as { id: string }).id,
+    });
     const paymentUrl = buildPaymentUrl(payments.vnpay, order, normalizeClientIp(clientIp));
     return { view: { order, course }, paymentUrl };
   }
@@ -106,7 +108,10 @@ export class OrdersService {
     return { items, totalItems };
   }
 
-  /** S11: at most 5 orders per user per 15 minutes; `Retry-After` is when the oldest of them leaves the window. */
+  /**
+   * S11: at most 5 orders per user per 15 minutes; `Retry-After` is when the oldest of them leaves the window. Not
+   * serialized: parallel checkouts can each pass and add a few extra pending orders, which costs nothing.
+   */
   private async throttle(userId: string): Promise<void> {
     const recent = await this.orders.find({
       select: { createdAt: true },

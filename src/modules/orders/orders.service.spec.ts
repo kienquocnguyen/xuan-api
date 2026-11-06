@@ -3,6 +3,7 @@ import type { AppConfig } from '../../config/load-config.js';
 import type { CourseSales } from '../courses/course-sales.js';
 import type { UserProfilesReader } from '../users/user-profiles.reader.js';
 import type { Order } from './order.entity.js';
+import { toOrderDto } from './dto/order.dto.js';
 import { OrderRateLimitedError, OrdersService } from './orders.service.js';
 import { verifyVnpay } from './vnpay/vnpay-signature.js';
 
@@ -27,14 +28,28 @@ function harness(
     payments?: AppConfig['payments'];
   } = {},
 ) {
+  // Like TypeORM: insert returns only identifiers; the re-read returns the whole row, nulls included.
+  let inserted: Partial<Order> = {};
   const orders = {
     find: vi.fn().mockResolvedValue((options.recent ?? []).map((createdAt) => ({ createdAt }))),
-    create: vi.fn((values: Partial<Order>) => values),
-    save: vi.fn(async (values: Partial<Order>) => ({
-      ...values,
-      id: 'order-1',
+    insert: vi.fn(async (values: Partial<Order>) => {
+      inserted = values;
+      return { identifiers: [{ id: 'order-1' }] };
+    }),
+    findOneByOrFail: vi.fn(async ({ id }: { id: string }) => ({
+      id,
       status: 'pending',
+      paidAt: null,
+      vnpTransactionNo: null,
+      vnpResponseCode: null,
+      vnpTransactionStatus: null,
+      vnpBankCode: null,
+      vnpCardType: null,
+      vnpBankTranNo: null,
+      vnpPayDate: null,
       createdAt: new Date('2026-11-07T17:30:00.000Z'),
+      updatedAt: new Date('2026-11-07T17:30:00.000Z'),
+      ...inserted,
     })),
   };
   const sales = {
@@ -67,7 +82,7 @@ describe('OrdersService.checkout (course sales spec §5.4)', () => {
     const { service, orders } = harness();
     const { view, paymentUrl } = await service.checkout('user-1', 'course-1', '::ffff:203.0.113.7');
 
-    const saved = orders.save.mock.calls[0][0] as Partial<Order>;
+    const saved = orders.insert.mock.calls[0][0] as Partial<Order>;
     expect(saved).toEqual({
       reference: expect.stringMatching(/^[0-9a-f]{32}$/),
       userId: 'user-1',
@@ -79,6 +94,16 @@ describe('OrdersService.checkout (course sales spec §5.4)', () => {
     expect(window).toBeGreaterThan(14 * 60_000);
     expect(window).toBeLessThanOrEqual(15 * 60_000);
     expect(view.course).toBe(course);
+    expect(orders.findOneByOrFail).toHaveBeenCalledWith({ id: 'order-1' });
+    // The view maps to the wire without touching an unset column (review C1).
+    expect(toOrderDto(view)).toEqual(
+      expect.objectContaining({
+        id: 'order-1',
+        status: 'pending',
+        paidAt: null,
+        failureCode: null,
+      }),
+    );
 
     const params = Object.fromEntries(new URL(paymentUrl).searchParams);
     expect(params).toMatchObject({
@@ -93,7 +118,7 @@ describe('OrdersService.checkout (course sales spec §5.4)', () => {
     const { service, orders } = harness();
     await service.checkout('user-1', 'course-1', undefined);
     await service.checkout('user-1', 'course-1', undefined);
-    const [first, second] = orders.save.mock.calls.map(([order]) => (order as Order).reference);
+    const [first, second] = orders.insert.mock.calls.map(([order]) => (order as Order).reference);
     expect(first).not.toBe(second);
   });
 
@@ -109,7 +134,7 @@ describe('OrdersService.checkout (course sales spec §5.4)', () => {
   ])('refuses %s, writing nothing', async (_case, options, code) => {
     const { service, orders } = harness(options);
     expect(await codeOf(service.checkout('user-1', 'course-1', undefined))).toBe(code);
-    expect(orders.save).not.toHaveBeenCalled();
+    expect(orders.insert).not.toHaveBeenCalled();
   });
 
   it('checks the course before the payment settings, so a 404 stays a 404 while payments are off', async () => {

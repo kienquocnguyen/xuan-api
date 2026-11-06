@@ -551,7 +551,7 @@ describe('OpenAPI document', () => {
         enum: ['vimeo', 'youtube'],
       });
       expect(schemaOf('CourseAccessGrantDto')?.properties?.source).toMatchObject({
-        enum: ['admin'],
+        enum: ['admin', 'purchase'], // course sales §5.3
       });
     });
 

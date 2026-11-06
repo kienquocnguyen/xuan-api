@@ -33,7 +33,8 @@ export class OrderDto {
     type: String,
     nullable: true,
     example: '24',
-    description: "VNPAY's vnp_ResponseCode when the payment failed; null otherwise.",
+    description:
+      "VNPAY's vnp_ResponseCode when the payment failed; null otherwise. '00' means VNPAY answered but the transaction didn't complete (vnp_TransactionStatus not 00).",
   })
   failureCode!: string | null;
 }

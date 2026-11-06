@@ -4,10 +4,10 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 const HASH_FIELDS = new Set(['vnp_SecureHash', 'vnp_SecureHashType']);
 const HMAC_SHA512_HEX = /^[0-9a-fA-F]{128}$/;
 
-/** PHP's `urlencode`: like `encodeURIComponent`, plus `!'()*` percent-encoded and a space as `+`. */
+/** PHP's `urlencode`: like `encodeURIComponent`, plus `!'()*~` percent-encoded and a space as `+`. */
 function urlencode(value: string): string {
   return encodeURIComponent(value)
-    .replace(/[!'()*]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
+    .replace(/[!'()*~]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
     .replace(/%20/g, '+');
 }
 

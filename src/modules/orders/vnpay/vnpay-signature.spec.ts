@@ -22,7 +22,7 @@ describe('canonicalQuery (course sales spec S8)', () => {
     ).toBe(
       'vnp_OrderInfo=Thanh+toan+khoa+hoc+abc' +
         '&vnp_ReturnUrl=https%3A%2F%2Fxuancreative.com%2Fa%3Fb%3Dc' +
-        '&vnp_X=%21%27%28%29%2A~',
+        '&vnp_X=%21%27%28%29%2A%7E',
     );
   });
 });
