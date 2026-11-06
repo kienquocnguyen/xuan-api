@@ -457,7 +457,7 @@ describe('Admin course authoring (/admin/courses…)', () => {
   });
 
   describe('price (course sales spec §4)', () => {
-    const setPrice = (courseId: string, body: unknown, cookie = admin.cookie) =>
+    const setPrice = (courseId: string, body: object, cookie = admin.cookie) =>
       server().put(`/admin/courses/${courseId}/price`).set(XHR).set('Cookie', cookie).send(body);
 
     it('sets, keeps and clears the price; the public outline shows it once published', async () => {
