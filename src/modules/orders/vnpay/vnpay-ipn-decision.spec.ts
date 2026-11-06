@@ -94,7 +94,9 @@ describe('decideIpn (course sales spec §5.6, SIT cases 1–6)', () => {
   });
 
   it('honours a success that arrives after the order expired (S9)', () => {
-    expect(decideIpn({ ...pending, expiresAt: new Date('2000-01-01T00:00:00Z') }, ipn())).toEqual({
+    // The order row carries expires_at; the decision must ignore it.
+    const expired = { ...pending, expiresAt: new Date('2000-01-01T00:00:00Z') };
+    expect(decideIpn(expired, ipn())).toEqual({
       kind: 'settle',
       outcome: 'paid',
     });
