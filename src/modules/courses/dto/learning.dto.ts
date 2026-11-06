@@ -6,7 +6,7 @@ import { clampPosition, type ProgressState } from '../progress.js';
 import { CourseSummaryDto, toCourseSummaryDto } from './course.dto.js';
 
 // Learner DTOs are separate classes from the public outline, so outcome 3 only adds fields (course spec §11.6).
-// LessonPlaybackDto and VimeoVideoDto are the only response classes with a video field (§7, §14).
+// LessonPlaybackDto and LessonVideoDto are the only response classes with a video field (§7, §14).
 
 /** The slug is an opaque lookup key (the posts/services D7 deviation); the lesson id is a uuid (D9). */
 export const lessonPathParamsSchema = z
@@ -67,9 +67,15 @@ export class LearnerCourseDto {
   @ApiProperty({ type: [LearnerCourseSectionDto] }) sections!: LearnerCourseSectionDto[];
 }
 
-/** The parts the web's Vimeo player needs: `id`, or `url` with `h` when a privacy hash is set (spec §8.2). */
-export class VimeoVideoDto {
-  @ApiProperty({ enum: ['vimeo'] }) provider!: 'vimeo';
+export const VIDEO_PROVIDERS = ['vimeo', 'youtube'] as const;
+export type VideoProvider = (typeof VIDEO_PROVIDERS)[number];
+
+/**
+ * What the web's player needs. Vimeo: `id`, or `url` with `h` when a privacy hash is set (course spec §8.2).
+ * YouTube: the unlisted video's 11-character id, and `privacyHash` is always null (course sales spec S2).
+ */
+export class LessonVideoDto {
+  @ApiProperty({ enum: VIDEO_PROVIDERS }) provider!: VideoProvider;
   @ApiProperty({ example: '76979871' }) videoId!: string;
   @ApiProperty({ type: String, nullable: true }) privacyHash!: string | null;
 }
@@ -79,7 +85,7 @@ export class LessonPlaybackDto {
   @ApiProperty() title!: string;
   @ApiProperty() sectionTitle!: string;
   @ApiProperty({ type: Number, nullable: true, example: 600 }) durationSeconds!: number | null;
-  @ApiProperty({ type: VimeoVideoDto }) video!: VimeoVideoDto;
+  @ApiProperty({ type: LessonVideoDto }) video!: LessonVideoDto;
   @ApiProperty({ type: String, nullable: true, format: 'uuid' }) previousLessonId!: string | null;
   @ApiProperty({ type: String, nullable: true, format: 'uuid' }) nextLessonId!: string | null;
   @ApiProperty({ type: LessonProgressDto }) progress!: LessonProgressDto;
@@ -122,12 +128,15 @@ export function toLessonPlaybackDto({ located, progress }: PlaybackView): Lesson
     title: lesson.title,
     sectionTitle: section.title,
     durationSeconds: lesson.durationSeconds,
-    // ck_course_lessons_published_has_video: a published lesson always has one.
-    video: {
-      provider: 'vimeo',
-      videoId: lesson.vimeoVideoId as string,
-      privacyHash: lesson.vimeoHash,
-    },
+    // ck_course_lessons_published_has_video and …_one_video: a published lesson has exactly one.
+    video:
+      lesson.youtubeVideoId !== null
+        ? { provider: 'youtube', videoId: lesson.youtubeVideoId, privacyHash: null }
+        : {
+            provider: 'vimeo',
+            videoId: lesson.vimeoVideoId as string,
+            privacyHash: lesson.vimeoHash,
+          },
     previousLessonId: located.previousLessonId,
     nextLessonId: located.nextLessonId,
     progress: toLessonProgressDto(progress, lesson.durationSeconds),

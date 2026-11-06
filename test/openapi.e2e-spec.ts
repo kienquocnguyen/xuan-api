@@ -343,6 +343,7 @@ describe('OpenAPI document', () => {
         'title',
         'updatedAt',
         'videoId',
+        'youtubeVideoId',
       ]);
     });
 
@@ -358,7 +359,7 @@ describe('OpenAPI document', () => {
     it('documents SaveCourseLessonDto as the validation behaves: optional, never null', () => {
       const lesson = schemaOf('SaveCourseLessonDto');
       expect(lesson?.required).toEqual(['title']);
-      for (const field of ['videoId', 'privacyHash', 'durationSeconds']) {
+      for (const field of ['videoId', 'privacyHash', 'youtubeVideoId', 'durationSeconds']) {
         const schema = JSON.stringify(lesson?.properties?.[field]);
         expect(schema).not.toContain('nullable');
         expect(schema).not.toContain('"null"');
@@ -498,7 +499,7 @@ describe('OpenAPI document', () => {
           'CourseAccessGrantDto',
           'CourseAccessUserDto',
           'LessonPlaybackDto',
-          'VimeoVideoDto',
+          'LessonVideoDto',
           'CourseAccessParams',
           'LessonPathParams',
         ]),
@@ -540,14 +541,16 @@ describe('OpenAPI document', () => {
         'title',
         'video',
       ]);
-      expect(propsOf('VimeoVideoDto')).toEqual(['privacyHash', 'provider', 'videoId']);
-      expect(schemaOf('VimeoVideoDto')?.properties?.provider).toMatchObject({ enum: ['vimeo'] });
+      expect(propsOf('LessonVideoDto')).toEqual(['privacyHash', 'provider', 'videoId']);
+      expect(schemaOf('LessonVideoDto')?.properties?.provider).toMatchObject({
+        enum: ['vimeo', 'youtube'],
+      });
       expect(schemaOf('CourseAccessGrantDto')?.properties?.source).toMatchObject({
         enum: ['admin'],
       });
     });
 
-    it('puts video fields only on LessonPlaybackDto and VimeoVideoDto (spec §7, §14)', () => {
+    it('puts video fields only on LessonPlaybackDto and LessonVideoDto (spec §7, §14)', () => {
       for (const name of [...LEARNER_DTOS, 'CourseAccessGrantDto', 'CourseAccessUserDto']) {
         expect({ name, props: propsOf(name).filter((p) => /video|vimeo|hash/i.test(p)) }).toEqual({
           name,

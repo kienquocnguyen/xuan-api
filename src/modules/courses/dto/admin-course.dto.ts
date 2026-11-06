@@ -16,7 +16,7 @@ export class AdminCourseSummaryDto {
   @ApiProperty({ example: 5 }) lessonCount!: number;
 }
 
-/** A lesson as the admin edits it, including its Vimeo reference (never on public DTOs). */
+/** A lesson as the admin edits it, including its video reference (never on public DTOs). */
 export class AdminCourseLessonDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() title!: string;
@@ -24,6 +24,8 @@ export class AdminCourseLessonDto {
   @ApiProperty({ enum: LESSON_STATUSES }) status!: LessonStatus;
   @ApiProperty({ type: String, nullable: true, example: '76979871' }) videoId!: string | null;
   @ApiProperty({ type: String, nullable: true }) privacyHash!: string | null;
+  @ApiProperty({ type: String, nullable: true, example: 'dQw4w9WgXcQ' })
+  youtubeVideoId!: string | null;
   @ApiProperty({ type: Number, nullable: true, example: 600 }) durationSeconds!: number | null;
   @ApiProperty({ format: 'date-time' }) updatedAt!: string;
 }
@@ -76,6 +78,7 @@ export function toAdminCourseDto(tree: CourseTree): AdminCourseDto {
         status: lesson.status,
         videoId: lesson.vimeoVideoId,
         privacyHash: lesson.vimeoHash,
+        youtubeVideoId: lesson.youtubeVideoId,
         durationSeconds: lesson.durationSeconds,
         updatedAt: lesson.updatedAt.toISOString(),
       })),

@@ -4,7 +4,7 @@ import { In, type DataSource, type EntityManager, type Repository } from 'typeor
 import { isForeignKeyViolation, isUniqueViolation } from '../../database/postgres-errors.js';
 import { AppError } from '../../errors/app-error.js';
 import { baselineErrors } from '../../errors/baseline-errors.js';
-import { CourseLesson } from './course-lesson.entity.js';
+import { CourseLesson, hasVideo } from './course-lesson.entity.js';
 import { CourseSection } from './course-section.entity.js';
 import type { AdminCourseListItem, CourseTree } from './course-tree.js';
 import { Course } from './course.entity.js';
@@ -226,6 +226,7 @@ export class CoursesService {
         position: await this.nextPosition(manager, 'lessons', sectionId),
         vimeoVideoId: input.videoId,
         vimeoHash: input.privacyHash,
+        youtubeVideoId: input.youtubeVideoId,
         durationSeconds: input.durationSeconds,
       });
       await this.touchCourse(manager, courseId);
@@ -233,19 +234,21 @@ export class CoursesService {
     return this.getForAdmin(courseId);
   }
 
-  /** Full replacement of the title and Vimeo reference; references stay editable when published (spec §8.2). */
+  /** Full replacement of the title and video; the video stays editable when published (spec §8.2). */
   async updateLesson(lessonId: string, input: SaveCourseLessonInput): Promise<CourseTree> {
     const courseId = await this.courseIdOfLesson(lessonId);
     await this.withCourseLock(courseId, async (manager) => {
       const lesson = await this.lockedLesson(manager, courseId, lessonId);
       // P2 (ck_course_lessons_published_has_video is the backstop).
-      if (lesson.status === 'published' && input.videoId === null) {
+      const video = { vimeoVideoId: input.videoId, youtubeVideoId: input.youtubeVideoId };
+      if (lesson.status === 'published' && !hasVideo(video)) {
         throw new AppError(coursesErrors.LESSON_VIDEO_MISSING);
       }
       const unchanged =
         lesson.title === input.title &&
         lesson.vimeoVideoId === input.videoId &&
         lesson.vimeoHash === input.privacyHash &&
+        lesson.youtubeVideoId === input.youtubeVideoId &&
         lesson.durationSeconds === input.durationSeconds;
       if (unchanged) return; // no write
       await manager.update(
@@ -255,6 +258,7 @@ export class CoursesService {
           title: input.title,
           vimeoVideoId: input.videoId,
           vimeoHash: input.privacyHash,
+          youtubeVideoId: input.youtubeVideoId,
           durationSeconds: input.durationSeconds,
         },
       );
@@ -268,7 +272,7 @@ export class CoursesService {
     await this.withCourseLock(courseId, async (manager) => {
       const lesson = await this.lockedLesson(manager, courseId, lessonId);
       if (lesson.status === 'published') return; // idempotent: no write
-      if (lesson.vimeoVideoId === null) throw new AppError(coursesErrors.LESSON_VIDEO_MISSING);
+      if (!hasVideo(lesson)) throw new AppError(coursesErrors.LESSON_VIDEO_MISSING);
       await manager.update(CourseLesson, { id: lessonId }, { status: 'published' });
       await this.touchCourse(manager, courseId);
     });

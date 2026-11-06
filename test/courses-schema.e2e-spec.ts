@@ -120,8 +120,16 @@ describe('course catalog invariants (courses, course_sections, course_lessons)',
       ['ck_course_lessons_vimeo_hash_format', { vimeo_video_id: '1', vimeo_hash: 'a-b' }],
       ['ck_course_lessons_hash_needs_video', { vimeo_hash: 'abc' }],
       ['ck_course_lessons_duration_positive', { duration_seconds: 0 }],
+      ['ck_course_lessons_youtube_video_id_format', { youtube_video_id: 'dQw4w9WgXc.' }],
+      ['ck_course_lessons_one_video', { vimeo_video_id: '1', youtube_video_id: 'dQw4w9WgXcQ' }],
     ])('fails on %s', async (constraint, columns) => {
       expect(await failureOf(insertLesson(columns))).toBe(constraint);
+    });
+
+    it('accepts a published lesson with only a YouTube video (course sales S2)', async () => {
+      await expect(
+        insertLesson({ status: 'published', youtube_video_id: 'dQw4w9WgXcQ' }),
+      ).resolves.toBeDefined();
     });
 
     it('fails on fk_course_lessons_section_id when a section with a lesson is deleted', async () => {

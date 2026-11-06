@@ -4,9 +4,10 @@ import { isStorableText, STORABLE_TEXT_MESSAGE } from '../../../http/validation/
 /** Same rule as ck_courses_slug_format (database.md §12). */
 export const COURSE_SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
-/** Same rules as ck_course_lessons_vimeo_video_id_format and ck_course_lessons_vimeo_hash_format. */
+/** Same rules as ck_course_lessons_vimeo_video_id_format, …_vimeo_hash_format and …_youtube_video_id_format. */
 const VIMEO_VIDEO_ID_PATTERN = /^[0-9]{1,20}$/;
 const VIMEO_HASH_PATTERN = /^[A-Za-z0-9]{1,64}$/;
+const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
 
 /** Required text: trimmed, so whitespace-only input is `TOO_SHORT`; limits match the `varchar` sizes. */
 const requiredText = (max: number) =>
@@ -29,21 +30,33 @@ export const saveCourseSectionSchema = z
   .strictObject({ title: requiredText(200) })
   .meta({ id: 'SaveCourseSectionDto' });
 
-/** A lesson's title and Vimeo reference. Status changes only through publish/unpublish (I9). */
+/**
+ * A lesson's title and video: a Vimeo reference (`videoId`, `privacyHash`) or a YouTube-unlisted id (course sales
+ * spec S2), never both. Status changes only through publish/unpublish (I9).
+ */
 export const saveCourseLessonSchema = z
   .strictObject({
     title: requiredText(200),
     videoId: optional(z.string().regex(VIMEO_VIDEO_ID_PATTERN)),
     privacyHash: optional(z.string().regex(VIMEO_HASH_PATTERN)),
+    youtubeVideoId: optional(z.string().regex(YOUTUBE_VIDEO_ID_PATTERN)),
     durationSeconds: optional(z.int().min(1).max(86_400)),
   })
   .superRefine((lesson, ctx) => {
-    // Same rule as ck_course_lessons_hash_needs_video.
+    // Same rule as ck_course_lessons_hash_needs_video: the hash belongs to a Vimeo id.
     if (lesson.privacyHash !== null && lesson.videoId === null) {
       ctx.addIssue({
         code: 'custom',
         path: ['privacyHash'],
         message: 'A privacy hash needs a video id.',
+      });
+    }
+    // Same rule as ck_course_lessons_one_video.
+    if (lesson.videoId !== null && lesson.youtubeVideoId !== null) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['youtubeVideoId'],
+        message: 'Choose a Vimeo or a YouTube video, not both.',
       });
     }
   })

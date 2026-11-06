@@ -22,7 +22,7 @@ const needsLesson = envelope(
   'COURSE_NEEDS_PUBLISHED_LESSON',
   'A published course needs at least one published lesson.',
 );
-const videoMissing = envelope('LESSON_VIDEO_MISSING', 'A published lesson needs a Vimeo video.');
+const videoMissing = envelope('LESSON_VIDEO_MISSING', 'A published lesson needs a video.');
 const lessonIsPublished = envelope(
   'LESSON_IS_PUBLISHED',
   'Unpublish the lesson before deleting it.',
@@ -475,6 +475,7 @@ describe('Admin course authoring (/admin/courses…)', () => {
           status: 'draft',
           videoId: null,
           privacyHash: null,
+          youtubeVideoId: null,
           durationSeconds: null,
           updatedAt: expect.stringMatching(ISO),
         },
@@ -485,6 +486,7 @@ describe('Admin course authoring (/admin/courses…)', () => {
           status: 'draft',
           videoId: '76979871',
           privacyHash: 'a1B2c3',
+          youtubeVideoId: null,
           durationSeconds: 600,
           updatedAt: expect.stringMatching(ISO),
         },
@@ -550,6 +552,39 @@ describe('Admin course authoring (/admin/courses…)', () => {
       expect(changed.status).toBe(200);
       expect(lessonIn(changed.body.data, lessonId)).toEqual(
         expect.objectContaining({ status: 'published', videoId: '2', privacyHash: 'h' }),
+      );
+    });
+
+    it('publishes a YouTube-only lesson and refuses both providers at once (course sales S2)', async () => {
+      const courseId = await createdId();
+      const sectionId = await newSection(courseId);
+      const lessonId = await newLesson(sectionId, { title: 'Bài', youtubeVideoId: 'dQw4w9WgXcQ' });
+      const published = await lessonAction(lessonId, 'publish');
+      expect(published.status).toBe(200);
+      expect(lessonIn(published.body.data, lessonId)).toEqual(
+        expect.objectContaining({
+          status: 'published',
+          videoId: null,
+          privacyHash: null,
+          youtubeVideoId: 'dQw4w9WgXcQ',
+        }),
+      );
+
+      const both = await updateLesson(lessonId, {
+        title: 'Bài',
+        videoId: '1',
+        youtubeVideoId: 'dQw4w9WgXcQ',
+      });
+      expect(both.status).toBe(400);
+      expect(both.body.error.details.fields).toEqual([
+        { field: 'youtubeVideoId', message: expect.any(String), code: 'INVALID' },
+      ]);
+
+      // Switching provider on a published lesson is an ordinary edit.
+      const toVimeo = await updateLesson(lessonId, { title: 'Bài', videoId: '1' });
+      expect(toVimeo.status).toBe(200);
+      expect(lessonIn(toVimeo.body.data, lessonId)).toEqual(
+        expect.objectContaining({ videoId: '1', youtubeVideoId: null }),
       );
     });
 
