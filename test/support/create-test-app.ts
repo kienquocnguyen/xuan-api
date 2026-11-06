@@ -26,7 +26,17 @@ export type TestAppOptions = Readonly<{
   contact?: Partial<AppConfig['contact']>;
   /** Overrides TRUST_PROXY_HOPS, so a test can set the client IP through X-Forwarded-For. */
   trustProxyHops?: number;
+  /** Overrides the payment settings (course sales); the default is VNPAY with TEST_VNPAY's fake terminal. */
+  payments?: AppConfig['payments'];
 }>;
+
+/** e2e's VNPAY terminal: never a real one, so a test-signed IPN can only ever reach a test app. */
+export const TEST_VNPAY = {
+  tmnCode: 'TESTTMN1',
+  hashSecret: 'test-vnpay-secret',
+  paymentUrl: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
+  returnUrl: 'http://localhost:3000/khoa-hoc/thanh-toan/ket-qua',
+} as const;
 
 /**
  * Same AppModule + same configureApp() as main.ts (D6). Refuses to start against a non-*_test database (I21).
@@ -54,6 +64,7 @@ export async function createTestApp(
       email: { provider: 'disabled' }, // the fake notifier below replaces any provider
       ...options.contact,
     },
+    payments: options.payments ?? { provider: 'vnpay', vnpay: TEST_VNPAY },
   };
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule, ...extraImports],
