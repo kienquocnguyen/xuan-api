@@ -306,7 +306,9 @@ describe('course catalog invariants (courses, course_sections, course_lessons)',
     });
 
     it.each([
-      ['ck_course_access_grants_source', { source: 'purchase' }],
+      ['ck_course_access_grants_source', { source: 'gift' }],
+      // course sales §5.3: a purchase grant needs its order (and an admin grant can't have one, below).
+      ['ck_course_access_grants_purchase_has_order', { source: 'purchase' }],
       ['ck_course_access_grants_admin_has_granter', { granted_by_user_id: null }],
       ['ck_course_access_grants_revocation_pair', { revoked_at: new Date() }],
       ['fk_course_access_grants_user_id', { user_id: UNKNOWN_ID }],
