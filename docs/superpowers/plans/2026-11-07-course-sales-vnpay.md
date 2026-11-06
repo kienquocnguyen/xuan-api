@@ -322,3 +322,21 @@
   - e2e;
   - `xuan_dev`: run;
   - the Production steps later.
+
+## Execution notes (2026-11-07)
+
+Deviations from the tasks above, each kept small and recorded here:
+
+- **Task 3:** `formatVnpayDate` and `normalizeClientIp` live in `vnpay-payment-url.ts`; there's no separate `vnpay-dates.ts`.
+- **Task 5:**
+  - `CourseSales.findSummaries` is named `findLabels` and returns `CourseLabel`.
+  - `OrdersModule` (entity registration only) moved into Task 5 so that commit boots on its own: the grant entity's `'Order'` FK needs `Order` registered.
+- **Task 6:**
+  - The request schemas live in `dto/order-requests.dto.ts`.
+  - The IPN route is **excluded from OpenAPI** (`@ApiExcludeEndpoint`, like Google's callback) instead of documented with a hand-written DTO (spec §5.6 updated).
+  - Unit specs with fakes (`orders.service.spec.ts`, `vnpay-ipn.service.spec.ts`) were added. The e2e can't run under this delegation, so they cover the transaction flow and the order of the checkout checks.
+- **Verification without a database:**
+  - the built TypeORM metadata was compared with the three migrations, name for name;
+  - Nest DI of the new providers was compiled in a throwaway testing module.
+
+  Neither replaces the owner-approved `xuan_test` run.

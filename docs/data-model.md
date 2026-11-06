@@ -39,8 +39,8 @@ erDiagram
     COURSE ||--o{ COURSE_ACCESS_GRANT : "is granted by"
     COURSE ||--o{ COURSE_SECTION : "contains"
     COURSE_SECTION ||--o{ LESSON : "contains (ordered)"
-    USER ||--o{ ORDER : "places (deferred)"
-    ORDER ||--o{ COURSE_ACCESS_GRANT : "grants a purchase grant (deferred)"
+    USER ||--o{ ORDER : "places"
+    ORDER ||--o| COURSE_ACCESS_GRANT : "grants a purchase grant once paid"
     NEWSLETTER_SUBSCRIPTION }o--o| USER : "may link to (needs product confirmation)"
 ```
 
@@ -71,8 +71,9 @@ erDiagram
 | **Content post** | An article/post published on the site. **Every post has an author user** | CONFIRMED. **V1 designed 2026-10-15** (blog design spec): text-first blog posts in Vietnamese (i18n-ready), a TipTap/ProseMirror JSON body (H2/H3, lists, quotes, bold, italic, links; no images yet), draft/published, SEO title/description; slug locked after first publication; publishing needs real content. **Blog completion (owner decisions BD-1…BD-13, 2026-10-19; spec `2026-10-19-blog-completion-design.md`):** B1 adds the `archived` state (restore → draft), hard delete only for never-published drafts, and up to 10 tags per post; B2 adds one category per post (required to publish); B3 adds a cover image with alt text, an optional share (OG) image and body version 2 (images, before/after, code blocks, video embeds by id); B4 adds reader ratings and comments with admin moderation. Scheduling, redirects and previews stay deferred (§5) | author user | `content` (table `content_posts`) |
 | **Newsletter subscription** ("Creator Notes") | An email-only list membership that may exist without an account | **NEEDS PRODUCT CONFIRMATION**: design intent only. If confirmed, it's introduced explicitly as a newsletter/email-subscription capability, never as a generic "subscribers" | optionally a user | — |
 | **Building project** ("Đang xây") | Something Xuân is building, with a status | NEEDS PRODUCT DESIGN, and only if it ever becomes database-managed (it's static copy today) | — | — |
-| **Order** | A record of a purchase | DEFERRED | user; course access grants (purchase source) | — |
-| **Payment** | Money movement for an order | DEFERRED | order | — |
+| **Order** | One checkout of one course by a signed-in user, at the course price of that moment; `pending` until VNPAY's verified notification makes it `paid` (which grants access) or `failed` | CONFIRMED, designed 2026-11-07 (course sales design, delegated) | user; course; one purchase grant when paid | `orders` (table `orders`) |
+| **Payment** | Money movement for an order. Not a separate record in V1: VNPAY's result (transaction number, bank, card type, pay date, codes) is kept on the order; refunds are manual in the VNPAY merchant portal | CONFIRMED (VNPAY, 2026-11-07); refunds via the API DEFERRED | order | `orders` |
+| **Course price** | Whole VND on the course; none = not for sale. The first course costs 499.000đ (data, set by an admin) | CONFIRMED 2026-11-07 (owner) | course | `courses` (`courses.price_vnd`) |
 | **Contact submission** (was *Inquiry*) | A visitor's message from the public contact form (`/lien-he`): name, email, one of four subjects (the editing course, the Kickstart session, 3-month coaching, general/collaboration) and the message. No account needed. Admins read and archive it; the business inbox gets one email per submission (one attempt; an admin can retry a failed one) | CONFIRMED, implemented 2026-11-03 (contact form design `2026-11-03-contact-form-design.md`) | none (visitors aren't users) | `contact` (table `contact_submissions`) |
 | **External providers** | Email, payment, calendar or newsletter services we integrate with | Google Calendar / Meet and applicant email notifications: CONFIRMED future integrations of the application/booking slice (§3.1). **Transactional email (Resend) and Google reCAPTCHA v3: implemented 2026-11-03 for the contact form.** The others: DEFERRED | appointments; applications | — |
 | **Support / donation** ("Arabica") | Supporting Xuân | DEFERRED while it's handled externally | — | — |
