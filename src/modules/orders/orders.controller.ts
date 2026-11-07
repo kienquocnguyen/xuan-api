@@ -15,10 +15,11 @@ import {
   orderReferenceParamSchema,
 } from './dto/order-requests.dto.js';
 import { ordersErrors } from './orders.errors.js';
-import { OrderRateLimitedError, OrdersService } from './orders.service.js';
+import { OrdersService, RetryLaterError } from './orders.service.js';
 
 const { VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, RATE_LIMITED } = baselineErrors;
-const { COURSE_NOT_FOR_SALE, COURSE_ALREADY_OWNED, PAYMENTS_UNAVAILABLE } = ordersErrors;
+const { COURSE_NOT_FOR_SALE, COURSE_ALREADY_OWNED, ORDER_PENDING, PAYMENTS_UNAVAILABLE } =
+  ordersErrors;
 
 /** A signed-in buyer's checkout and order status (course sales spec §5.4). Any role; the user is the session's (I9). */
 @ApiTags('orders')
@@ -26,8 +27,17 @@ const { COURSE_NOT_FOR_SALE, COURSE_ALREADY_OWNED, PAYMENTS_UNAVAILABLE } = orde
 export class OrdersController {
   constructor(private readonly orders: OrdersService) {}
 
+  /**
+   * At most one payable order per user and course (S16): `201` creates one, `200` returns the live pending order with
+   * a freshly signed URL for the same VNPAY transaction. Either way the browser goes to `paymentUrl`.
+   */
   @Post()
-  @ApiEnvelopeResponse(CheckoutDto, { status: 201 })
+  @ApiEnvelopeResponse(CheckoutDto, { status: 201, description: 'A new pending order.' })
+  @ApiEnvelopeResponse(CheckoutDto, {
+    status: 200,
+    description:
+      'The live pending order for this course (a double click, another tab), re-signed: same reference, amount and expiry.',
+  })
   @ApiErrorResponses(
     VALIDATION_FAILED,
     UNAUTHENTICATED,
@@ -35,6 +45,7 @@ export class OrdersController {
     NOT_FOUND,
     COURSE_NOT_FOR_SALE,
     COURSE_ALREADY_OWNED,
+    ORDER_PENDING, // with Retry-After: the previous order just expired and may still settle
     RATE_LIMITED,
     PAYMENTS_UNAVAILABLE,
   )
@@ -46,10 +57,15 @@ export class OrdersController {
   ): Promise<CheckoutDto> {
     try {
       // `req.ip` is the client behind TRUST_PROXY_HOPS proxies (CF-8): VNPAY's vnp_IpAddr.
-      const { view, paymentUrl } = await this.orders.checkout(user.id, input.courseId, req.ip);
+      const { view, paymentUrl, reused } = await this.orders.checkout(
+        user.id,
+        input.courseId,
+        req.ip,
+      );
+      if (reused) res.status(200);
       return { order: toOrderDto(view), paymentUrl };
     } catch (error) {
-      if (error instanceof OrderRateLimitedError) {
+      if (error instanceof RetryLaterError) {
         res.setHeader('Retry-After', String(error.retryAfterSeconds));
       }
       throw error;

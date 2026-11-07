@@ -1302,12 +1302,20 @@ describe('OpenAPI document', () => {
           'NOT_FOUND',
           'COURSE_NOT_FOR_SALE',
           'COURSE_ALREADY_OWNED',
+          'ORDER_PENDING',
           'RATE_LIMITED',
           'PAYMENTS_UNAVAILABLE',
         ].sort(),
       );
       expect(codes('/orders/{reference}', 'get')).toEqual([...input, 'NOT_FOUND'].sort());
       expect(codes('/admin/orders', 'get')).toEqual([...input, 'FORBIDDEN'].sort());
+    });
+
+    it('documents checkout as 201 (new order) and 200 (the live pending order, reused), both CheckoutDto (S16)', () => {
+      const responses = doc().paths['/orders']?.post?.responses ?? {};
+      for (const status of ['200', '201']) {
+        expect(JSON.stringify(responses[status])).toContain('#/components/schemas/CheckoutDto');
+      }
     });
 
     it('leaves the VNPAY IPN out: it is VNPAY’s contract, not xuan-web’s (S5)', () => {

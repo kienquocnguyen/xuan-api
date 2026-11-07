@@ -57,6 +57,20 @@ describe('Orders (/orders, /admin/orders)', () => {
     return id;
   };
   const server = () => request(app.getHttpServer());
+  /** What a cancelled-payment IPN leaves behind (vnpay-ipn.e2e-spec proves the IPN itself). */
+  const fail = (reference: string) =>
+    db.query(`UPDATE orders SET status = 'failed', vnp_response_code = '24' WHERE reference = $1`, [
+      reference,
+    ]);
+  const moveExpiry = (reference: string, interval: string) =>
+    db.query(`UPDATE orders SET expires_at = now() + $2::interval WHERE reference = $1`, [
+      reference,
+      interval,
+    ]);
+  const orderCount = async () =>
+    Number((await db.query<{ n: string }[]>(`SELECT count(*) AS n FROM orders`))[0].n);
+  const urlParams = (paymentUrl: string) =>
+    Object.fromEntries(new URL(paymentUrl).searchParams) as Record<string, string>;
   const checkout = (body: object, cookie = buyer.cookie) =>
     server().post('/orders').set(XHR).set('Cookie', cookie).send(body);
 
@@ -165,8 +179,13 @@ describe('Orders (/orders, /admin/orders)', () => {
       ]);
     });
 
-    it('throttles the sixth checkout within 15 minutes with Retry-After (429)', async () => {
-      for (let i = 0; i < 5; i += 1) expect((await checkout({ courseId })).status).toBe(201);
+    it('throttles the sixth new order within 15 minutes with Retry-After (429)', async () => {
+      // Each cancelled order frees the course for a new one (S16); the throttle still counts them (S11).
+      for (let i = 0; i < 5; i += 1) {
+        const res = await checkout({ courseId });
+        expect(res.status).toBe(201);
+        await fail(res.body.data.order.reference);
+      }
       const res = await checkout({ courseId });
       expect(res.status).toBe(429);
       expect(res.body.error.code).toBe('RATE_LIMITED');
@@ -188,6 +207,121 @@ describe('Orders (/orders, /admin/orders)', () => {
       } finally {
         await off.close();
       }
+    });
+  });
+
+  describe('POST /orders: one payable order per user and course (S16)', () => {
+    it('a double click returns the same pending order (200), re-signed for the same VNPAY transaction', async () => {
+      const first = await checkout({ courseId });
+      const again = await checkout({ courseId });
+      expect(first.status).toBe(201);
+      expect(again.status).toBe(200);
+      expect(again.body.data.order).toEqual(first.body.data.order);
+      const before = urlParams(first.body.data.paymentUrl);
+      const after = urlParams(again.body.data.paymentUrl);
+      for (const key of ['vnp_TxnRef', 'vnp_Amount', 'vnp_CreateDate', 'vnp_ExpireDate']) {
+        expect(after[key]).toBe(before[key]);
+      }
+      expect(verifyVnpay(TEST_VNPAY.hashSecret, after).valid).toBe(true);
+      expect(await orderCount()).toBe(1);
+    });
+
+    it('concurrent checkouts create exactly one order; the others reuse it', async () => {
+      for (let trial = 0; trial < 5; trial += 1) {
+        await db.query(`DELETE FROM orders`);
+        const answers = await Promise.all(Array.from({ length: 5 }, () => checkout({ courseId })));
+        expect(answers.map((res) => res.status).sort((a, b) => a - b)).toEqual([
+          200, 200, 200, 200, 201,
+        ]);
+        expect(new Set(answers.map((res) => res.body.data.order.reference)).size).toBe(1);
+        expect(await orderCount()).toBe(1);
+      }
+    });
+
+    it('reuses the order whatever the price is now: the amount the buyer saw', async () => {
+      const first = (await checkout({ courseId })).body.data;
+      await db.query(`UPDATE courses SET price_vnd = 450000 WHERE id = $1`, [courseId]);
+      const again = await checkout({ courseId });
+      expect(again.status).toBe(200);
+      expect(again.body.data.order.reference).toBe(first.order.reference);
+      expect(again.body.data.order.amountVnd).toBe(499_000);
+      expect(urlParams(again.body.data.paymentUrl).vnp_Amount).toBe('49900000');
+    });
+
+    it.each([
+      ['in its last minute', '30 seconds', 330],
+      ['just expired, inside the 5-minute grace', '-2 minutes', 180],
+    ])(
+      'answers 409 ORDER_PENDING with Retry-After for an order %s, and creates nothing',
+      async (_case, interval, seconds) => {
+        const { reference } = (await checkout({ courseId })).body.data.order;
+        await moveExpiry(reference, interval);
+        const res = await checkout({ courseId });
+        expect(res.status).toBe(409);
+        expect(res.body).toEqual(
+          envelope(
+            'ORDER_PENDING',
+            'Your previous payment for this course is still being confirmed.',
+          ),
+        );
+        const retryAfter = Number(res.headers['retry-after']);
+        expect(retryAfter).toBeGreaterThan(seconds - 10);
+        expect(retryAfter).toBeLessThanOrEqual(seconds + 1);
+        expect(await orderCount()).toBe(1);
+      },
+    );
+
+    it('creates a new order once the old one is past expiry + grace, and leaves the old one pending', async () => {
+      const old = (await checkout({ courseId })).body.data.order;
+      await moveExpiry(old.reference, '-6 minutes');
+      const res = await checkout({ courseId });
+      expect(res.status).toBe(201);
+      expect(res.body.data.order.reference).not.toBe(old.reference);
+      // Never assumed unpaid: a late success IPN can still settle it (vnpay-ipn.e2e-spec, S9).
+      const [row] = await db.query<{ status: string }[]>(
+        `SELECT status FROM orders WHERE reference = $1`,
+        [old.reference],
+      );
+      expect(row.status).toBe('pending');
+    });
+
+    it('creates a new order after a failed (cancelled) one', async () => {
+      const old = (await checkout({ courseId })).body.data.order;
+      await fail(old.reference);
+      const res = await checkout({ courseId });
+      expect(res.status).toBe(201);
+      expect(res.body.data.order.reference).not.toBe(old.reference);
+    });
+
+    it('answers COURSE_ALREADY_OWNED, not a reuse, once the buyer has access', async () => {
+      const order = (await checkout({ courseId })).body.data.order;
+      await db.query(
+        `UPDATE orders SET status = 'paid', paid_at = now(), vnp_response_code = '00' WHERE id = $1`,
+        [order.id],
+      );
+      await insert('course_access_grants', {
+        user_id: buyer.user.id,
+        course_id: courseId,
+        source: 'purchase',
+        order_id: order.id,
+      });
+      expect((await checkout({ courseId })).body).toEqual(
+        envelope('COURSE_ALREADY_OWNED', 'You already have access to this course.'),
+      );
+    });
+
+    it("never reuses another course's or another user's order", async () => {
+      const mine = (await checkout({ courseId })).body.data.order;
+      const otherCourse = await insertCourse({ slug: 'khoa-khac' });
+      const other = await checkout({ courseId: otherCourse });
+      expect(other.status).toBe(201);
+      const someoneElse = await signInAs(app);
+      const theirs = await checkout({ courseId }, someoneElse.cookie);
+      expect(theirs.status).toBe(201);
+      const references = [mine, other.body.data.order, theirs.body.data.order].map(
+        (order: { reference: string }) => order.reference,
+      );
+      expect(new Set(references).size).toBe(3);
     });
   });
 
@@ -214,6 +348,7 @@ describe('Orders (/orders, /admin/orders)', () => {
   describe('GET /admin/orders', () => {
     it('lists orders newest first with the buyer’s public profile, filterable by status', async () => {
       const first = (await checkout({ courseId })).body.data.order;
+      await fail(first.reference); // so the second checkout is a new order (S16)
       const second = (await checkout({ courseId })).body.data.order;
       const admin = await signInAs(app, { role: 'admin' });
 

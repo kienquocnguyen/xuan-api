@@ -12,6 +12,12 @@ export const ordersErrors = {
     kind: 'conflict',
     message: 'You already have access to this course.',
   },
+  /** S16: the previous order just expired and may still settle; the response carries `Retry-After`. */
+  ORDER_PENDING: {
+    code: 'ORDER_PENDING',
+    kind: 'conflict',
+    message: 'Your previous payment for this course is still being confirmed.',
+  },
   PAYMENTS_UNAVAILABLE: {
     code: 'PAYMENTS_UNAVAILABLE',
     kind: 'unavailable',

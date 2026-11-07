@@ -39,7 +39,7 @@ export class OrderDto {
   failureCode!: string | null;
 }
 
-/** Checkout's answer: the new pending order and the signed VNPAY URL to send the browser to. */
+/** Checkout's answer: the pending order (new, or the live one reused, S16) and the signed VNPAY URL to send the browser to. */
 export class CheckoutDto {
   @ApiProperty({ type: OrderDto }) order!: OrderDto;
   @ApiProperty({
