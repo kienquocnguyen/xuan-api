@@ -42,11 +42,12 @@ A signed-in visitor opens the first course (`workflow-edit-video-youtube`) and c
 | S7 | Where the SIT runs (Production with sandbox keys, a tunnel, or a preview) is an ops decision for the owner. The code works with any of them | [Owner, pending] |
 | S8 | Signature canonical form = **PHP-`urlencode`-compatible encoding** of keys and values, sorted by key, joined `k=v&…`, as in VNPAY's current official demos. **Must be confirmed with one sandbox payment before go-live** (the PDF's samples disagree) | [Claude] |
 | S9 | No `expired` order state. A successful IPN after `vnp_ExpireDate` is still honoured, because the money was taken | [Claude] |
-| S10 | Each checkout creates a new order. Earlier pending orders stay payable. Two paid orders for one course give two purchase grants (harmless, OD-1) and are refunded by hand | [Claude] |
-| S11 | Checkout is limited to **5 orders per user per 15 minutes** (`429 RATE_LIMITED`). Not serialized: parallel checkouts can add a few extra pending orders, which costs nothing | [Claude] |
+| S10 | ~~Each checkout creates a new order.~~ **Superseded by S16 (2026-11-08).** What remains: two paid orders for one course (now only through a payment VNPAY accepts after its own expiry) give two purchase grants (harmless, OD-1) and are refunded by hand | [Claude] |
+| S11 | Checkout is limited to **5 new orders per user per 15 minutes** (`429 RATE_LIMITED`). A reuse (S16) creates nothing and is never throttled. Serialized per course by S16's lock; checkouts of different courses in parallel can exceed it by a few, which costs nothing | [Claude] |
 | S13 | **A purchase grant is unconditional.** The paid order is the authority: the money was taken. `grantForPurchase` checks neither the course's status or price nor existing grants. A buyer who already holds an admin grant gets a second, purchase grant (OD-1) | [Claude] (builder check) |
 | S14 | **`failed` isn't terminal for a success.** A success IPN for a `failed` order settles it `paid` and grants access: a charged buyer is never left without access. A failure IPN for a `failed` order, and any IPN for a `paid` order, answers `02` | [Claude] (builder check) |
 | S15 | Migrations are **hand-written** in TypeORM's generated style, because `migration:generate` needs a database the delegation doesn't cover. The owner's packet ends with a second `migration:generate`, which must be empty. Baseline: local `xuan_dev` has every migration through `CreateContactSubmissions` (verified 2026-11-03) | [Claude] (builder check) |
+| S16 | **At most one payable order per user and course** (owner-approved 2026-11-08, handoff §6.1). Under `pg_advisory_xact_lock(hashtextextended('orders:checkout:<user>:<course>', 0))`, checkout reads the user's newest `pending` order for the course with `expires_at` > now − 5 min: **≥ 1 min left → reuse it** (`200`, same `reference`, amount, `vnp_CreateDate` and `vnp_ExpireDate`, re-signed; only `vnp_IpAddr` may differ); **< 1 min left, or expired < 5 min ago → `409 ORDER_PENDING` with `Retry-After`** until expiry + 5 min, because expiry isn't proof VNPAY didn't charge; otherwise a new order (`201`). A reused order keeps its price snapshot even if the price changed. `failed` and `paid` orders never block (ownership answers `COURSE_ALREADY_OWNED` first). The IPN is unchanged: a late or second real success is always recorded (S9, S13, S14). Whether VNPAY's page accepts a re-opened `vnp_TxnRef` is checked in the sandbox test (handoff §7); either way it can't charge twice for one `vnp_TxnRef` | [Owner] (approach), [Claude] (1 min, 5 min) |
 | S12 | One outcome, one branch (`feat/course-sales-vnpay`): the video provider, price and orders together. Separate branches would need stacking, because nothing can merge until the owner approves the database steps | [Claude] (`xuan-git-branch-cohesion`) |
 
 ## 3. Lesson videos: YouTube unlisted (S2)
@@ -155,7 +156,7 @@ Allowed dependencies (architecture §4) gain `orders → courses, users`.
 
 | Route | Access | Request → response | Errors |
 |---|---|---|---|
-| `POST /orders` | signed in, CSRF | `CreateOrderDto { courseId: uuid }` → **201** `CheckoutDto { order: OrderDto, paymentUrl }` | `400`, `401`, `403` (CSRF), `404` (unknown or unpublished course), `409 COURSE_NOT_FOR_SALE`, `409 COURSE_ALREADY_OWNED`, `429 RATE_LIMITED`, `503 PAYMENTS_UNAVAILABLE` |
+| `POST /orders` | signed in, CSRF | `CreateOrderDto { courseId: uuid }` → **201** (new) or **200** (live pending order reused, S16) `CheckoutDto { order: OrderDto, paymentUrl }` | `400`, `401`, `403` (CSRF), `404` (unknown or unpublished course), `409 COURSE_NOT_FOR_SALE`, `409 COURSE_ALREADY_OWNED`, `409 ORDER_PENDING`, `429 RATE_LIMITED`, `503 PAYMENTS_UNAVAILABLE` |
 | `GET /orders/:reference` | signed in; own orders only | `OrderReferenceParam` → `OrderDto`, `Cache-Control: no-store` | `400`, `401`, `404` (unknown or someone else's) |
 | `GET /payments/vnpay/ipn` | `@Public`, VNPAY only (signature) | the VNPAY query → **200** `{ RspCode, Message }` raw (S5) | none: every failure is an `RspCode` |
 | `GET /admin/orders` | admin | `AdminOrdersQuery { page, pageSize, status? }` → paginated `AdminOrderDto`, newest first | `400`, `401`, `403` |
@@ -174,18 +175,19 @@ Allowed dependencies (architecture §4) gain `orders → courses, users`.
 |---|---|---|
 | `COURSE_NOT_FOR_SALE` | 409 | "This course isn't open for purchase." |
 | `COURSE_ALREADY_OWNED` | 409 | "You already have access to this course." |
+| `ORDER_PENDING` | 409 | "Your previous payment for this course is still being confirmed." (S16; with `Retry-After`) |
 | `PAYMENTS_UNAVAILABLE` | 503 | "Online payment is temporarily unavailable." |
 
-`RATE_LIMITED` is the baseline code, with `Retry-After`.
+`RATE_LIMITED` is the baseline code. Both it and `ORDER_PENDING` carry `Retry-After` (seconds).
 
 **Checkout steps:**
-1. Throttle check.
-2. `findForSale`: null → 404.
-3. `priceVnd === null` → 409 `COURSE_NOT_FOR_SALE`.
-4. `hasActiveAccess` → 409 `COURSE_ALREADY_OWNED`.
-5. Payments disabled → 503 `PAYMENTS_UNAVAILABLE`. It's checked after the course checks, so a 404 stays a 404.
-6. Insert the order (`pending`, `amount_vnd = priceVnd`, `expires_at = now + 15 min`).
-7. Build the URL.
+1. `findForSale`: null → 404.
+2. `priceVnd === null` → 409 `COURSE_NOT_FOR_SALE`.
+3. `hasActiveAccess` → 409 `COURSE_ALREADY_OWNED`.
+4. Payments disabled → 503 `PAYMENTS_UNAVAILABLE`. It's checked after the course checks, so a 404 stays a 404.
+5. Transaction (I8), S16: the per-user-and-course advisory lock, then the newest live `pending` order → reuse (`200`), or `409 ORDER_PENDING`, or:
+6. Throttle check (S11), then insert the order (`pending`, `amount_vnd = priceVnd`, `expires_at = now + 15 min`) → `201`.
+7. Build the URL from the order (new or reused).
 
 ### 5.5 Payment URL (techspec §2.5.3.1)
 

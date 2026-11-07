@@ -15,7 +15,8 @@
 | Nest DI of the new providers | Resolves (compiled offline) |
 | Migrations on `xuan_test` / `xuan_dev` | **Done 2026-11-08** (owner-approved, §1a): run, catalog matches the map, revert ×3 and re-run, empty second generate on both; `xuan_dev` backed up first, existing data and schema unchanged |
 | e2e (new: orders, IPN SIT cases + races, schema; updated: courses, learning, OpenAPI) | **724/724 pass** on `xuan_test` (40 files), first run |
-| Signature encoding vs VNPAY's real server (spec S8) | **Unverified**: needs sandbox keys (§3) |
+| Duplicate-charge guard (§6.1, spec S16): one payable order per user and course, reuse, `409 ORDER_PENDING` | **Code done 2026-11-08** (owner-approved); unit tests pass; e2e: see the PR |
+| Signature encoding vs VNPAY's real server (spec S8) | **Unverified**: needs sandbox keys (§3, §7) |
 | VNPAY SIT, production keys, Production migration | Not started (§3, §4) |
 
 ## 1. Approval packet: local databases
@@ -148,11 +149,15 @@ The contract is in `docs/api-contract.md` "Course sales" and delta 22.
 
 **"Đăng ký":**
 - `POST /orders { courseId }` with `X-Requested-With`, then `window.location.assign(paymentUrl)`.
+- **`201` and `200` are both success; treat them alike.** `201` = a new order. `200` = the user's live pending order for this course (a double click, a second tab, coming back from VNPAY's page), with a freshly signed `paymentUrl` for the **same** VNPAY transaction (same `reference`, amount, `expiresAt`).
+- **Never store or rebuild a payment URL.** To get a valid one, call `POST /orders` again: the backend returns the live order or creates a new one. Disable the button while the request runs (the backend is race-safe anyway).
+- Optional: show "Thanh toán trước *HH:MM*" from `order.expiresAt`.
 
 | Answer | Vietnamese hint | Action |
 |---|---|---|
 | `409 COURSE_ALREADY_OWNED` | "Bạn đã sở hữu khóa học này" | Link to the course |
 | `409 COURSE_NOT_FOR_SALE` | "Khóa học chưa mở đăng ký" | — |
+| `409 ORDER_PENDING` | "Giao dịch trước đang được xác nhận, vui lòng thử lại sau *N* phút" | `N` from `Retry-After` (seconds, ≤ 6 min). Can't happen while the live order has more than a minute left |
 | `429` | — | Show the `Retry-After` wait |
 | `503` | "Thanh toán trực tuyến tạm thời gián đoạn" | — |
 
@@ -178,25 +183,26 @@ The contract is in `docs/api-contract.md` "Course sales" and delta 22.
 
 ## 6. Payment risks before Production (evaluated 2026-11-08)
 
-### 6.1 Duplicate charges
+### 6.1 Duplicate charges (guard built 2026-11-08, spec S16)
 
-**How it can happen:**
-- `COURSE_ALREADY_OWNED` stops a checkout **after** a payment is confirmed, but not while an earlier order is still payable.
-- Two pending orders for the same course, from two tabs or from clicking "Đăng ký" again within 15 minutes, can both be paid. Each one gets a grant and a charge (S10).
-- VNPAY refuses payment after `vnp_ExpireDate` (15 minutes), so the risk is confined to that window.
+**The risk:** two payable orders for one course (two tabs, a second click on "Đăng ký" within 15 minutes) could both be paid: two charges.
 
-**Minimum mitigation (recommended before Production; small, no schema change):**
-- At checkout, refuse a new order while the user has a `pending` order for the same course whose `expires_at` is still in the future.
-- Answer `409 ORDER_PENDING`, with that order's `reference` and `expiresAt`, so xuan-web can say "Bạn đang có giao dịch chờ thanh toán đến HH:MM".
-- Serialize parallel clicks with `pg_advisory_xact_lock(user, course)` in the checkout transaction.
-- With at most one live payable order per user and course, a second charge needs VNPAY to accept a payment after its own expiry.
-- Cost: one new error code, one query and a lock. A user who abandoned the VNPAY page waits at most 15 minutes before checking out again.
-- *Not chosen:* reusing the old order's URL. That re-sends a `vnp_TxnRef` VNPAY may already hold, and its behaviour is unverified.
+**What the backend does now (owner-approved; spec S16):**
+- **At most one payable order per user and course.** Checkout runs under `pg_advisory_xact_lock` per user and course, so simultaneous clicks are serialized. Exactly one order is created; the others get it back.
+- **Reuse:** a `pending` order with ≥ 1 minute left is returned (`200`) with a re-signed URL for the same `vnp_TxnRef`, amount and expiry. VNPAY charges a `vnp_TxnRef` at most once, and our IPN settles an order once.
+- **Wait:** an order in its last minute, or expired less than 5 minutes ago, answers `409 ORDER_PENDING` with `Retry-After`. Expiry isn't proof VNPAY didn't charge: a payment started just before it can still complete and its IPN arrive.
+- **New order:** only when nothing is pending, the old order `failed`, or it expired over 5 minutes ago. The old one stays `pending`, never assumed unpaid.
+- **The IPN is unchanged:** a late success (after expiry, after a new order, after an admin or another purchase grant) is always recorded `00`/`paid` with a grant. A real charge is never refused (S9, S13, S14). Proven by e2e.
+- The throttle (5 per 15 min) now counts only **new** orders; a reuse is never throttled.
 
-**Operational recovery (always available):**
+**What remains possible:** a second charge needs VNPAY to accept a payment over 5 minutes after its own `vnp_ExpireDate` while the buyer opens a new order. Recovery stays manual:
 1. `GET /admin/orders?status=paid` shows two paid orders for the same user and course.
 2. Refund the later one by its `vnpTransactionNo` in the VNPAY merchant portal.
 3. Note it. The extra purchase grant is harmless (OD-1).
+
+**Open, checked in the sandbox (§7):**
+- whether VNPAY's page accepts a re-opened `vnp_TxnRef` (the reuse path);
+- whether VNPAY sends an IPN when the buyer **cancels** on its page. If it doesn't, the cancelled order stays `pending` and the next checkout reuses a transaction VNPAY has closed. The buyer would then wait up to ~20 minutes. If the sandbox shows this, it's a follow-up decision for the owner, not part of this change.
 
 ### 6.2 A successful payment whose IPN never arrives
 
@@ -216,46 +222,74 @@ The contract is in `docs/api-contract.md` "Course sales" and delta 22.
 
 ## 7. Next: one controlled VNPAY sandbox payment
 
-No real money: sandbox only, against local `xuan_dev`.
+Sandbox only, no real money, against **local `xuan_dev`** only. Never Neon: the API reads `.env` (not `.env.production.local`), and the preflight below refuses anything but local `xuan_dev`.
 
-**Prerequisites (owner):**
-1. **Sandbox credentials:** VNPAY's sandbox `vnp_TmnCode` and `vnp_HashSecret`, typed into your local `.env` yourself:
+### 7.1 Owner setup (minimum)
+
+1. **Docker Desktop** running, with `xuan-postgres` up.
+2. **Sandbox credentials**, typed into your local `.env` yourself (never in chat, never committed):
    - `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`;
    - `VNPAY_PAYMENT_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html`;
    - `VNPAY_RETURN_URL=http://localhost:3000/khoa-hoc/thanh-toan/ket-qua`. The page can 404 for now; the IPN is what's tested.
-2. **A public HTTPS tunnel to `localhost:4000`:** e.g. Cloudflare's `cloudflared tunnel --url http://localhost:4000`, a new tool that needs your OK. Its `https://…trycloudflare.com/payments/vnpay/ipn` becomes the sandbox terminal's IPN URL, set in VNPAY's sandbox merchant admin or by VNPAY support.
-3. **Test data on `xuan_dev`, through the admin API as you:**
-   - a published course;
-   - one published lesson with a `youtubeVideoId`;
-   - `PUT /admin/courses/:id/price {"priceVnd":499000}`.
+3. **The HTTPS tunnel:** install `cloudflared` once (`winget install --id Cloudflare.cloudflared`, a new tool: your OK). Start a quick tunnel, no account needed: `cloudflared tunnel --url http://localhost:4000`. It prints `https://<random>.trycloudflare.com`.
+   - The tunnel exposes the **whole** local API while it runs. Keep it up only for the test, then stop it (Ctrl+C).
+   - The address changes on every start, so register it again each time.
+4. **Register the IPN URL** `https://<random>.trycloudflare.com/payments/vnpay/ipn` for your sandbox terminal: in VNPAY's sandbox merchant admin (link in the onboarding email), or ask VNPAY support to set it.
 
-**The test:**
-1. Start the API (`yarn start:dev`). Config must load, with no `VNPAY_*` error.
-2. Signed in as a **non-admin** test user, from a page on `http://localhost:3000`, run in DevTools:
+### 7.2 Gates before any transaction
 
-   ```js
-   fetch('http://localhost:4000/orders', {
-     method: 'POST',
-     credentials: 'include',
-     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
-     body: JSON.stringify({ courseId: '<id>' }),
-   });
-   ```
+1. `yarn build`, then Claude runs a read-only preflight script (kept out of the repo; it prints no secret and connects only to read `current_database()`). It must say `PREFLIGHT OK: local xuan_dev + VNPAY sandbox`. It checks:
+   - the effective `DATABASE_URL` is `xuan_dev` on a local host;
+   - a live `SELECT current_database()` = `xuan_dev`;
+   - VNPAY is configured with the sandbox host.
+2. `yarn start:dev`. Config loads with no `VNPAY_*` error.
+3. **Tunnel → API check, creates nothing:** `curl https://<random>.trycloudflare.com/payments/vnpay/ipn` must answer `{"RspCode":"97","Message":"Invalid Checksum"}`.
+4. You confirm the IPN URL is registered with VNPAY.
 
-   Expect `201`.
-3. **Signature gate (S8):** open `data.paymentUrl`. **VNPAY's payment page must appear**; a checksum error means the encoding must change before anything else.
-4. Pay with the sandbox NCB test card from VNPAY's instructions.
-5. **Check, in order:**
-   - the API log shows `VNPAY IPN <reference>: RspCode 00, vnp_ResponseCode 00, vnp_TransactionStatus 00`;
-   - `GET /orders/<reference>` → `status: "paid"`;
-   - `GET /admin/orders` shows `vnpTransactionNo`, bank and card;
-   - `GET /learn/courses/<slug>/lessons/<lessonId>` → `200` with the YouTube video.
-6. **Failure path:** a second order, cancelled on VNPAY's page → `status: "failed"`, `failureCode: "24"`, no grant.
-7. Then ask VNPAY to run the SIT against the same IPN URL.
+### 7.3 Isolated test data on `xuan_dev` (as admin, through the admin API)
+
+A dedicated course that no real student owns: slug `vnpay-sandbox-test`, title `[TEST] VNPAY sandbox`, one section, one published lesson with a `youtubeVideoId`, the course published, and `PUT /admin/courses/:id/price {"priceVnd":499000}`. Afterwards, set the price back to `null` and unpublish it.
+
+The buyer can be your own admin account. Admins also need a grant to watch, so the before and after check still works, and the purchase grant lands only on the test course.
+
+### 7.4 The test (in this order)
+
+From a page on `http://localhost:3000`, signed in, run `POST /orders` in DevTools:
+
+```js
+const checkout = () => fetch('http://localhost:4000/orders', {
+  method: 'POST', credentials: 'include',
+  headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+  body: JSON.stringify({ courseId: '<test course id>' }),
+}).then(async (r) => ({ status: r.status, body: await r.json() }));
+```
+
+**A. Cancelled payment first** (you can't buy after owning):
+1. `await checkout()` → `201`. Open `body.data.paymentUrl`.
+2. **Signature gate (S8): VNPAY's payment page must appear.** "Sai chữ ký" / checksum error → stop; the encoding must change first.
+3. Cancel on VNPAY's page ("Hủy thanh toán").
+4. **Observe:** does an `VNPAY IPN <reference>: RspCode 00, vnp_ResponseCode 24 …` line appear?
+   - Yes → `GET /orders/<reference>` → `failed`, `failureCode: "24"`, no grant.
+   - No (stays `pending`) → note it (§6.1 open item), and run step B.1 to see whether the reused URL still works.
+
+**B. Successful payment, including reuse:**
+1. `await checkout()` twice. First `201` (or `200` if A's order is still `pending`), then **`200` with the same `reference`**. Open the **second** `paymentUrl`. Record whether VNPAY accepts the re-signed URL for the same `vnp_TxnRef`.
+2. Pay with the sandbox NCB test card (from VNPAY's instructions).
+3. **Check, in order:**
+   - the API log: `VNPAY IPN <reference>: RspCode 00, vnp_ResponseCode 00, vnp_TransactionStatus 00`;
+   - `GET /orders/<reference>` → `status: "paid"`, `paidAt` set;
+   - `GET /admin/orders` → `vnpTransactionNo`, bank and card filled;
+   - `GET /admin/courses/<id>/access-grants` → a `purchase` grant for this order;
+   - `GET /learn/courses/vnpay-sandbox-test/lessons/<lessonId>` → `200` with `video.provider: "youtube"`;
+   - `await checkout()` → `409 COURSE_ALREADY_OWNED`.
+
+### 7.5 Then the SIT
+
+Ask VNPAY to run the SIT against the same IPN URL. **Their script needs two separate transactions stopped at OTP** (`VNPAY SIT.docx`). With S16, a second checkout by the same user for the same course within 15 minutes returns the **same** transaction. Use two test users, or two test courses, or wait 20 minutes between them.
 
 ## 8. Known limitations
 
 - **YouTube unlisted (S2, accepted):** an unlisted id plays on youtube.com for anyone who has it. Our API hands it only to paying students, but it can't stop a student from sharing it. The remedy is Vimeo: switch each lesson's id field, with no code change.
 - **No refund API:** refunds are manual in the VNPAY portal, and an admin API to revoke a purchase grant is deferred (S6).
 - **No `querydr` reconciliation:** if VNPAY's IPN never arrives, the order stays `pending`. Fix: look up the transaction in the VNPAY portal and grant access manually with the admin grant.
-- **Paying twice:** two tabs paying two orders give two grants and two charges; refund one manually (S10).
+- **Paying twice:** now only if VNPAY accepts a payment over 5 minutes after its own expiry while the buyer opened a new order (S16). Two grants, two charges; refund one manually (§6.1).
