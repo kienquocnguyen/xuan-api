@@ -20,7 +20,7 @@ export const coursesErrors = {
   LESSON_VIDEO_MISSING: {
     code: 'LESSON_VIDEO_MISSING',
     kind: 'conflict',
-    message: 'A published lesson needs a Vimeo video.',
+    message: 'A published lesson needs a video.',
   },
   LESSON_IS_PUBLISHED: {
     code: 'LESSON_IS_PUBLISHED',

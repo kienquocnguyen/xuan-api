@@ -112,6 +112,7 @@ describe('Learner courses and gated playback (/learn/courses…)', () => {
     title: `Khóa ${slug}`,
     summary: `Tóm tắt ${slug}`,
     publishedAt,
+    priceVnd: null,
   });
 
   describe('GET /learn/courses', () => {
@@ -237,6 +238,19 @@ describe('Learner courses and gated playback (/learn/courses…)', () => {
           nextLessonId: null,
           progress: { positionSeconds: 0, completed: false },
         },
+      });
+    });
+
+    it('returns a YouTube-unlisted video with its provider and no hash (course sales S2)', async () => {
+      await grantDirect(learner.user.id, c.id);
+      await db.query(
+        `UPDATE course_lessons SET vimeo_video_id = NULL, youtube_video_id = 'dQw4w9WgXcQ' WHERE id = $1`,
+        [c.l2],
+      );
+      expect((await learn(`/c/lessons/${c.l2}`)).body.data.video).toEqual({
+        provider: 'youtube',
+        videoId: 'dQw4w9WgXcQ',
+        privacyHash: null,
       });
     });
 

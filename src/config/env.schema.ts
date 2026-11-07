@@ -60,6 +60,18 @@ export const envSchema = z
       .regex(/^(?:[^<>\r\n]+ )?<[^\s<>@]+@[^\s<>@]+>$|^[^\s<>@]+@[^\s<>@]+$/)
       .optional(),
     CONTACT_NOTIFICATION_TO: z.email().optional(),
+
+    // VNPAY payment gateway (course sales spec §5.7): all four or none. The secret is never printed (I5).
+    VNPAY_TMN_CODE: z
+      .string()
+      .regex(/^[A-Za-z0-9]{8}$/)
+      .optional(),
+    VNPAY_HASH_SECRET: z.string().min(1).optional(),
+    VNPAY_PAYMENT_URL: z
+      .url()
+      .refine((url) => new URL(url).protocol === 'https:', 'Must use https.')
+      .optional(),
+    VNPAY_RETURN_URL: z.url().optional(),
   })
   .superRefine((env, ctx) => {
     const issue = (variable: string, message: string) =>
@@ -116,7 +128,22 @@ export const envSchema = z
         if (env[name] === undefined) issue(name, 'Set all three contact email variables, or none.');
       }
     }
+    // VNPAY: a half-configured gateway is a typo, not a choice.
+    const vnpay = [
+      'VNPAY_TMN_CODE',
+      'VNPAY_HASH_SECRET',
+      'VNPAY_PAYMENT_URL',
+      'VNPAY_RETURN_URL',
+    ] as const;
+    if (vnpay.some((name) => env[name] !== undefined)) {
+      for (const name of vnpay) {
+        if (env[name] === undefined) issue(name, 'Set all four VNPAY variables, or none.');
+      }
+    }
     if (env.NODE_ENV === 'production') {
+      if (env.VNPAY_RETURN_URL && new URL(env.VNPAY_RETURN_URL).protocol !== 'https:') {
+        issue('VNPAY_RETURN_URL', 'Must use https in production.');
+      }
       if (!env.AUTH_COOKIE_SECURE) issue('AUTH_COOKIE_SECURE', 'Must be true in production.');
       if (new URL(env.GOOGLE_CALLBACK_URL).protocol !== 'https:') {
         issue('GOOGLE_CALLBACK_URL', 'Must use https in production.');

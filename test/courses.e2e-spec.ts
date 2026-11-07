@@ -83,6 +83,7 @@ describe('Public courses (/courses)', () => {
             title: 'Khóa moi',
             summary: 'Tóm tắt moi',
             publishedAt: '2026-10-01T00:00:00.000Z',
+            priceVnd: null,
           },
           {
             id: older,
@@ -90,6 +91,7 @@ describe('Public courses (/courses)', () => {
             title: 'Khóa cu',
             summary: 'Tóm tắt cu',
             publishedAt: '2026-09-01T00:00:00.000Z',
+            priceVnd: null,
           },
         ],
       });
@@ -125,6 +127,7 @@ describe('Public courses (/courses)', () => {
           title: 'Khóa workflow-edit-video-youtube',
           summary: 'Tóm tắt workflow-edit-video-youtube',
           publishedAt: '2026-10-01T00:00:00.000Z',
+          priceVnd: null,
           sections: [
             {
               id: first,

@@ -11,12 +11,19 @@ export class AdminCourseSummaryDto {
   @ApiProperty() summary!: string;
   @ApiProperty({ enum: COURSE_STATUSES }) status!: CourseStatus;
   @ApiProperty({ type: String, nullable: true, format: 'date-time' }) publishedAt!: string | null;
+  @ApiProperty({
+    type: 'integer',
+    nullable: true,
+    example: 499000,
+    description: 'Whole VND; null when not for sale.',
+  })
+  priceVnd!: number | null;
   @ApiProperty({ format: 'date-time' }) updatedAt!: string;
   @ApiProperty({ example: 3 }) publishedLessonCount!: number;
   @ApiProperty({ example: 5 }) lessonCount!: number;
 }
 
-/** A lesson as the admin edits it, including its Vimeo reference (never on public DTOs). */
+/** A lesson as the admin edits it, including its video reference (never on public DTOs). */
 export class AdminCourseLessonDto {
   @ApiProperty({ format: 'uuid' }) id!: string;
   @ApiProperty() title!: string;
@@ -24,6 +31,8 @@ export class AdminCourseLessonDto {
   @ApiProperty({ enum: LESSON_STATUSES }) status!: LessonStatus;
   @ApiProperty({ type: String, nullable: true, example: '76979871' }) videoId!: string | null;
   @ApiProperty({ type: String, nullable: true }) privacyHash!: string | null;
+  @ApiProperty({ type: String, nullable: true, example: 'dQw4w9WgXcQ' })
+  youtubeVideoId!: string | null;
   @ApiProperty({ type: Number, nullable: true, example: 600 }) durationSeconds!: number | null;
   @ApiProperty({ format: 'date-time' }) updatedAt!: string;
 }
@@ -61,6 +70,7 @@ export function toAdminCourseDto(tree: CourseTree): AdminCourseDto {
     summary: summary.summary,
     status: summary.status,
     publishedAt: summary.publishedAt,
+    priceVnd: summary.priceVnd,
     updatedAt: summary.updatedAt,
     publishedLessonCount: summary.publishedLessonCount,
     lessonCount: summary.lessonCount,
@@ -76,6 +86,7 @@ export function toAdminCourseDto(tree: CourseTree): AdminCourseDto {
         status: lesson.status,
         videoId: lesson.vimeoVideoId,
         privacyHash: lesson.vimeoHash,
+        youtubeVideoId: lesson.youtubeVideoId,
         durationSeconds: lesson.durationSeconds,
         updatedAt: lesson.updatedAt.toISOString(),
       })),
@@ -95,6 +106,7 @@ function summaryOf(
     summary: course.summary,
     status: course.status,
     publishedAt: course.publishedAt ? course.publishedAt.toISOString() : null,
+    priceVnd: course.priceVnd,
     updatedAt: course.updatedAt.toISOString(),
     publishedLessonCount,
     lessonCount,

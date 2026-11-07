@@ -13,10 +13,15 @@ import { CourseSection } from './course-section.entity.js';
 export const LESSON_STATUSES = ['draft', 'published'] as const;
 export type LessonStatus = (typeof LESSON_STATUSES)[number];
 
+/** P2 and ck_course_lessons_published_has_video: a lesson is publishable only with a video of either provider. */
+export function hasVideo(lesson: Pick<CourseLesson, 'vimeoVideoId' | 'youtubeVideoId'>): boolean {
+  return lesson.vimeoVideoId !== null || lesson.youtubeVideoId !== null;
+}
+
 /**
  * `course_lessons` (database.md §12). The id is the stable identity progress points to; moves change only
- * `section_id` and `position`, within the same course. The Vimeo reference never reaches a public response
- * and is never logged (course spec §8.2).
+ * `section_id` and `position`, within the same course. The video is a Vimeo reference or a YouTube-unlisted id
+ * (course sales spec S2), never both; it never reaches a public response and is never logged (course spec §8.2).
  */
 @Entity('course_lessons')
 @Unique('uq_course_lessons_section_id_position', ['sectionId', 'position'], {
@@ -28,10 +33,12 @@ export type LessonStatus = (typeof LESSON_STATUSES)[number];
 @Check('ck_course_lessons_vimeo_video_id_format', `"vimeo_video_id" ~ '^[0-9]{1,20}$'`)
 @Check('ck_course_lessons_vimeo_hash_format', `"vimeo_hash" ~ '^[A-Za-z0-9]{1,64}$'`)
 @Check('ck_course_lessons_hash_needs_video', `"vimeo_hash" IS NULL OR "vimeo_video_id" IS NOT NULL`)
+@Check('ck_course_lessons_youtube_video_id_format', `"youtube_video_id" ~ '^[A-Za-z0-9_-]{11}$'`)
+@Check('ck_course_lessons_one_video', `"vimeo_video_id" IS NULL OR "youtube_video_id" IS NULL`)
 @Check('ck_course_lessons_duration_positive', `"duration_seconds" > 0`)
 @Check(
   'ck_course_lessons_published_has_video',
-  `"status" <> 'published' OR "vimeo_video_id" IS NOT NULL`,
+  `"status" <> 'published' OR "vimeo_video_id" IS NOT NULL OR "youtube_video_id" IS NOT NULL`,
 )
 export class CourseLesson {
   @PrimaryColumn({
@@ -59,6 +66,9 @@ export class CourseLesson {
 
   @Column({ name: 'vimeo_hash', type: 'varchar', length: 64, nullable: true })
   vimeoHash!: string | null;
+
+  @Column({ name: 'youtube_video_id', type: 'varchar', length: 11, nullable: true })
+  youtubeVideoId!: string | null;
 
   @Column({ name: 'duration_seconds', type: 'integer', nullable: true })
   durationSeconds!: number | null;

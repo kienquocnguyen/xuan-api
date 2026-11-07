@@ -22,8 +22,10 @@ import {
   curriculumOrderSchema,
   type SaveCourseInput,
   type SaveCourseLessonInput,
+  type SaveCoursePriceInput,
   type SaveCourseSectionInput,
   saveCourseLessonSchema,
+  saveCoursePriceSchema,
   saveCourseSchema,
   saveCourseSectionSchema,
 } from './dto/save-course.dto.js';
@@ -80,6 +82,18 @@ export class AdminCoursesController {
     @Param({ schema: courseIdParamSchema }) params: CourseIdParam,
   ): Promise<AdminCourseDto> {
     return toAdminCourseDto(await this.courses.getForAdmin(params.courseId));
+  }
+
+  // A separate route, so SaveCourseDto keeps its semantics; `null` takes the course off sale (course sales §4).
+  @Put('courses/:courseId/price')
+  @ApiSchemaParameters('path', courseIdParamSchema)
+  @ApiEnvelopeResponse(AdminCourseDto)
+  @ApiErrorResponses(VALIDATION_FAILED, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND)
+  async setPrice(
+    @Param({ schema: courseIdParamSchema }) params: CourseIdParam,
+    @Body({ schema: saveCoursePriceSchema }) input: SaveCoursePriceInput,
+  ): Promise<AdminCourseDto> {
+    return toAdminCourseDto(await this.courses.setPrice(params.courseId, input.priceVnd));
   }
 
   @Put('courses/:courseId')

@@ -11,6 +11,13 @@ export class CourseSummaryDto {
   @ApiProperty() title!: string;
   @ApiProperty() summary!: string;
   @ApiProperty({ format: 'date-time' }) publishedAt!: string;
+  @ApiProperty({
+    type: 'integer',
+    nullable: true,
+    example: 499000,
+    description: 'Whole VND; null when the course is not for sale.',
+  })
+  priceVnd!: number | null;
 }
 
 export class CourseOutlineLessonDto {
@@ -39,6 +46,7 @@ export function toCourseSummaryDto(course: Course): CourseSummaryDto {
     summary: course.summary,
     // ck_courses_published_has_date: a published course always has one.
     publishedAt: (course.publishedAt as Date).toISOString(),
+    priceVnd: course.priceVnd,
   };
 }
 
@@ -51,6 +59,7 @@ export function toCourseDto(tree: CourseTree): CourseDto {
     title: summary.title,
     summary: summary.summary,
     publishedAt: summary.publishedAt,
+    priceVnd: summary.priceVnd,
     sections: tree.sections.map(({ section, lessons }) => ({
       id: section.id,
       title: section.title,

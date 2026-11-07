@@ -8,6 +8,7 @@ import { Course } from './course.entity.js';
 import { AdminCourseAccessController } from './admin-course-access.controller.js';
 import { AdminCoursesController } from './admin-courses.controller.js';
 import { CourseAccessService } from './course-access.service.js';
+import { CourseSales } from './course-sales.js';
 import { CoursesController } from './courses.controller.js';
 import { LessonProgress } from './lesson-progress.entity.js';
 import { CoursesService } from './courses.service.js';
@@ -32,6 +33,8 @@ import { LearningService } from './learning.service.js';
     AdminCourseAccessController,
     LearningController,
   ],
-  providers: [CoursesService, CourseAccessService, LearningService],
+  providers: [CoursesService, CourseAccessService, LearningService, CourseSales],
+  // The only export (course sales spec §5.1): checkout facts and the purchase grant, for OrdersModule.
+  exports: [CourseSales],
 })
 export class CoursesModule {}

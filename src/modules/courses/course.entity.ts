@@ -22,6 +22,7 @@ export type CourseStatus = (typeof COURSE_STATUSES)[number];
 @Check('ck_courses_summary_not_blank', `btrim("summary") <> ''`)
 @Check('ck_courses_status', `"status" IN ('draft', 'published')`)
 @Check('ck_courses_published_has_date', `"status" <> 'published' OR "published_at" IS NOT NULL`)
+@Check('ck_courses_price_vnd_range', `"price_vnd" BETWEEN 1000 AND 100000000`)
 export class Course {
   @PrimaryColumn({
     type: 'uuid',
@@ -44,6 +45,10 @@ export class Course {
 
   @Column({ name: 'published_at', type: 'timestamptz', nullable: true })
   publishedAt!: Date | null;
+
+  /** Whole VND; `null` = not for sale (course sales spec §4, settles course spec §10.5). */
+  @Column({ name: 'price_vnd', type: 'integer', nullable: true })
+  priceVnd!: number | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
