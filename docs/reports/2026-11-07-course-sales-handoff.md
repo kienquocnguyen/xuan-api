@@ -13,8 +13,8 @@
 | `yarn lint`, `yarn typecheck`, `yarn build`, `yarn format:check`, `yarn test` (602 unit tests) | Pass (observed) |
 | Entity metadata vs the three hand-written migrations | Matches name for name (built offline) |
 | Nest DI of the new providers | Resolves (compiled offline) |
-| Migrations on `xuan_test` / `xuan_dev` | **Not run**: needs your approval (§1) |
-| e2e (new: orders, IPN SIT cases + races, schema; updated: courses, learning, OpenAPI) | **Written, not run**: needs your approval (§1) |
+| Migrations on `xuan_test` / `xuan_dev` | **Done 2026-11-08** (owner-approved, §1a): run, catalog matches the map, revert ×3 and re-run, empty second generate on both; `xuan_dev` backed up first, existing data and schema unchanged |
+| e2e (new: orders, IPN SIT cases + races, schema; updated: courses, learning, OpenAPI) | **724/724 pass** on `xuan_test` (40 files), first run |
 | Signature encoding vs VNPAY's real server (spec S8) | **Unverified**: needs sandbox keys (§3) |
 | VNPAY SIT, production keys, Production migration | Not started (§3, §4) |
 
@@ -61,6 +61,24 @@ No existing row is modified, and no existing row can violate the new or replaced
 ### Rollback
 
 `migration:revert` ×3. Each `down()` refuses loudly rather than deleting data, if a purchase grant or a published YouTube-only lesson exists.
+
+## 1a. Packet result (2026-11-08)
+
+**`xuan_test`:**
+- **Preflight:** guard passed; target `localhost:5433` → Docker `xuan-postgres` (PostgreSQL 18.6), database `xuan_test`. Exactly the three migrations were pending.
+- **Run and inspect:** `migration:run` succeeded. The catalog matches `database.md` §12: columns, every CHECK, FK and unique, both partial-index predicates.
+- **Reversibility:** `migration:revert` ×3, then run again.
+- **Second `migration:generate`:** "No changes in database schema were found".
+- **`yarn test:e2e`:** 40 files, **724 tests passed**, including the six SIT cases, duplicate IPNs and two concurrent IPNs.
+
+**`xuan_dev`:**
+- **Preflight:** the same Docker server, database `xuan_dev`, and the same three migrations pending.
+- **Backup:** `pg_dump` saved to `.superpowers/sdd/xuan_dev-before-course-sales.dump` (git-ignored, 56 KB). `pg_restore --list` reads 17 table-data entries.
+- **Fingerprints taken before the run:** row count and content hash of each of the 17 tables, plus a hash of every pre-existing column.
+- **Run:** `migration:run` succeeded, and the second generate is empty.
+- **After the run:** only `migrations` (11 → 14 rows) and the new, empty `orders` table differ. Every other table and the pre-existing column hash are unchanged. Constraint and index sets are identical to `xuan_test`.
+
+**Environment note:** Docker Desktop wasn't running. It was started, along with the existing `db` container (`docker compose start db`). Nothing was recreated, and no volume was touched.
 
 ## 2. What the backend does now
 
@@ -158,7 +176,84 @@ The contract is in `docs/api-contract.md` "Course sales" and delta 22.
 
 **OpenAPI:** regenerate the snapshot from a local API (`DOCS_ENABLED=true`, `yarn api:pull`, `yarn api:generate`). `VimeoVideoDto` is now `LessonVideoDto`.
 
-## 6. Known limitations
+## 6. Payment risks before Production (evaluated 2026-11-08)
+
+### 6.1 Duplicate charges
+
+**How it can happen:**
+- `COURSE_ALREADY_OWNED` stops a checkout **after** a payment is confirmed, but not while an earlier order is still payable.
+- Two pending orders for the same course, from two tabs or from clicking "Đăng ký" again within 15 minutes, can both be paid. Each one gets a grant and a charge (S10).
+- VNPAY refuses payment after `vnp_ExpireDate` (15 minutes), so the risk is confined to that window.
+
+**Minimum mitigation (recommended before Production; small, no schema change):**
+- At checkout, refuse a new order while the user has a `pending` order for the same course whose `expires_at` is still in the future.
+- Answer `409 ORDER_PENDING`, with that order's `reference` and `expiresAt`, so xuan-web can say "Bạn đang có giao dịch chờ thanh toán đến HH:MM".
+- Serialize parallel clicks with `pg_advisory_xact_lock(user, course)` in the checkout transaction.
+- With at most one live payable order per user and course, a second charge needs VNPAY to accept a payment after its own expiry.
+- Cost: one new error code, one query and a lock. A user who abandoned the VNPAY page waits at most 15 minutes before checking out again.
+- *Not chosen:* reusing the old order's URL. That re-sends a `vnp_TxnRef` VNPAY may already hold, and its behaviour is unverified.
+
+**Operational recovery (always available):**
+1. `GET /admin/orders?status=paid` shows two paid orders for the same user and course.
+2. Refund the later one by its `vnpTransactionNo` in the VNPAY merchant portal.
+3. Note it. The extra purchase grant is harmless (OD-1).
+
+### 6.2 A successful payment whose IPN never arrives
+
+**What happens:**
+- The money is taken, the order stays `pending`, and the student has no access.
+- VNPAY retries an IPN that isn't answered `00`/`02` (retry count unverified).
+- A permanent miss means an outage on our side longer than VNPAY's retries, or a wrong IPN URL. The SIT and the sandbox test (§7) prove the URL first.
+
+**Minimum acceptable for launch: an operational procedure, no new code.**
+1. The result page shows "Đang xác nhận thanh toán…" and the order `reference` when the order is still `pending` after ~20 s, and asks the student to send the reference to Xuan if access doesn't appear within an hour.
+2. Daily, while volume is low: `GET /admin/orders?status=pending` → for each order older than 15 minutes, look up `vnp_TxnRef` = `reference` in the VNPAY merchant portal.
+3. If VNPAY shows it paid: grant access with the existing admin route `PUT /admin/courses/:courseId/access/:userId`. The user id is on the admin order row. Record the VNPAY transaction number in your notes.
+   - The order stays `pending` in our table. That's a known record mismatch, acceptable at this volume.
+4. If VNPAY shows it unpaid or expired: nothing to do.
+
+**Later improvement (not now):** an admin "reconcile" action that calls VNPAY `querydr` (techspec §2.5.4) and settles through the same transaction as the IPN. This turns step 3 into one click and fixes the record.
+
+## 7. Next: one controlled VNPAY sandbox payment
+
+No real money: sandbox only, against local `xuan_dev`.
+
+**Prerequisites (owner):**
+1. **Sandbox credentials:** VNPAY's sandbox `vnp_TmnCode` and `vnp_HashSecret`, typed into your local `.env` yourself:
+   - `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`;
+   - `VNPAY_PAYMENT_URL=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html`;
+   - `VNPAY_RETURN_URL=http://localhost:3000/khoa-hoc/thanh-toan/ket-qua`. The page can 404 for now; the IPN is what's tested.
+2. **A public HTTPS tunnel to `localhost:4000`:** e.g. Cloudflare's `cloudflared tunnel --url http://localhost:4000`, a new tool that needs your OK. Its `https://…trycloudflare.com/payments/vnpay/ipn` becomes the sandbox terminal's IPN URL, set in VNPAY's sandbox merchant admin or by VNPAY support.
+3. **Test data on `xuan_dev`, through the admin API as you:**
+   - a published course;
+   - one published lesson with a `youtubeVideoId`;
+   - `PUT /admin/courses/:id/price {"priceVnd":499000}`.
+
+**The test:**
+1. Start the API (`yarn start:dev`). Config must load, with no `VNPAY_*` error.
+2. Signed in as a **non-admin** test user, from a page on `http://localhost:3000`, run in DevTools:
+
+   ```js
+   fetch('http://localhost:4000/orders', {
+     method: 'POST',
+     credentials: 'include',
+     headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+     body: JSON.stringify({ courseId: '<id>' }),
+   });
+   ```
+
+   Expect `201`.
+3. **Signature gate (S8):** open `data.paymentUrl`. **VNPAY's payment page must appear**; a checksum error means the encoding must change before anything else.
+4. Pay with the sandbox NCB test card from VNPAY's instructions.
+5. **Check, in order:**
+   - the API log shows `VNPAY IPN <reference>: RspCode 00, vnp_ResponseCode 00, vnp_TransactionStatus 00`;
+   - `GET /orders/<reference>` → `status: "paid"`;
+   - `GET /admin/orders` shows `vnpTransactionNo`, bank and card;
+   - `GET /learn/courses/<slug>/lessons/<lessonId>` → `200` with the YouTube video.
+6. **Failure path:** a second order, cancelled on VNPAY's page → `status: "failed"`, `failureCode: "24"`, no grant.
+7. Then ask VNPAY to run the SIT against the same IPN URL.
+
+## 8. Known limitations
 
 - **YouTube unlisted (S2, accepted):** an unlisted id plays on youtube.com for anyone who has it. Our API hands it only to paying students, but it can't stop a student from sharing it. The remedy is Vimeo: switch each lesson's id field, with no code change.
 - **No refund API:** refunds are manual in the VNPAY portal, and an admin API to revoke a purchase grant is deferred (S6).
