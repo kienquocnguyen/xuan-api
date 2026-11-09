@@ -18,7 +18,7 @@ import { HumanCheckService } from './recaptcha/human-check.service.js';
 import { createRecaptchaVerifier } from './recaptcha/create-recaptcha-verifier.js';
 import { RECAPTCHA_VERIFIER } from './recaptcha/recaptcha.js';
 
-/** The contact form (contact form design): its table's only registration (I1); exports nothing. */
+/** The contact form (contact form design): the only registration of both its tables, contact_submissions and coaching_registrations (I1); exports nothing. */
 @Module({
   imports: [TypeOrmModule.forFeature([ContactSubmission, CoachingRegistration]), AppConfigModule],
   controllers: [

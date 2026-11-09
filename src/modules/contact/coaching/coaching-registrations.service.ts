@@ -102,7 +102,8 @@ export class CoachingRegistrationsService {
       throw new AppError(coachingErrors.COACHING_REGISTRATION_UNAVAILABLE);
     if (human === 'refused') {
       // A double click sends one token twice and Google refuses the second: answer it like the first.
-      // Under the email's lock, so a first request still inserting has committed before the check.
+      // The email's lock helps only if the first request already holds it; if that one is still waiting on
+      // Google, this check finds nothing and this request gets 403 while the other still saves.
       const first = await this.dataSource.transaction(async (tx) => {
         await this.lockEmail(tx, answers.email);
         return this.findDuplicate(tx, answers);

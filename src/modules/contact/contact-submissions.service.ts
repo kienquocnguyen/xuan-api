@@ -62,7 +62,8 @@ export class ContactSubmissionsService {
     if (human === 'unavailable') throw new AppError(contactErrors.CONTACT_FORM_UNAVAILABLE);
     if (human === 'refused') {
       // A double click sends one token twice and Google refuses the second (CF-7): answer it like the first.
-      // Under the email's lock, so a first request still inserting has committed before the check.
+      // The email's lock helps only if the first request already holds it; if that one is still waiting on
+      // Google, this check finds nothing and this request gets 403 while the other still saves.
       const first = await this.dataSource.transaction(async (tx) => {
         await this.lockEmail(tx, input.email);
         return this.findDuplicate(tx, input);

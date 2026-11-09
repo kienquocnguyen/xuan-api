@@ -190,6 +190,15 @@ describe('POST /coaching-registrations (coaching registrations design)', () => {
       expect(fakeRecaptcha(app).calls).toHaveLength(1);
     });
 
+    it('stores an identical repeat as a new row once the first is older than 24 hours', async () => {
+      await submit();
+      await db.query("UPDATE coaching_registrations SET created_at = now() - interval '25 hours'");
+      const again = await submit();
+
+      expect(again.status).toBe(202);
+      expect(await rows()).toHaveLength(2);
+    });
+
     it('stores a corrected answer as a new row', async () => {
       await submit();
       await submit({ ...kickstart, goals: ['share_knowledge'] });
@@ -287,6 +296,16 @@ describe('POST /coaching-registrations (coaching registrations design)', () => {
       expect(over.headers['retry-after']).toBeDefined();
       const other = await submit({ ...kickstart, email: 'p6@example.com' }, { ip: '198.51.100.2' });
       expect(other.status).toBe(202);
+    });
+
+    it('no longer counts registrations older than one hour toward the email limit', async () => {
+      for (const n of [1, 2, 3]) expect((await submit(nth(n))).status).toBe(202);
+      await db.query(
+        "UPDATE coaching_registrations SET created_at = now() - interval '61 minutes'",
+      );
+
+      expect((await submit(nth(4))).status).toBe(202);
+      expect(await rows()).toHaveLength(4);
     });
 
     it('counts neither contact_submissions nor duplicates toward the limit', async () => {

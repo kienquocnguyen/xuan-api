@@ -338,7 +338,7 @@ Both are implemented (`src/modules/services/`, 2026-10-14) and proven by exact-b
   - `favoriteCreators`: optional text, ≤ 2 000;
   - `consent`: the literal `true` (`INVALID` otherwise; the server stores the time, not the flag);
   - `recaptchaToken`: 1–4 096 characters, a fresh reCAPTCHA v3 token from `grecaptcha.execute(siteKey, { action: 'coaching_registration_submit' })` at submit time (single-use, 2 minutes). Same policy, secret and allowed hostnames as the contact form.
-  - **Field codes:** a missing or unknown enum, literal or discriminator (`program`, `youtubeStage`, `practiceCommitment`, `consent`, a list item) is `INVALID`; a missing string (`desiredOutcome`) is `REQUIRED`; lengths are `TOO_SHORT`/`TOO_LONG`; blank required text is `INVALID`; a NUL or broken Unicode is `INVALID`.
+  - **Field codes:** a missing or unknown enum, literal or discriminator (`program`, `youtubeStage`, `practiceCommitment`, `consent`, a list item) is `INVALID`; a missing string (`desiredOutcome`) is `REQUIRED`; lengths are `TOO_SHORT`/`TOO_LONG`; blank or spaces-only required text is `TOO_SHORT`, and so is an empty `goals` or `challenges` list; `INVALID` is for non-empty text with only invisible characters, control characters in `name`, and non-storable text (a NUL or broken Unicode).
 - **Errors:**
   - `400 VALIDATION_FAILED`;
   - `403 FORBIDDEN` (CSRF);
@@ -348,7 +348,7 @@ Both are implemented (`src/modules/services/`, 2026-10-14) and proven by exact-b
   - `503 COACHING_REGISTRATION_UNAVAILABLE` "Registration is temporarily unavailable. Please try again later." (Google unreachable, or reCAPTCHA not configured in production);
   - `500`.
 - **Admin inbox** (admin only; editors and users `403`; writes need CSRF):
-  - `GET /admin/coaching-registrations?status&program&page&pageSize` → `{ data: { items: AdminCoachingRegistrationDto[], pageInfo } }`, newest `createdAt` first (tie: `id`); `status` `new` | `contacted` | `archived`, `program` as above (none = all); `pageSize` 1–50 (`AdminCoachingRegistrationsQuery`);
+  - `GET /admin/coaching-registrations?status&program&page&pageSize` → `{ data: { items: AdminCoachingRegistrationDto[], pageInfo } }`, newest `createdAt` first (tie: `id`); `status` `new` | `contacted` | `archived`, `program` as above (none = all); `pageSize` 1–50, default 12 (`AdminCoachingRegistrationsQuery`);
   - `GET /admin/coaching-registrations/:registrationId` → `AdminCoachingRegistrationDto`. Reading never changes the status;
   - `POST …/:registrationId/contacted` (`new` → `contacted`; contacted or archived unchanged, no write);
   - `POST …/:registrationId/archive` (anything → `archived`, idempotent);
