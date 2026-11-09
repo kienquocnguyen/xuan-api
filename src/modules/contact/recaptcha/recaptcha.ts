@@ -1,6 +1,9 @@
 /** The action name the web passes to `grecaptcha.execute` for the contact form (contract identifier). */
 export const RECAPTCHA_ACTION = 'contact_submit';
 
+/** The action name the web passes to `grecaptcha.execute` for the coaching registration form (contract identifier). */
+export const COACHING_RECAPTCHA_ACTION = 'coaching_registration_submit';
+
 /** Tokens live 2 minutes at Google; the extra minute absorbs clock skew. */
 const MAX_CHALLENGE_AGE_MS = 180_000;
 const MAX_CLOCK_AHEAD_MS = 60_000;
@@ -39,9 +42,10 @@ export function assessRecaptcha(
   result: SiteVerifyResult,
   policy: RecaptchaPolicy,
   now: Date,
+  expectedAction: string,
 ): RecaptchaVerdict {
   if (!result.success) return 'not_successful';
-  if (result.action !== RECAPTCHA_ACTION) return 'wrong_action';
+  if (result.action !== expectedAction) return 'wrong_action';
   if (!result.hostname || !policy.allowedHostnames.includes(result.hostname.toLowerCase()))
     return 'wrong_hostname';
   if (result.score === undefined || result.score < policy.minScore) return 'low_score';

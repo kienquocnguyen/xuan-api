@@ -9,12 +9,8 @@ import { baselineErrors } from '../../errors/baseline-errors.js';
 import { contactErrors } from './contact.errors.js';
 import type { CreateContactSubmissionInput } from './dto/create-contact-submission.dto.js';
 import { ContactNotificationsService } from './notifications/contact-notifications.service.js';
-import {
-  assessRecaptcha,
-  RECAPTCHA_VERIFIER,
-  type RecaptchaVerifier,
-  RecaptchaUnavailableError,
-} from './recaptcha/recaptcha.js';
+import { HumanCheckService } from './recaptcha/human-check.service.js';
+import { RECAPTCHA_ACTION } from './recaptcha/recaptcha.js';
 
 /** Accepted submissions per rolling hour (contact form design CF-6). */
 export const CONTACT_LIMITS = { perEmail: 3, perClientIp: 5 } as const;
@@ -46,7 +42,7 @@ export class ContactSubmissionsService {
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
-    @Inject(RECAPTCHA_VERIFIER) private readonly recaptcha: RecaptchaVerifier,
+    private readonly humanCheck: HumanCheckService,
     private readonly notifications: ContactNotificationsService,
   ) {}
 
@@ -62,9 +58,12 @@ export class ContactSubmissionsService {
     const earlier = await this.findDuplicate(manager, input);
     if (earlier) return earlier;
     await this.assertWithinLimits(manager, input.email, ipHash);
-    if (!(await this.isHuman(input.recaptchaToken, clientIp))) {
+    const human = await this.humanCheck.check(input.recaptchaToken, clientIp, RECAPTCHA_ACTION);
+    if (human === 'unavailable') throw new AppError(contactErrors.CONTACT_FORM_UNAVAILABLE);
+    if (human === 'refused') {
       // A double click sends one token twice and Google refuses the second (CF-7): answer it like the first.
-      // Under the email's lock, so a first request still inserting has committed before the check.
+      // The email's lock helps only if the first request already holds it; if that one is still waiting on
+      // Google, this check finds nothing and this request gets 403 while the other still saves.
       const first = await this.dataSource.transaction(async (tx) => {
         await this.lockEmail(tx, input.email);
         return this.findDuplicate(tx, input);
@@ -158,26 +157,6 @@ export class ContactSubmissionsService {
       limits.ipCount >= CONTACT_LIMITS.perClientIp ? limits.ipRetry : null,
     ].filter((wait): wait is number => wait !== null);
     if (waits.length > 0) throw new ContactRateLimitedError(Math.max(1, ...waits));
-  }
-
-  /** CF-4, CF-5. Google unreachable fails closed with 503; a refusal is logged with its reason, never sent. */
-  private async isHuman(token: string, clientIp: string | null): Promise<boolean> {
-    const settings = this.config.contact.recaptcha;
-    if (settings.mode !== 'verify') return true; // `bypass`: development and test only (config)
-    let verdict: string;
-    try {
-      const result = await this.recaptcha.verify(token, clientIp);
-      verdict = assessRecaptcha(result, settings, new Date());
-      if (verdict !== 'pass' && result.errorCodes.length > 0)
-        verdict += ` (${result.errorCodes.join(', ')})`;
-    } catch (error) {
-      if (!(error instanceof RecaptchaUnavailableError)) throw error;
-      this.logger.warn(error.message);
-      throw new AppError(contactErrors.CONTACT_FORM_UNAVAILABLE);
-    }
-    if (verdict === 'pass') return true;
-    this.logger.warn(`reCAPTCHA refused a contact submission: ${verdict}`);
-    return false;
   }
 
   /** Keyed, so the stored value can't be reversed by hashing every IPv4 address (CF-6). */

@@ -246,6 +246,7 @@ The **actual, decided schema**, so the current database can be understood at a g
 | `content_media` (+ `content_posts.cover_media_id`, `cover_alt`, `og_media_id`; `body_version` IN (1, 2)) | migration `AddPostMedia1792426532193` (blog completion B3, BD-4/5/10); map recorded under the bounded autonomous execution row (workflow §3.5). **Implemented on `xuan_test` only** (2026-10-27: guarded run, `\d+` matches this map, revert/run round trip, empty second generate); invariants proven by `test/content-media-schema.e2e-spec.ts` and `test/content-posts-schema.e2e-spec.ts`. **`xuan_dev` pending in the consolidated owner packet** (protected: B1 and B2 are still pending there, and B3 adds FKs and a CHECK to an existing table and widens one) | `content` (entity `ContentMedia`) | `docs/superpowers/plans/2026-10-19-post-media.md`, Task 1 |
 | `contact_submissions` | **implemented** 2026-11-03 (contact form design, delegated slice; notification columns simplified the same day before any run); migration `CreateContactSubmissions1793750400000`, written by hand to the generated format and read against this map. **Run on `xuan_test` only** (owner-approved): run → `\d+` matched this map → revert → run → second `migration:generate` empty → e2e green. `xuan_dev` and Neon: not run, owner approval needed | `contact` (entity `ContactSubmission`) | `docs/superpowers/specs/2026-11-03-contact-form-design.md` |
 | `course_lessons.youtube_video_id`, `courses.price_vnd`, `orders` (+ `course_access_grants.order_id`, source `'purchase'`) | **implemented** 2026-11-08 on `xuan_test` and `xuan_dev` (owner-approved packet, handoff §1; course sales design `docs/superpowers/specs/2026-11-07-course-sales-vnpay-design.md`, delegated 2026-11-07, S15): migrations `AddLessonYouTubeVideo1793990000000`, `AddCoursePrice1793990100000`, `CreateOrders1793990200000`, written by hand to the generated format; the built entity metadata was checked against them offline (names of every FK, index, unique and CHECK). `xuan_test`: guard passed, the 3 pending as expected, run, catalog inspection matches this map (columns, every CHECK, FK, unique and index incl. both partial predicates), revert ×3 and re-run, empty second generate, `yarn test:e2e` 724/724. `xuan_dev` (protected: two CHECKs replaced): target verified as local Docker, the same 3 pending, a `pg_dump` backup read back by `pg_restore --list`, run, empty second generate; every pre-existing table's rows and content hash and the pre-existing column set unchanged; its constraints and indexes identical to `xuan_test`. **Production (Neon): not run** | `courses` (lessons, price, grants); `orders` (`orders`) | `docs/superpowers/plans/2026-11-07-course-sales-vnpay.md`, Tasks 1, 2, 5 |
+| `coaching_registrations` | **implemented** 2026-11-09 (map owner-approved; delegated slice); migration `CreateCoachingRegistrations1794218387446`, generated and checked on a throwaway database (run → `\d+` matched this map → revert → run → second `migration:generate` empty), then run on `xuan_test` by the e2e guard; invariants proven by `test/coaching-schema.e2e-spec.ts`. `xuan_dev` and Neon: not run, owner approval needed | `contact` (entity `CoachingRegistration`) | `docs/superpowers/specs/2026-11-09-coaching-registrations-design.md` |
 | `content_post_ratings`, `content_post_comments` | migration `CreatePostDiscussion1793089452033` (blog completion B4, BD-6/7/8, Q2); map recorded under the bounded autonomous execution row (workflow §3.5). **Implemented on `xuan_test` only** (2026-10-27: guarded run, `\d+` matches this map, revert/run round trip, empty second generate, the other tables' schema unchanged); invariants proven by `test/content-discussion-schema.e2e-spec.ts`. **`xuan_dev` pending in the consolidated owner packet** (only new tables, but protected while B1–B3 are pending there) | `content` (entities `PostRating`, `PostComment`) | `docs/superpowers/plans/2026-10-27-post-discussion.md`, Task 1 |
 
 #### `services`
@@ -881,3 +882,62 @@ erDiagram
 | `ix_orders_created_at_id` | `(created_at, id)` | The admin list, newest first, stable ties |
 
 **Migration safety:** `CreateOrders` adds a table and, on `course_access_grants`, a nullable column without a default, a CHECK that every existing row satisfies (all are `admin` with no order), a partial index and an FK; it **replaces** `ck_course_access_grants_source` with a wider one. `down()` restores the narrow CHECK, which fails while a purchase grant exists (it never deletes one), then drops the column and the table. `AddLessonYouTubeVideo` and `AddCoursePrice` add nullable columns and CHECKs no existing row can violate; the former replaces `ck_course_lessons_published_has_video` with a relaxed one, and its `down()` fails while a published lesson has only a YouTube video.
+
+#### `coaching_registrations`
+
+A registration for 1-1 coaching (`channel_kickstart_session`) or the 3-month program (`youtube_coaching_3_months`), sent through the public form and reviewed in the admin page (coaching registrations design `docs/superpowers/specs/2026-11-09-coaching-registrations-design.md`, CR-1 to CR-11). Owned by `contact`. It has no foreign keys: the sender is a visitor, not a user. Rows are never deleted in V1. Answers are stored as stable machine values; xuan-web owns the Vietnamese labels.
+
+**Invariants:** the email is stored lowercase; program, stage and status come from closed lists; at least one goal and one challenge, each from the list of its program; a channel link only with `has_channel`; "other" text only when `other` is chosen (and required for the 3-month program); the 3-month answers (`desired_outcome`, `practice_commitment`) exist exactly for the 3-month program.
+
+```mermaid
+erDiagram
+    coaching_registrations {
+        uuid id PK "pk_coaching_registrations · DEFAULT uuidv7()"
+        varchar_40 program "required · CK 2 values"
+        varchar_100 name "required · CK not blank"
+        varchar_254 email "required · CK lowercase"
+        varchar_16 youtube_stage "required · CK not_started|has_channel"
+        varchar_500 youtube_channel_url "nullable · CK only with has_channel"
+        varchar_5000 expertise "required · CK not blank"
+        varchar_40_array goals "required · CK 1+ values from 6"
+        varchar_40_array challenges "required · CK 1+ values from the program list"
+        varchar_5000 challenge_other "nullable · CK only with other"
+        varchar_5000 desired_outcome "nullable · CK 3-month only"
+        varchar_24 practice_commitment "nullable · CK 3-month only · 3 values"
+        varchar_2000 favorite_creators "nullable"
+        timestamptz consented_at "required"
+        varchar_16 status "required · DEFAULT 'new' · CK new|contacted|archived"
+        varchar_64 client_ip_hash "nullable · HMAC-SHA256 hex"
+        timestamptz created_at "required · DEFAULT now()"
+        timestamptz updated_at "required · DEFAULT now()"
+    }
+```
+
+| Column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_coaching_registrations` | D26 |
+| `program` | `varchar(40)` | yes | — | **CK** `ck_coaching_registrations_program`: the challenges lists below are keyed by it, so an unknown program trips only this check | CR-3, stable machine values shared with `contact_submissions.subject` |
+| `name` | `varchar(100)` | yes | — | **CK** `ck_coaching_registrations_name_not_blank`: `name ~ '[^[:space:]]'` | The API trims it and refuses line breaks |
+| `email` | `varchar(254)` | yes | — | **CK** `ck_coaching_registrations_email_lowercase`: `email = lower(email)` | One canonical form (D30), so the per-email limit and the duplicate check compare like with like |
+| `youtube_stage` | `varchar(16)` | yes | — | **CK** `ck_coaching_registrations_youtube_stage`: `IN ('not_started', 'has_channel')` | The form's channel question |
+| `youtube_channel_url` | `varchar(500)` | no | — | **CK** `ck_coaching_registrations_channel_url_stage`: `youtube_stage = 'has_channel' OR youtube_channel_url IS NULL` | Optional even with a channel; a link without a channel is contradictory. The API validates host and scheme |
+| `expertise` | `varchar(5000)` | yes | — | **CK** `ck_coaching_registrations_expertise_not_blank`: `expertise ~ '[^[:space:]]'` | Required text on both forms |
+| `goals` | `varchar(40)[]` | yes | — | **CK** `ck_coaching_registrations_goals`: `cardinality(goals) >= 1 AND goals <@ ARRAY['share_knowledge', 'be_known_for_expertise', 'connect_with_community', 'build_client_trust', 'grow_business', 'still_exploring']::varchar[]` | Multi-select answer; the API also refuses duplicates |
+| `challenges` | `varchar(40)[]` | yes | — | **CK** `ck_coaching_registrations_challenges`: `(program <> 'channel_kickstart_session' OR challenges <@ ARRAY[the 6 Kickstart values]) AND (program <> 'youtube_coaching_3_months' OR challenges <@ ARRAY[the 8 three-month values]) AND cardinality(challenges) >= 1` | The two programs offer different lists. Written so an unknown program trips only the program check |
+| `challenge_other` | `varchar(5000)` | no | — | **CK** `ck_coaching_registrations_challenge_other`: `(challenge_other IS NULL OR 'other' = ANY(challenges)) AND (program <> 'youtube_coaching_3_months' OR NOT ('other' = ANY(challenges)) OR challenge_other IS NOT NULL)` | Free text only when `other` is chosen; required on the 3-month form, optional on Kickstart (CR-10) |
+| `desired_outcome` | `varchar(5000)` | no | — | **CK** `ck_coaching_registrations_three_month_fields`: `(program = 'youtube_coaching_3_months') = (desired_outcome IS NOT NULL) AND (program = 'youtube_coaching_3_months') = (practice_commitment IS NOT NULL)` | Asked on the 3-month form only |
+| `practice_commitment` | `varchar(24)` | no | — | same check as above; **CK** `ck_coaching_registrations_practice_commitment`: `IN ('can_commit', 'needs_arranging', 'unsure')` | Asked on the 3-month form only. SQL treats a NULL as passing the value list, so the pairing check above is what requires it |
+| `favorite_creators` | `varchar(2000)` | no | — | — | Optional on both forms (CR-10) |
+| `consented_at` | `timestamptz` | yes | — | — | CR-9: the server's time when the visitor agreed; the consent flag itself is not stored |
+| `status` | `varchar(16)` | yes | `'new'` | **CK** `ck_coaching_registrations_status`: `IN ('new', 'contacted', 'archived')` | CR-5; no approve/reject state |
+| `client_ip_hash` | `varchar(64)` | no | — | — | HMAC-SHA256 of the client IP (CR-7), only for the per-IP limit; never on the wire |
+| `created_at` | `timestamptz` | yes | `now()` | — | D27; the admin order and the limit windows |
+| `updated_at` | `timestamptz` | yes | `now()` | — | D27 |
+
+| Index | Columns | Why |
+|---|---|---|
+| `ix_coaching_registrations_status_created_at_id` | `(status, created_at, id)` | The admin list filtered by status, newest first, with a stable tie-break |
+| `ix_coaching_registrations_email_created_at` | `(email, created_at)` | The per-email limit and the duplicate check |
+| `ix_coaching_registrations_client_ip_hash_created_at` | `(client_ip_hash, created_at)` | The per-IP limit |
+
+**Migration safety:** one new table and its indexes; no existing table, row or constraint changes. `down()` drops the table, discarding any registrations (a deliberate, documented loss; once registrations exist, roll forward instead, C9).
