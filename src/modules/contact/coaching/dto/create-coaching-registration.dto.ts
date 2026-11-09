@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  isStorableText,
+  STORABLE_TEXT_MESSAGE,
+} from '../../../../http/validation/storable-text.js';
 import { codePointLength, formEmail, formName, formText } from '../../dto/form-text.js';
 import {
   GOALS,
@@ -35,7 +39,8 @@ const channelUrl = z
     return trimmed === '' || hasScheme.test(trimmed) ? trimmed : `https://${trimmed}`;
   })
   .superRefine(codePointLength(0, COACHING_CHANNEL_URL_MAX))
-  .refine((value) => value === '' || isYoutubeUrl(value), {
+  .refine(isStorableText, STORABLE_TEXT_MESSAGE)
+  .refine((value) => value === '' || !isStorableText(value) || isYoutubeUrl(value), {
     message: 'Use a link on youtube.com or youtu.be.',
   });
 

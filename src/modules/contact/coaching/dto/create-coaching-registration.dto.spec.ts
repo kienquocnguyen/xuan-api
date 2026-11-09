@@ -91,6 +91,17 @@ describe('CreateCoachingRegistrationDto (coaching registrations design, request 
     expectError(kickstart, { youtubeChannelUrl: url }, 'youtubeChannelUrl', 'INVALID');
   });
 
+  it.each([
+    ['a NUL character', 'https://youtube.com/a\u0000b'],
+    ['a lone surrogate', 'https://youtube.com/a\uD800b'],
+  ])('refuses a channel link with %s, with one error', (_name, url) => {
+    const result = run(kickstart, { youtubeChannelUrl: url });
+    expect(result.success).toBe(false);
+    expect(errorsOf(result)).toEqual([
+      expect.objectContaining({ field: 'youtubeChannelUrl', code: 'INVALID' }),
+    ]);
+  });
+
   it('refuses a channel link longer than 500 characters', () => {
     expectError(
       kickstart,
