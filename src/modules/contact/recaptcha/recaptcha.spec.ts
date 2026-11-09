@@ -1,6 +1,7 @@
 import { GoogleRecaptchaVerifier } from './google-recaptcha-verifier.js';
 import {
   assessRecaptcha,
+  COACHING_RECAPTCHA_ACTION,
   RECAPTCHA_ACTION,
   RecaptchaUnavailableError,
   type SiteVerifyResult,
@@ -19,11 +20,16 @@ const passing: SiteVerifyResult = {
 
 describe('assessRecaptcha (contact form design CF-4)', () => {
   it('passes a successful, fresh, human-scored token for our action and host', () => {
-    expect(assessRecaptcha(passing, policy, now)).toBe('pass');
-    expect(assessRecaptcha({ ...passing, score: 0.5 }, policy, now)).toBe('pass');
-    expect(assessRecaptcha({ ...passing, hostname: 'WWW.xuancreative.com' }, policy, now)).toBe(
-      'pass',
-    );
+    expect(assessRecaptcha(passing, policy, now, RECAPTCHA_ACTION)).toBe('pass');
+    expect(assessRecaptcha({ ...passing, score: 0.5 }, policy, now, RECAPTCHA_ACTION)).toBe('pass');
+    expect(
+      assessRecaptcha(
+        { ...passing, hostname: 'WWW.xuancreative.com' },
+        policy,
+        now,
+        RECAPTCHA_ACTION,
+      ),
+    ).toBe('pass');
   });
 
   it.each([
@@ -42,7 +48,14 @@ describe('assessRecaptcha (contact form design CF-4)', () => {
     ['stale_challenge', { ...passing, challengeTs: 'yesterday' }],
     ['stale_challenge', { ...passing, challengeTs: undefined }],
   ])('refuses with %s', (reason, result) => {
-    expect(assessRecaptcha(result as SiteVerifyResult, policy, now)).toBe(reason);
+    expect(assessRecaptcha(result as SiteVerifyResult, policy, now, RECAPTCHA_ACTION)).toBe(reason);
+  });
+
+  it('binds the token to the form it was issued for', () => {
+    expect(assessRecaptcha(passing, policy, now, COACHING_RECAPTCHA_ACTION)).toBe('wrong_action');
+    const coaching = { ...passing, action: COACHING_RECAPTCHA_ACTION };
+    expect(assessRecaptcha(coaching, policy, now, COACHING_RECAPTCHA_ACTION)).toBe('pass');
+    expect(assessRecaptcha(coaching, policy, now, RECAPTCHA_ACTION)).toBe('wrong_action');
   });
 });
 

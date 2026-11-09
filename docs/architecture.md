@@ -105,7 +105,8 @@ src/
                      course lock rule L1 (AD15) · grant upsert (AD16) · imports UsersModule for UserProfilesReader
     contact/         contact_submissions · public form and admin inbox controllers · submissions / inbox /
                      notifications services · recaptcha/ (Google gateway + policy) · notifications/ (Resend gateway,
-                     email builder, one-attempt delivery and manual retry) (AD20)
+                     email builder, one-attempt delivery and manual retry) (AD20) ·
+                     coaching/ (coaching_registrations, public form + admin inbox, no email) (AD22)
 test/                e2e specs, test-only fixture controller, test support (development-workflow.md: Testing)
 ```
 
@@ -406,7 +407,7 @@ HttpContractModule   APP_PIPE · APP_FILTER · APP_INTERCEPTOR
 | Helmet, prefix (D22) | Defaults; no global prefix, no versioning | The API owns its subdomain; contract paths are `/services`, `/users/me` |
 | Shutdown hooks (D22) | Enabled | TypeORM closes its pool on SIGTERM |
 | Docs (D20) | `/docs` + `/docs-json` only when config enables them | Off by default; contract §6: non-production or protected |
-| Rate limiting (D23) | Not in the first slice; **required on public writes before public launch**. Discussion writes are throttled per user since blog B4 (AD19); the contact form is limited per email and per client IP from its own rows, and `trust proxy` = `TRUST_PROXY_HOPS` (AD20). No other public write exists | A launch gate, not a learning-slice concern |
+| Rate limiting (D23) | Not in the first slice; **required on public writes before public launch**. Discussion writes are throttled per user since blog B4 (AD19); the contact form is limited per email and per client IP from its own rows, and `trust proxy` = `TRUST_PROXY_HOPS` (AD20), and so are coaching registrations (AD22). Those two are the public writes | A launch gate, not a learning-slice concern |
 | Auth guard, cookies, CSRF header/Origin enforcement | `CsrfGuard` + global `AccessGuard`; `cookie-parser` with `AUTH_COOKIE_SECRET` (§17) | Default deny; cookie sessions need CSRF defense in depth (`api-contract.md` §8) |
 
 ## 13. Decisions log
@@ -446,6 +447,10 @@ Each entry ends with *revisit when*. The full reasoning and the rejected alterna
   - **Limits, honestly:** the per-email limit is exact (the advisory lock); the per-IP limit isn't serialized, so concurrent submissions from one IP with different emails can exceed it by their number. Notifications are not exactly-once. The idempotency key prevents a second email for a retry within Resend's 24-hour window; later, a retry of an email whose acceptance was lost can deliver a copy. `sent` means accepted by Resend, not delivered.
   - *Why no queue:* durability is the row itself. Redis, a broker, a worker or a cron would add infrastructure for a handful of messages a day.
   - *Revisit when* manual retries become a burden, delivery tracking (webhooks) is wanted, or a second email use appears (then the gateway moves out of `contact`).
+- **AD22. Coaching registrations: a second public form in the `contact` module, reusing its reCAPTCHA gateway, with no notification email** (design `docs/superpowers/specs/2026-11-09-coaching-registrations-design.md`, CR-1…CR-11). `contact/coaching/` owns `coaching_registrations` (I1). `POST /coaching-registrations` is public, CSRF-checked and answers `202` with `receivedAt` only; the body is a Zod union on `program`, rendered as `oneOf` in OpenAPI.
+  - **Reuse:** the `RecaptchaVerifier` gateway and policy are shared with the contact form (action `coaching_registration_submit`, same config); an unconfigured production answers `503 COACHING_REGISTRATION_UNAVAILABLE`. No new environment variable.
+  - **Abuse:** as AD20, counted from this table's own rows: 3 per email and 5 per client IP an hour (IP stored as an HMAC, own label), a per-email advisory lock. A duplicate is the same email, program and every answer within 24 h; a corrected answer is a new row.
+  - **No email in V1:** Xuan reads the admin inbox. Statuses are `new` → `contacted` and `archived`; approval, scheduling and payment are decided elsewhere.
 
 ## 14. Open product questions
 
