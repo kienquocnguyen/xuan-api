@@ -1227,4 +1227,57 @@ describe('OpenAPI document', () => {
       expect(Object.keys(doc().paths).filter((path) => path.startsWith('/internal'))).toEqual([]);
     });
   });
+
+  describe('coaching registrations contract (coaching registrations design)', () => {
+    const doc = () => createOpenApiDocument(app);
+    const schemas = () => (doc().components?.schemas ?? {}) as Record<string, unknown>;
+    const codes = (path: string, method: 'get' | 'post') =>
+      Object.values(doc().paths[path]?.[method]?.responses ?? {})
+        .flatMap((response) =>
+          String((response as { description?: string }).description).split(' | '),
+        )
+        .filter((code) => /^[A-Z_]+$/.test(code))
+        .sort();
+
+    it('names the request union and both variants (I19)', () => {
+      expect(Object.keys(schemas())).toEqual(
+        expect.arrayContaining([
+          'CreateCoachingRegistrationDto',
+          'CreateChannelKickstartRegistrationDto',
+          'CreateThreeMonthCoachingRegistrationDto',
+          'CoachingRegistrationReceiptDto',
+          'AdminCoachingRegistrationDto',
+          'AdminCoachingRegistrationsQuery',
+          'CoachingRegistrationIdParam',
+        ]),
+      );
+    });
+
+    it('documents the submission as 202 with its exact codes (I18)', () => {
+      const submit = doc().paths['/coaching-registrations']?.post;
+      expect(Object.keys(submit?.responses ?? {})).toContain('202');
+      expect(JSON.stringify(submit?.requestBody)).toContain(
+        '#/components/schemas/CreateCoachingRegistrationDto',
+      );
+      expect(codes('/coaching-registrations', 'post')).toEqual(
+        [
+          'COACHING_REGISTRATION_UNAVAILABLE',
+          'FORBIDDEN',
+          'INTERNAL_ERROR',
+          'PAYLOAD_TOO_LARGE',
+          'RATE_LIMITED',
+          'RECAPTCHA_VERIFICATION_FAILED',
+          'VALIDATION_FAILED',
+        ].sort(),
+      );
+    });
+
+    it('renders the admin practiceCommitment as a nullable enum', () => {
+      const schema = schemas()['AdminCoachingRegistrationDto'] as {
+        properties: Record<string, unknown>;
+      };
+      expect(JSON.stringify(schema.properties.practiceCommitment)).toContain('"nullable":true');
+      expect(JSON.stringify(schema.properties.practiceCommitment)).toContain('can_commit');
+    });
+  });
 });
