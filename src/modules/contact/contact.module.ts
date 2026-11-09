@@ -10,6 +10,7 @@ import { ContactSubmission } from './contact-submission.entity.js';
 import { ContactSubmissionsService } from './contact-submissions.service.js';
 import { ContactNotificationsService } from './notifications/contact-notifications.service.js';
 import { CONTACT_NOTIFIER, createContactNotifier } from './notifications/contact-notifier.js';
+import { HumanCheckService } from './recaptcha/human-check.service.js';
 import { createRecaptchaVerifier } from './recaptcha/create-recaptcha-verifier.js';
 import { RECAPTCHA_VERIFIER } from './recaptcha/recaptcha.js';
 
@@ -21,6 +22,7 @@ import { RECAPTCHA_VERIFIER } from './recaptcha/recaptcha.js';
     ContactSubmissionsService,
     ContactInboxService,
     ContactNotificationsService,
+    HumanCheckService,
     // Gateways chosen from config (C5).
     {
       provide: RECAPTCHA_VERIFIER,
