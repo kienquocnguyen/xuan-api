@@ -197,6 +197,29 @@ describe('POST /coaching-registrations (coaching registrations design)', () => {
       expect(await rows()).toHaveLength(3);
     });
 
+    it('stores a name-only correction as a new row', async () => {
+      await submit();
+      const res = await submit({ ...kickstart, name: 'Nguyễn Văn B' });
+      expect(res.status).toBe(202);
+      expect((await rows()).map((row) => row.name)).toEqual(['Nguyễn Văn A', 'Nguyễn Văn B']);
+    });
+
+    it('answers a repeat with blank optional fields like the first, writing nothing', async () => {
+      const blank = {
+        ...kickstart,
+        youtubeStage: 'not_started',
+        youtubeChannelUrl: '  ',
+        challenges: ['too_many_topics'],
+        challengeOther: '',
+        favoriteCreators: '',
+      };
+      const first = await submit(blank);
+      const again = await submit({ ...blank, youtubeChannelUrl: '', favoriteCreators: '   ' });
+      expect(again.status).toBe(202);
+      expect(again.body).toEqual(first.body);
+      expect(await rows()).toHaveLength(1);
+    });
+
     it('treats the same answers on the other program as new', async () => {
       const common = {
         name: 'Trần B',

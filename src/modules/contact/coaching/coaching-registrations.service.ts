@@ -152,7 +152,7 @@ export class CoachingRegistrationsService {
     ]);
   }
 
-  /** Same email, program and every answer within 24 hours (CR-8); null equals null. */
+  /** Same email, program, name and every answer within 24 hours (CR-8); null equals null. */
   private async findDuplicate(
     manager: EntityManager,
     answers: StoredAnswers,
@@ -160,6 +160,7 @@ export class CoachingRegistrationsService {
     const [row] = await manager.query<CoachingReceipt[]>(
       `SELECT created_at AS "receivedAt" FROM coaching_registrations
         WHERE email = $1 AND program = $2
+          AND name IS NOT DISTINCT FROM $12
           AND youtube_stage IS NOT DISTINCT FROM $3
           AND youtube_channel_url IS NOT DISTINCT FROM $4
           AND expertise IS NOT DISTINCT FROM $5
@@ -183,6 +184,7 @@ export class CoachingRegistrationsService {
         answers.desiredOutcome,
         answers.practiceCommitment,
         answers.favoriteCreators,
+        answers.name,
       ],
     );
     return row ?? null;
