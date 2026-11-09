@@ -4,6 +4,7 @@ import {
   courseIdParamSchema,
   curriculumOrderSchema,
   saveCourseLessonSchema,
+  saveCoursePriceSchema,
   saveCourseSchema,
   saveCourseSectionSchema,
 } from './save-course.dto.js';
@@ -87,6 +88,7 @@ describe('saveCourseLessonSchema', () => {
       title: 'Bài 1',
       videoId: null,
       privacyHash: null,
+      youtubeVideoId: null,
       durationSeconds: null,
     });
   });
@@ -103,8 +105,21 @@ describe('saveCourseLessonSchema', () => {
       title: 'Bài 1',
       videoId: '76979871',
       privacyHash: 'a1B2c3',
+      youtubeVideoId: null,
       durationSeconds: 86_400,
     });
+  });
+
+  it('keeps a YouTube-unlisted video id (spec S2)', () => {
+    expect(saveCourseLessonSchema.parse({ title: 'Bài 1', youtubeVideoId: 'dQw4w9WgXcQ' })).toEqual(
+      {
+        title: 'Bài 1',
+        videoId: null,
+        privacyHash: null,
+        youtubeVideoId: 'dQw4w9WgXcQ',
+        durationSeconds: null,
+      },
+    );
   });
 
   it.each(WHITESPACE_ONLY)('rejects a %s-only title as TOO_SHORT', (_case, blank) => {
@@ -125,8 +140,50 @@ describe('saveCourseLessonSchema', () => {
     ['a fractional duration', { durationSeconds: 1.5 }, [['durationSeconds', 'INVALID_TYPE']]],
     ['a duration over a day', { durationSeconds: 86_401 }, [['durationSeconds', 'TOO_LARGE']]],
     ['an unknown key', { videoUrl: 'https://vimeo.com/1' }, [['videoUrl', 'UNKNOWN_FIELD']]],
+    [
+      'a 10-character YouTube id',
+      { youtubeVideoId: 'dQw4w9WgXc' },
+      [['youtubeVideoId', 'INVALID_FORMAT']],
+    ],
+    [
+      'a YouTube id with a dot',
+      { youtubeVideoId: 'dQw4w9WgX.Q' },
+      [['youtubeVideoId', 'INVALID_FORMAT']],
+    ],
+    [
+      'both a Vimeo and a YouTube id',
+      { videoId: '1', youtubeVideoId: 'dQw4w9WgXcQ' },
+      [['youtubeVideoId', 'INVALID']],
+    ],
+    [
+      'a privacy hash with only a YouTube id',
+      { youtubeVideoId: 'dQw4w9WgXcQ', privacyHash: 'abc' },
+      [['privacyHash', 'INVALID']],
+    ],
   ])('rejects %s', (_case, overrides, expected) => {
     expect(fieldCodes(saveCourseLessonSchema, { title: 'Bài 1', ...overrides })).toEqual(expected);
+  });
+});
+
+describe('saveCoursePriceSchema (course sales spec §4)', () => {
+  it.each([
+    ['the first course price', 499_000],
+    ['the floor', 1_000],
+    ['the ceiling', 100_000_000],
+    ['null (not for sale)', null],
+  ])('accepts %s', (_case, priceVnd) => {
+    expect(saveCoursePriceSchema.parse({ priceVnd })).toEqual({ priceVnd });
+  });
+
+  it.each([
+    ['an omitted price', {}, [['priceVnd', 'REQUIRED']]],
+    ['a price under 1.000đ', { priceVnd: 999 }, [['priceVnd', 'TOO_SMALL']]],
+    ['a price over 100 million', { priceVnd: 100_000_001 }, [['priceVnd', 'TOO_LARGE']]],
+    ['a fractional price', { priceVnd: 499_000.5 }, [['priceVnd', 'INVALID_TYPE']]],
+    ['a price as text', { priceVnd: '499000' }, [['priceVnd', 'INVALID_TYPE']]],
+    ['an unknown key', { priceVnd: 499_000, currency: 'VND' }, [['currency', 'UNKNOWN_FIELD']]],
+  ])('rejects %s', (_case, input, expected) => {
+    expect(fieldCodes(saveCoursePriceSchema, input)).toEqual(expected);
   });
 });
 

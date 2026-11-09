@@ -245,6 +245,7 @@ The **actual, decided schema**, so the current database can be understood at a g
 | `content_categories`, `content_category_translations` (+ `content_posts.category_id`) | migration `CreatePostCategories1792424947762` (blog completion B2, BD-3); map recorded under the bounded autonomous execution row (workflow §3.5). **Implemented on `xuan_test` only** (2026-10-19: guarded run, `\d+` matches this map, revert/run round trip, empty second generate); invariants proven by `test/content-categories-schema.e2e-spec.ts`. **`xuan_dev` pending in the consolidated owner packet** (protected: B1 is still pending there, and B2 adds an FK to an existing table) | `content` (entities `ContentCategory`, `ContentCategoryTranslation`) | `docs/superpowers/plans/2026-10-19-post-categories.md`, Task 1 |
 | `content_media` (+ `content_posts.cover_media_id`, `cover_alt`, `og_media_id`; `body_version` IN (1, 2)) | migration `AddPostMedia1792426532193` (blog completion B3, BD-4/5/10); map recorded under the bounded autonomous execution row (workflow §3.5). **Implemented on `xuan_test` only** (2026-10-27: guarded run, `\d+` matches this map, revert/run round trip, empty second generate); invariants proven by `test/content-media-schema.e2e-spec.ts` and `test/content-posts-schema.e2e-spec.ts`. **`xuan_dev` pending in the consolidated owner packet** (protected: B1 and B2 are still pending there, and B3 adds FKs and a CHECK to an existing table and widens one) | `content` (entity `ContentMedia`) | `docs/superpowers/plans/2026-10-19-post-media.md`, Task 1 |
 | `contact_submissions` | **implemented** 2026-11-03 (contact form design, delegated slice; notification columns simplified the same day before any run); migration `CreateContactSubmissions1793750400000`, written by hand to the generated format and read against this map. **Run on `xuan_test` only** (owner-approved): run → `\d+` matched this map → revert → run → second `migration:generate` empty → e2e green. `xuan_dev` and Neon: not run, owner approval needed | `contact` (entity `ContactSubmission`) | `docs/superpowers/specs/2026-11-03-contact-form-design.md` |
+| `course_lessons.youtube_video_id`, `courses.price_vnd`, `orders` (+ `course_access_grants.order_id`, source `'purchase'`) | **implemented** 2026-11-08 on `xuan_test` and `xuan_dev` (owner-approved packet, handoff §1; course sales design `docs/superpowers/specs/2026-11-07-course-sales-vnpay-design.md`, delegated 2026-11-07, S15): migrations `AddLessonYouTubeVideo1793990000000`, `AddCoursePrice1793990100000`, `CreateOrders1793990200000`, written by hand to the generated format; the built entity metadata was checked against them offline (names of every FK, index, unique and CHECK). `xuan_test`: guard passed, the 3 pending as expected, run, catalog inspection matches this map (columns, every CHECK, FK, unique and index incl. both partial predicates), revert ×3 and re-run, empty second generate, `yarn test:e2e` 724/724. `xuan_dev` (protected: two CHECKs replaced): target verified as local Docker, the same 3 pending, a `pg_dump` backup read back by `pg_restore --list`, run, empty second generate; every pre-existing table's rows and content hash and the pre-existing column set unchanged; its constraints and indexes identical to `xuan_test`. **Production (Neon): not run** | `courses` (lessons, price, grants); `orders` (`orders`) | `docs/superpowers/plans/2026-11-07-course-sales-vnpay.md`, Tasks 1, 2, 5 |
 | `coaching_registrations` | **implemented** 2026-11-09 (map owner-approved; delegated slice); migration `CreateCoachingRegistrations1794218387446`, generated and checked on a throwaway database (run → `\d+` matched this map → revert → run → second `migration:generate` empty), then run on `xuan_test` by the e2e guard; invariants proven by `test/coaching-schema.e2e-spec.ts`. `xuan_dev` and Neon: not run, owner approval needed | `contact` (entity `CoachingRegistration`) | `docs/superpowers/specs/2026-11-09-coaching-registrations-design.md` |
 | `content_post_ratings`, `content_post_comments` | migration `CreatePostDiscussion1793089452033` (blog completion B4, BD-6/7/8, Q2); map recorded under the bounded autonomous execution row (workflow §3.5). **Implemented on `xuan_test` only** (2026-10-27: guarded run, `\d+` matches this map, revert/run round trip, empty second generate, the other tables' schema unchanged); invariants proven by `test/content-discussion-schema.e2e-spec.ts`. **`xuan_dev` pending in the consolidated owner packet** (only new tables, but protected while B1–B3 are pending there) | `content` (entities `PostRating`, `PostComment`) | `docs/superpowers/plans/2026-10-27-post-discussion.md`, Task 1 |
 
@@ -596,6 +597,7 @@ erDiagram
         varchar_500 summary "required · CK ck_courses_summary_not_blank"
         varchar_16 status "required · DEFAULT 'draft' · CK ck_courses_status"
         timestamptz published_at "nullable · CK ck_courses_published_has_date"
+        integer price_vnd "nullable · CK ck_courses_price_vnd_range"
         timestamptz created_at "required · DEFAULT now()"
         timestamptz updated_at "required · DEFAULT now()"
     }
@@ -630,6 +632,7 @@ erDiagram
 | `title` | `varchar(200)` | yes | — | **CK** `ck_courses_title_not_blank`: `btrim(title) <> ''` | The course name. The API trims input and rejects blank values first (400); the CHECK is the backstop |
 | `summary` | `varchar(500)` | yes | — | **CK** `ck_courses_summary_not_blank`: `btrim(summary) <> ''` | The catalog card text |
 | `status` | `varchar(16)` | yes | `'draft'` | **CK** `ck_courses_status`: `status IN ('draft','published')` | Only published courses are public. "Published" means visible, not for sale (spec §10.5). A published course always has ≥ 1 published lesson: no single-row constraint can say that, so the course lock rule L1 holds it (AD15) |
+| `price_vnd` | `integer` | no | — | **CK** `ck_courses_price_vnd_range`: `price_vnd BETWEEN 1000 AND 100000000` | Whole VND (course sales §4). `NULL` = **not for sale**: settles spec §10.5's availability question without a flag. Set by `PUT /admin/courses/:courseId/price`; an order snapshots it |
 | `published_at` | `timestamptz` | no | — | **CK** `ck_courses_published_has_date`: `status <> 'published' OR published_at IS NOT NULL` | The first-publication instant, kept across unpublish/republish (as posts, B16) |
 | `created_at` | `timestamptz` | yes | `now()` | — | D27 |
 | `updated_at` | `timestamptz` | yes | `now()` | — | D27; `@UpdateDateColumn`. The latest meaningful change to the course **or its curriculum**: every section or lesson create, edit, (un)publish, delete and real reorder also sets it, under the course lock (L1). No-op writes (identical content, idempotent (un)publish, an unchanged order) and refused changes don't. Learner progress and access grants never will. Orders the admin list |
@@ -658,6 +661,7 @@ Sections have **no status**: a section is shown publicly only while it holds a p
 | `status` | `varchar(16)` | yes | `'draft'` | **CK** `ck_course_lessons_status`: `status IN ('draft','published')` | Draft lessons are invisible outside admin routes |
 | `vimeo_video_id` | `varchar(20)` | no | — | **CK** `ck_course_lessons_vimeo_video_id_format`: `vimeo_video_id ~ '^[0-9]{1,20}$'` | The Vimeo video id (spec §8.2). **Never in a public response, never logged** |
 | `vimeo_hash` | `varchar(64)` | no | — | **CK** `ck_course_lessons_vimeo_hash_format`: `vimeo_hash ~ '^[A-Za-z0-9]{1,64}$'`; **CK** `ck_course_lessons_hash_needs_video`: `vimeo_hash IS NULL OR vimeo_video_id IS NOT NULL` | The optional privacy hash (`h`), treated like the id |
+| `youtube_video_id` | `varchar(11)` | no | — | **CK** `ck_course_lessons_youtube_video_id_format`: `youtube_video_id ~ '^[A-Za-z0-9_-]{11}$'`; **CK** `ck_course_lessons_one_video`: `vimeo_video_id IS NULL OR youtube_video_id IS NULL` | A YouTube-**unlisted** video id (course sales S2: Vimeo is a cost the business isn't ready for). Same exposure rules as the Vimeo id; an unlisted id plays on youtube.com for whoever holds it (accepted risk, course sales §6) |
 | `duration_seconds` | `integer` | no | — | **CK** `ck_course_lessons_duration_positive`: `duration_seconds > 0` | Admin-entered and optional (spec §8.3); shown in the outline. The API caps it at 86 400 |
 | `created_at` | `timestamptz` | yes | `now()` | — | D27 |
 | `updated_at` | `timestamptz` | yes | `now()` | — | D27 |
@@ -669,12 +673,12 @@ Sections have **no status**: a section is shown publicly only while it holds a p
 | `uq_courses_slug` | UNIQUE | `(slug)` | One course per URL; the public lookup |
 | `uq_course_sections_course_id_position` | UNIQUE **DEFERRABLE INITIALLY DEFERRED** | `(course_id, position)` | Positions are unique per course, checked **at commit**, so a reorder is a run of plain updates in one transaction (spike S7). Its leading `course_id` is also the FK index |
 | `uq_course_lessons_section_id_position` | UNIQUE **DEFERRABLE INITIALLY DEFERRED** | `(section_id, position)` | Same for lessons within a section; also the FK index |
-| `ck_course_lessons_published_has_video` | CHECK | `status <> 'published' OR vimeo_video_id IS NOT NULL` | A published lesson always has a video (P2). The service refuses first with `409 LESSON_VIDEO_MISSING` |
+| `ck_course_lessons_published_has_video` | CHECK | `status <> 'published' OR vimeo_video_id IS NOT NULL OR youtube_video_id IS NOT NULL` (relaxed by course sales) | A published lesson always has a video (P2). The service refuses first with `409 LESSON_VIDEO_MISSING` |
 | _(no other index)_ | — | — | The public list (`WHERE status = 'published' ORDER BY published_at DESC, id DESC`) runs over a handful of rows, as with services. Add an index only when `EXPLAIN` on real data says so |
 
 **TypeORM caveat:** `migration:generate` compares unique constraints **by name only** and doesn't read `condeferrable`. A later change of deferrability on either position unique is invisible to generate and needs a hand-written migration.
 
-**Not in these tables:** price, availability or a "for sale" flag (orders slice, spec §10.5); a language column (additive later); access grants (`course_access_grants`) and progress (`lesson_progress`), below.
+**Not in these tables:** an availability or "for sale" flag (a `NULL` `price_vnd` means not for sale); a language column (additive later); access grants (`course_access_grants`) and progress (`lesson_progress`), below.
 
 #### `course_access_grants`
 
@@ -695,6 +699,7 @@ erDiagram
         timestamptz granted_at "required · DEFAULT now()"
         timestamptz revoked_at "nullable"
         uuid revoked_by_user_id FK "nullable · fk_course_access_grants_revoked_by_user_id · RESTRICT"
+        uuid order_id FK "nullable · fk_course_access_grants_order_id → orders · RESTRICT"
         timestamptz created_at "required · DEFAULT now()"
         timestamptz updated_at "required · DEFAULT now()"
     }
@@ -705,11 +710,12 @@ erDiagram
 | `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_course_access_grants` | One row per grant (OD-1) |
 | `user_id` | `uuid` | yes | — | **FK** `fk_course_access_grants_user_id` → `users(id)` `ON DELETE RESTRICT` (by entity name, AD14) | The learner. An unknown user's violation becomes `404 NOT_FOUND` |
 | `course_id` | `uuid` | yes | — | **FK** `fk_course_access_grants_course_id` → `courses(id)` `ON DELETE RESTRICT` | Any status: testers can be granted before publication. An unknown course's violation becomes `404 NOT_FOUND` |
-| `source` | `varchar(16)` | yes | — | **CK** `ck_course_access_grants_source`: `source IN ('admin')` | Only value in V1; the orders slice widens it to `'purchase'` (spec §5.4). No default: every writer names its source |
+| `source` | `varchar(16)` | yes | — | **CK** `ck_course_access_grants_source`: `source IN ('admin', 'purchase')` | `'purchase'` added by course sales (spec §5.4): inserted only by the VNPAY IPN through `CourseSales.grantForPurchase`. No default: every writer names its source |
 | `granted_by_user_id` | `uuid` | no | — | **FK** `fk_course_access_grants_granted_by_user_id` → `users(id)` `ON DELETE RESTRICT`; **CK** `ck_course_access_grants_admin_has_granter`: `source <> 'admin' OR granted_by_user_id IS NOT NULL` | Who granted. A future purchase grant has none |
 | `granted_at` | `timestamptz` | yes | `now()` | — | Shown in the grant history; never changes |
 | `revoked_at` | `timestamptz` | no | — | **CK** `ck_course_access_grants_revocation_pair`: `(revoked_at IS NULL) = (revoked_by_user_id IS NULL)` | `NULL` = active |
 | `revoked_by_user_id` | `uuid` | no | — | **FK** `fk_course_access_grants_revoked_by_user_id` → `users(id)` `ON DELETE RESTRICT` | Who revoked |
+| `order_id` | `uuid` | no | — | **FK** `fk_course_access_grants_order_id` → `orders(id)` `ON DELETE RESTRICT` (by entity name, AD14); **CK** `ck_course_access_grants_purchase_has_order`: `(source = 'purchase') = (order_id IS NOT NULL)` | The paid order a purchase grant came from; a refund would revoke exactly this grant (§5.1; refunds are manual in V1, course sales S6) |
 | `created_at` | `timestamptz` | yes | `now()` | — | D27 |
 | `updated_at` | `timestamptz` | yes | `now()` | — | D27; `@UpdateDateColumn`. Set by a revocation **and by a repeated grant**: the grant upsert's `DO UPDATE` must name a column (spike S8), so a repeated grant is business-idempotent (same row, `id` and `granted_at`; same DTO) but not a database no-op. Not on the wire |
 
@@ -718,12 +724,13 @@ erDiagram
 | Name | Kind | Definition | Note |
 |---|---|---|---|
 | `uq_course_access_grants_user_id_course_id_active_admin` | UNIQUE **partial** index | `(user_id, course_id) WHERE source = 'admin' AND revoked_at IS NULL` | At most one active admin grant per (user, course) (CP5). The grant upsert's `ON CONFLICT (user_id, course_id) WHERE …` target (D32, C6). Named with a predicate suffix: a plain `uq_<table>_<cols>` would suggest a full unique (spec §21) |
+| `uq_course_access_grants_order_id_purchase` | UNIQUE **partial** index | `(order_id) WHERE source = 'purchase'` | One grant per order: a replayed or concurrent IPN can't grant twice (backstop behind the IPN's `FOR UPDATE`). Hand-written predicate (S8). Also the order FK's index |
 | `ix_course_access_grants_user_id_course_id` | INDEX | `(user_id, course_id)` | The access check (`EXISTS … revoked_at IS NULL`, any source), `GET /learn/courses` and the user FK |
 | _(no other index)_ | — | — | The admin grant list (`WHERE course_id ORDER BY granted_at DESC, id DESC`) runs over a handful of rows, and no course or user is ever deleted in V1. Add one when `EXPLAIN` on real data says so |
 
 **TypeORM caveat (spike S8):** `migration:generate` compares indexes by name, uniqueness and columns, **not by their `WHERE` predicate**. A later predicate change is invisible to generate and needs a hand-written migration, like the deferrable position uniques above.
 
-**Not in this table:** `order_id` and the `'purchase'` source (orders slice, spec §5.4, expand-only); an expiry (CP1: lifetime access).
+**Not in this table:** an expiry (CP1: lifetime access).
 
 #### `lesson_progress`
 
@@ -820,6 +827,61 @@ erDiagram
 The unfiltered inbox (newest first over every status) sorts the table, which stays small (a contact form). An index for it is added when a plan shows the need.
 
 **Migration safety:** one new table and its indexes; no existing table, row or constraint changes. `down()` drops the table, discarding any submissions (a deliberate, documented loss; once submissions exist, roll forward instead, C9). The migration was rewritten in place on 2026-11-03 to drop the retry schedule (`notification_next_attempt_at`, its CHECK and the partial due index); that was allowed because it had never run on any database (`xuan_test` showed it pending before its first run).
+
+#### `orders`
+
+One checkout of one course by one signed-in user, at a price snapshot (course sales design §5.2). Created `pending` by `POST /orders`; **only VNPAY's IPN** settles it, in the same transaction as the purchase grant. Owned by `orders` (`Order`).
+
+**Invariants:** the reference is 32 lowercase hex characters and unique (it is `vnp_TxnRef` and the buyer's URL); the amount is positive; `paid` ⇔ `paid_at` set; a settled order records VNPAY's response code. There is no `expired` status (S9) and `failed` isn't terminal for a success (S14).
+
+```mermaid
+erDiagram
+    users ||--o{ orders : "places"
+    courses ||--o{ orders : "is bought through"
+    orders ||--o| course_access_grants : "grants (purchase)"
+
+    orders {
+        uuid id PK "pk_orders · DEFAULT uuidv7()"
+        varchar_32 reference UK "uq_orders_reference · CK 32 lowercase hex"
+        uuid user_id FK "fk_orders_user_id → users · RESTRICT"
+        uuid course_id FK "fk_orders_course_id → courses · RESTRICT"
+        integer amount_vnd "required · CK > 0"
+        varchar_16 status "required · DEFAULT 'pending' · CK pending|paid|failed"
+        timestamptz expires_at "required"
+        timestamptz paid_at "nullable · CK pair with paid"
+        varchar_15 vnp_transaction_no "nullable"
+        varchar_2 vnp_response_code "nullable · CK required once settled"
+        varchar_2 vnp_transaction_status "nullable"
+        varchar_20 vnp_bank_code "nullable"
+        varchar_20 vnp_card_type "nullable"
+        varchar_255 vnp_bank_tran_no "nullable"
+        varchar_14 vnp_pay_date "nullable"
+        timestamptz created_at "required · DEFAULT now()"
+        timestamptz updated_at "required · DEFAULT now()"
+    }
+```
+
+| Column | Type | Required | Default | Keys / constraints | Why |
+|---|---|---|---|---|---|
+| `id` | `uuid` | yes | `uuidv7()` | **PK** `pk_orders` | D26; the purchase grant's `order_id` |
+| `reference` | `varchar(32)` | yes | — | **UQ** `uq_orders_reference`; **CK** `ck_orders_reference_format`: `reference ~ '^[0-9a-f]{32}$'` | Sent as `vnp_TxnRef` (alphanumeric only, unique per day for VNPAY: globally unique here) and the key of `GET /orders/:reference`. A random v4 UUID's hex, independent of `id`, so unguessable |
+| `user_id` | `uuid` | yes | — | **FK** `fk_orders_user_id` → `users(id)` `ON DELETE RESTRICT` (by entity name, AD14) | The buyer; the session user, never input (I9) |
+| `course_id` | `uuid` | yes | — | **FK** `fk_orders_course_id` → `courses(id)` `ON DELETE RESTRICT` (by entity name) | What was bought; an order outlives an unpublish |
+| `amount_vnd` | `integer` | yes | — | **CK** `ck_orders_amount_vnd_positive`: `amount_vnd > 0` | `courses.price_vnd` at checkout. The IPN compares `vnp_Amount` with `amount_vnd × 100` (`04` otherwise) |
+| `status` | `varchar(16)` | yes | `'pending'` | **CK** `ck_orders_status`: `status IN ('pending', 'paid', 'failed')` | Written only by the IPN after creation |
+| `expires_at` | `timestamptz` | yes | — | — | `vnp_ExpireDate` (checkout + 15 min). Display only: a late success is still honoured (S9) |
+| `paid_at` | `timestamptz` | no | — | **CK** `ck_orders_paid_pair`: `(status = 'paid') = (paid_at IS NOT NULL)` | When the IPN confirmed it |
+| `vnp_transaction_no` … `vnp_pay_date` | `varchar` (15, 2, 2, 20, 20, 255, 14) | no | — | **CK** `ck_orders_settled_has_result`: `status = 'pending' OR vnp_response_code IS NOT NULL` | What VNPAY's IPN said, cut to these lengths so storing it never fails the IPN; for support, the admin list and manual refunds |
+| `created_at` | `timestamptz` | yes | `now()` | — | D27; the checkout throttle window and the admin order |
+| `updated_at` | `timestamptz` | yes | `now()` | — | D27 |
+
+| Index | Columns | Why |
+|---|---|---|
+| `ix_orders_user_id_created_at` | `(user_id, created_at)` | The checkout throttle (5 per user per 15 min) and the buyer FK |
+| `ix_orders_course_id` | `(course_id)` | The course FK's `RESTRICT` lookup |
+| `ix_orders_created_at_id` | `(created_at, id)` | The admin list, newest first, stable ties |
+
+**Migration safety:** `CreateOrders` adds a table and, on `course_access_grants`, a nullable column without a default, a CHECK that every existing row satisfies (all are `admin` with no order), a partial index and an FK; it **replaces** `ck_course_access_grants_source` with a wider one. `down()` restores the narrow CHECK, which fails while a purchase grant exists (it never deletes one), then drops the column and the table. `AddLessonYouTubeVideo` and `AddCoursePrice` add nullable columns and CHECKs no existing row can violate; the former replaces `ck_course_lessons_published_has_video` with a relaxed one, and its `down()` fails while a published lesson has only a YouTube video.
 
 #### `coaching_registrations`
 

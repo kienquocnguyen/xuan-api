@@ -102,7 +102,11 @@ src/
                      post-compatibility (the omitted-field guard and the body version contract, blog completion spec §3.4)
     courses/         courses, course_sections, course_lessons, course_access_grants, lesson_progress · public catalog, admin curriculum,
                      admin access and learner controllers · courses / course-access / learning services ·
-                     course lock rule L1 (AD15) · grant upsert (AD16) · imports UsersModule for UserProfilesReader
+                     course lock rule L1 (AD15) · grant upsert (AD16) · imports UsersModule for UserProfilesReader ·
+                     exports CourseSales (checkout facts, purchase grants; AD21)
+    orders/          orders · checkout, buyer order and admin list controllers · the VNPAY IPN controller (raw response) ·
+                     orders / IPN services · vnpay/ (canonical query, HMAC sign/verify, GMT+7 dates, payment URL,
+                     IPN decision table) · imports CoursesModule (CourseSales) and UsersModule (AD21)
     contact/         contact_submissions · public form and admin inbox controllers · submissions / inbox /
                      notifications services · recaptcha/ (Google gateway + policy) · notifications/ (Resend gateway,
                      email builder, one-attempt delivery and manual retry) (AD20) ·
@@ -145,6 +149,8 @@ This is an allow-list: anything not listed is forbidden (I2).
 **Why modules talk only through exported providers:** the old backend let controllers import other domains' models. Here, a module's tables are private. Its exported service is its public API.
 
 **V1 modules don't import each other's entities.** ORM relation metadata across modules is deferred to its first real case (C12, §15).
+
+**Business-module edges today:** `content → users`, `courses → users` (`UserProfilesReader`); `orders → courses` (`CourseSales`, AD21), `orders → users` (`UserProfilesReader`). No cycle: `courses` never imports `orders` (its FK to `orders` is declared by entity name, AD14).
 
 Enforcement: lint once the tool is settled (a verification spike), and review until then.
 
@@ -383,6 +389,7 @@ real env vars (production) ─────────────────�
 | `RECAPTCHA_SECRET_KEY` | Contact form reCAPTCHA v3 (secret). Without it: verification skipped in development and test; **every submission `503` in production** (AD20) |
 | `RECAPTCHA_ALLOWED_HOSTNAMES`, `RECAPTCHA_MIN_SCORE` | Hostnames a token may come from (required with the secret, refused without it); score threshold 0–1, default 0.5 |
 | `RESEND_API_KEY`, `CONTACT_EMAIL_FROM`, `CONTACT_NOTIFICATION_TO` | Contact notification email: all three or none (the key is a secret). None: submissions are still stored, and their notifications are `failed` with `NOT_CONFIGURED` |
+| `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`, `VNPAY_PAYMENT_URL`, `VNPAY_RETURN_URL` | Course payments (AD21): all four or none (the hash secret is a secret). Terminal code 8 alphanumerics; gateway URL `https`; return URL (xuan-web's result page) `https` in production. None: checkout answers `503 PAYMENTS_UNAVAILABLE` and the IPN `97` |
 
 Files and secrets: `development-workflow.md` (Secrets).
 
@@ -407,7 +414,7 @@ HttpContractModule   APP_PIPE · APP_FILTER · APP_INTERCEPTOR
 | Helmet, prefix (D22) | Defaults; no global prefix, no versioning | The API owns its subdomain; contract paths are `/services`, `/users/me` |
 | Shutdown hooks (D22) | Enabled | TypeORM closes its pool on SIGTERM |
 | Docs (D20) | `/docs` + `/docs-json` only when config enables them | Off by default; contract §6: non-production or protected |
-| Rate limiting (D23) | Not in the first slice; **required on public writes before public launch**. Discussion writes are throttled per user since blog B4 (AD19); the contact form is limited per email and per client IP from its own rows, and `trust proxy` = `TRUST_PROXY_HOPS` (AD20), and so are coaching registrations (AD22). Those two are the public writes | A launch gate, not a learning-slice concern |
+| Rate limiting (D23) | Not in the first slice; **required on public writes before public launch**. Discussion writes are throttled per user since blog B4 (AD19); the contact form is limited per email and per client IP from its own rows, and `trust proxy` = `TRUST_PROXY_HOPS` (AD20), and so are coaching registrations (AD22). Those two are the public form writes; the VNPAY IPN is authenticated by its signature (AD21) | A launch gate, not a learning-slice concern |
 | Auth guard, cookies, CSRF header/Origin enforcement | `CsrfGuard` + global `AccessGuard`; `cookie-parser` with `AUTH_COOKIE_SECRET` (§17) | Default deny; cookie sessions need CSRF defense in depth (`api-contract.md` §8) |
 
 ## 13. Decisions log
@@ -447,6 +454,14 @@ Each entry ends with *revisit when*. The full reasoning and the rejected alterna
   - **Limits, honestly:** the per-email limit is exact (the advisory lock); the per-IP limit isn't serialized, so concurrent submissions from one IP with different emails can exceed it by their number. Notifications are not exactly-once. The idempotency key prevents a second email for a retry within Resend's 24-hour window; later, a retry of an email whose acceptance was lost can deliver a copy. `sent` means accepted by Resend, not delivered.
   - *Why no queue:* durability is the row itself. Redis, a broker, a worker or a cron would add infrastructure for a handful of messages a day.
   - *Revisit when* manual retries become a burden, delivery tracking (webhooks) is wanted, or a second email use appears (then the gateway moves out of `contact`).
+- **AD21. Course sales: an `orders` module, a cross-module transaction through a passed `EntityManager`, and a VNPAY IPN outside the envelope** (course sales design `docs/superpowers/specs/2026-11-07-course-sales-vnpay-design.md`, S1–S15).
+  - **Ownership:** `orders` owns `orders` and a pure `vnpay/` toolkit (canonical query, HMAC-SHA512 sign/verify with a constant-time compare, GMT+7 dates, the payment URL, the IPN decision table). `courses` keeps the grant rows and exports exactly one provider, `CourseSales`: `findForSale`, `findLabels`, `hasActiveAccess`, `grantForPurchase`.
+  - **Cross-module transaction (first case, §15):** the IPN opens the transaction, locks the order (`FOR UPDATE`), and hands its `EntityManager` to `CourseSales.grantForPurchase(manager, …)`, which writes only through it (I8). The owning module keeps the rule; the caller owns the transaction boundary. `uq_course_access_grants_order_id_purchase` is the backstop.
+  - **The IPN** (`GET /payments/vnpay/ipn`) is a documented exception to I11/I13 (S5): VNPAY requires HTTP 200 with its own `{ RspCode, Message }`, so the route uses `@RawResponse` (AD6's opt-out), never throws (an unexpected failure rolls back and answers `99`, so VNPAY retries), and is excluded from OpenAPI like the Google callback. It is a mutating GET protected by the signature, not by CSRF (which passes safe methods).
+  - **Only the IPN settles orders and grants access (S4).** A purchase grant is unconditional (S13); a success after a recorded failure still settles `paid` (S14); expiry never blocks a success (S9).
+  - **Config:** four `VNPAY_*` variables, all or none; none disables checkout (`503 PAYMENTS_UNAVAILABLE`), so the API deploys before credentials exist.
+  - *Unverified until the sandbox:* the canonical encoding (S8, PHP `urlencode` form, as VNPAY's current demos) is confirmed by one sandbox payment before go-live.
+  - *Revisit when* refunds go through the API (revoke the order's grant), a second payment provider appears (a gateway interface, C5), or IPNs go missing in practice (`querydr` reconciliation).
 - **AD22. Coaching registrations: a second public form in the `contact` module, reusing its reCAPTCHA gateway, with no notification email** (design `docs/superpowers/specs/2026-11-09-coaching-registrations-design.md`, CR-1…CR-11). `contact/coaching/` owns `coaching_registrations` (I1). `POST /coaching-registrations` is public, CSRF-checked and answers `202` with `receivedAt` only; the body is a Zod union on `program`, rendered as `oneOf` in OpenAPI.
   - **Reuse:** the `RecaptchaVerifier` gateway and policy are shared with the contact form (action `coaching_registration_submit`, same config); an unconfigured production answers `503 COACHING_REGISTRATION_UNAVAILABLE`. No new environment variable.
   - **Abuse:** as AD20, counted from this table's own rows: 3 per email and 5 per client IP an hour (IP stored as an HMAC, own label), a per-email advisory lock. A duplicate is the same email, program and every answer within 24 h; a corrected answer is a new row.
@@ -472,7 +487,7 @@ These are shared with xuan-web. Agents ask instead of guessing.
 | ~~Pagination implementation~~ | **Done 2026-10-15** with blog posts: `pageQueryFields`, `PageInfoDto`, `toPageInfo` in `http/pagination/page.ts`; `@ApiPaginatedEnvelopeResponse` in `http/openapi/` |
 | ~~First request-body validation~~ | **Done 2026-10-15** with blog posts (`SavePostDto` via `@Body({ schema })`) |
 | Cross-module ORM **relation** metadata (C12) | Resolved for foreign keys by AD14 (FK metadata without relations); relation metadata itself stays deferred until a real need |
-| Module-to-module details; cross-module transactions | First real consumer (orders/entitlements) |
+| ~~Module-to-module details; cross-module transactions~~ | **Resolved 2026-11-07 by AD21** (orders → courses: one exported provider; the caller's `EntityManager` passed in for one transaction) |
 | Query classes, dedicated mappers, local layering | C1, C2, C4 signals |
 | ~~Integration gateways (external providers)~~ | **First one done 2026-10-27:** the `MediaStorage` gateway (AD17; R2). Each later provider gets its own port in its owning module |
 | Structured logging, request IDs | First deployment |

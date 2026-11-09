@@ -4,7 +4,7 @@ import { ApiExtraModels, ApiResponse, getSchemaPath } from '@nestjs/swagger';
 /** Documents { data: Dto } (or { data: Dto[] }), matching the success interceptor (I11). */
 export function ApiEnvelopeResponse(
   dto: Type<unknown>,
-  options: { status?: number; isArray?: boolean } = {},
+  options: { status?: number; isArray?: boolean; description?: string } = {},
 ) {
   const data = options.isArray
     ? { type: 'array', items: { $ref: getSchemaPath(dto) } }
@@ -13,6 +13,7 @@ export function ApiEnvelopeResponse(
     ApiExtraModels(dto),
     ApiResponse({
       status: options.status ?? 200,
+      ...(options.description === undefined ? {} : { description: options.description }),
       schema: {
         type: 'object',
         required: ['data'],

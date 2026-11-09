@@ -23,6 +23,7 @@ type GrantRow = {
   granted_at: Date;
   revoked_at: Date | null;
   revoked_by_user_id: string | null;
+  order_id: string | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -37,6 +38,7 @@ function grantFromRow(row: GrantRow): CourseAccessGrant {
     grantedAt: row.granted_at,
     revokedAt: row.revoked_at,
     revokedByUserId: row.revoked_by_user_id,
+    orderId: row.order_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   });

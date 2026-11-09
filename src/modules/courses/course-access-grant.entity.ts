@@ -10,15 +10,20 @@ import {
 } from 'typeorm';
 import { Course } from './course.entity.js';
 
-export const GRANT_SOURCES = ['admin'] as const;
+/** `purchase`: inserted by a verified VNPAY payment, tied to its order (course sales spec §5.3). */
+export const GRANT_SOURCES = ['admin', 'purchase'] as const;
 export type GrantSource = (typeof GRANT_SOURCES)[number];
 
 /** The partial unique index's predicate; the grant upsert's `ON CONFLICT … WHERE` repeats it (AD16). */
 export const ACTIVE_ADMIN_GRANT_PREDICATE = `"source" = 'admin' AND "revoked_at" IS NULL`;
 
+/** One purchase grant per order, so a replayed IPN can never grant twice (course sales spec §5.3). */
+export const PURCHASE_GRANT_PREDICATE = `"source" = 'purchase'`;
+
 /**
  * `course_access_grants` (database.md §12): one row per grant (course spec §5, OD-1); access ⇔ an active row.
- * The three user FKs are declared by entity name, so this module never imports the users entity (AD14, I2).
+ * The user FKs and the order FK are declared by entity name, so this module never imports the users or orders
+ * entities (AD14, I2).
  * TypeORM's generate ignores the partial index's predicate (spike S8): changing it needs a hand-written migration.
  */
 @Entity('course_access_grants')
@@ -26,8 +31,16 @@ export const ACTIVE_ADMIN_GRANT_PREDICATE = `"source" = 'admin' AND "revoked_at"
   unique: true,
   where: ACTIVE_ADMIN_GRANT_PREDICATE,
 })
+@Index('uq_course_access_grants_order_id_purchase', ['orderId'], {
+  unique: true,
+  where: PURCHASE_GRANT_PREDICATE,
+})
 @Index('ix_course_access_grants_user_id_course_id', ['userId', 'courseId'])
-@Check('ck_course_access_grants_source', `"source" IN ('admin')`)
+@Check('ck_course_access_grants_source', `"source" IN ('admin', 'purchase')`)
+@Check(
+  'ck_course_access_grants_purchase_has_order',
+  `("source" = 'purchase') = ("order_id" IS NOT NULL)`,
+)
 @Check(
   'ck_course_access_grants_admin_has_granter',
   `"source" <> 'admin' OR "granted_by_user_id" IS NOT NULL`,
@@ -68,6 +81,11 @@ export class CourseAccessGrant {
   @Column({ name: 'revoked_by_user_id', type: 'uuid', nullable: true })
   @ForeignKey('User', { name: 'fk_course_access_grants_revoked_by_user_id', onDelete: 'RESTRICT' })
   revokedByUserId!: string | null;
+
+  /** The paid order a `purchase` grant came from; null for admin grants. */
+  @Column({ name: 'order_id', type: 'uuid', nullable: true })
+  @ForeignKey('Order', { name: 'fk_course_access_grants_order_id', onDelete: 'RESTRICT' })
+  orderId!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

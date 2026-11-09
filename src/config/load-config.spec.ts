@@ -47,6 +47,7 @@ describe('loadConfig', () => {
         recaptcha: { mode: 'bypass' },
         email: { provider: 'disabled' },
       },
+      payments: { provider: 'disabled' },
     });
   });
 
@@ -309,6 +310,80 @@ describe('loadConfig', () => {
       expect(loadConfig(valid).trustProxyHops).toBe(0);
       expect(loadConfig({ ...production, TRUST_PROXY_HOPS: '0' }).trustProxyHops).toBe(0);
       expect(failureOf({ ...valid, TRUST_PROXY_HOPS: '9' })).toContain('TRUST_PROXY_HOPS');
+    });
+  });
+
+  describe('VNPAY payments (course sales spec §5.7)', () => {
+    const production = {
+      ...valid,
+      NODE_ENV: 'production',
+      AUTH_COOKIE_SECURE: 'true',
+      GOOGLE_CALLBACK_URL: 'https://api.xuancreative.com/auth/google/callback',
+      MEDIA_STORAGE: 'disabled',
+    };
+    const vnpay = {
+      VNPAY_TMN_CODE: 'TESTTMN1',
+      VNPAY_HASH_SECRET: 'vnpay-s3cret',
+      VNPAY_PAYMENT_URL: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
+      VNPAY_RETURN_URL: 'http://localhost:3000/khoa-hoc/thanh-toan/ket-qua',
+    };
+    const failureOf = (env: Record<string, string | undefined>) => {
+      try {
+        loadConfig(env);
+      } catch (error) {
+        expect(error).toBeInstanceOf(ConfigError);
+        return (error as Error).message;
+      }
+      throw new Error('expected a ConfigError');
+    };
+
+    it('is disabled without any VNPAY variable, in production too', () => {
+      expect(loadConfig(valid).payments).toEqual({ provider: 'disabled' });
+      expect(loadConfig(production).payments).toEqual({ provider: 'disabled' });
+    });
+
+    it('configures VNPAY with all four values', () => {
+      expect(loadConfig({ ...valid, ...vnpay }).payments).toEqual({
+        provider: 'vnpay',
+        vnpay: {
+          tmnCode: 'TESTTMN1',
+          hashSecret: 'vnpay-s3cret',
+          paymentUrl: 'https://sandbox.vnpayment.vn/paymentv2/vpcpay.html',
+          returnUrl: 'http://localhost:3000/khoa-hoc/thanh-toan/ket-qua',
+        },
+      });
+    });
+
+    it('refuses a partial set, naming the missing variables and never printing the secret', () => {
+      const partial = failureOf({ ...valid, VNPAY_HASH_SECRET: 'vnpay-s3cret' });
+      expect(partial).toContain('VNPAY_TMN_CODE');
+      expect(partial).toContain('VNPAY_PAYMENT_URL');
+      expect(partial).toContain('VNPAY_RETURN_URL');
+      expect(partial).not.toContain('vnpay-s3cret');
+    });
+
+    it.each([
+      ['a 7-character terminal code', { VNPAY_TMN_CODE: 'TESTTMN' }, 'VNPAY_TMN_CODE'],
+      ['a terminal code with a dash', { VNPAY_TMN_CODE: 'TEST-MN1' }, 'VNPAY_TMN_CODE'],
+      [
+        'a plain-http gateway',
+        { VNPAY_PAYMENT_URL: 'http://sandbox.vnpayment.vn/x' },
+        'VNPAY_PAYMENT_URL',
+      ],
+      ['a return URL that is not a URL', { VNPAY_RETURN_URL: 'ket-qua' }, 'VNPAY_RETURN_URL'],
+    ])('refuses %s', (_case, override, variable) => {
+      expect(failureOf({ ...valid, ...vnpay, ...override })).toContain(variable);
+    });
+
+    it('needs an https return URL in production', () => {
+      expect(failureOf({ ...production, ...vnpay })).toContain('VNPAY_RETURN_URL');
+      expect(
+        loadConfig({
+          ...production,
+          ...vnpay,
+          VNPAY_RETURN_URL: 'https://xuancreative.com/khoa-hoc/thanh-toan/ket-qua',
+        }).payments.provider,
+      ).toBe('vnpay');
     });
   });
 });

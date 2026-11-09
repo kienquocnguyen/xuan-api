@@ -54,6 +54,18 @@ export type AppConfig = Readonly<{
       | Readonly<{ provider: 'resend'; apiKey: string; from: string; to: string }>
       | Readonly<{ provider: 'disabled' }>;
   }>;
+  /** Course payments (course sales spec §5.7). `disabled`: checkout answers 503 PAYMENTS_UNAVAILABLE. */
+  payments:
+    | Readonly<{
+        provider: 'vnpay';
+        vnpay: Readonly<{
+          tmnCode: string;
+          hashSecret: string;
+          paymentUrl: string;
+          returnUrl: string;
+        }>;
+      }>
+    | Readonly<{ provider: 'disabled' }>;
 }>;
 
 export class ConfigError extends Error {}
@@ -88,7 +100,22 @@ export function loadConfig(source: NodeJS.ProcessEnv = readEnvironment()): AppCo
     // Production runs behind exactly one proxy (Vercel's edge) unless told otherwise.
     trustProxyHops: env.TRUST_PROXY_HOPS ?? (env.NODE_ENV === 'production' ? 1 : 0),
     contact: Object.freeze(contactConfig(env)),
+    payments: Object.freeze(paymentsConfig(env)),
   });
+}
+
+function paymentsConfig(env: Env): AppConfig['payments'] {
+  // The schema guarantees all four or none.
+  if (!env.VNPAY_HASH_SECRET) return { provider: 'disabled' };
+  return {
+    provider: 'vnpay',
+    vnpay: Object.freeze({
+      tmnCode: env.VNPAY_TMN_CODE as string,
+      hashSecret: env.VNPAY_HASH_SECRET,
+      paymentUrl: env.VNPAY_PAYMENT_URL as string,
+      returnUrl: env.VNPAY_RETURN_URL as string,
+    }),
+  };
 }
 
 type Env = z.infer<typeof envSchema>;

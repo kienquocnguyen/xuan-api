@@ -294,6 +294,7 @@ describe('OpenAPI document', () => {
           'SaveCourseDto',
           'SaveCourseSectionDto',
           'SaveCourseLessonDto',
+          'SaveCoursePriceDto',
           'CurriculumOrderDto',
           'CourseIdParam',
           'CourseSectionIdParam',
@@ -305,6 +306,7 @@ describe('OpenAPI document', () => {
     it('documents the DTO fields exactly', () => {
       expect(propsOf('CourseSummaryDto')).toEqual([
         'id',
+        'priceVnd',
         'publishedAt',
         'slug',
         'summary',
@@ -312,6 +314,7 @@ describe('OpenAPI document', () => {
       ]);
       expect(propsOf('CourseDto')).toEqual([
         'id',
+        'priceVnd',
         'publishedAt',
         'sections',
         'slug',
@@ -323,6 +326,7 @@ describe('OpenAPI document', () => {
       expect(propsOf('AdminCourseSummaryDto')).toEqual([
         'id',
         'lessonCount',
+        'priceVnd',
         'publishedAt',
         'publishedLessonCount',
         'slug',
@@ -344,6 +348,7 @@ describe('OpenAPI document', () => {
         'title',
         'updatedAt',
         'videoId',
+        'youtubeVideoId',
       ]);
     });
 
@@ -359,7 +364,7 @@ describe('OpenAPI document', () => {
     it('documents SaveCourseLessonDto as the validation behaves: optional, never null', () => {
       const lesson = schemaOf('SaveCourseLessonDto');
       expect(lesson?.required).toEqual(['title']);
-      for (const field of ['videoId', 'privacyHash', 'durationSeconds']) {
+      for (const field of ['videoId', 'privacyHash', 'youtubeVideoId', 'durationSeconds']) {
         const schema = JSON.stringify(lesson?.properties?.[field]);
         expect(schema).not.toContain('nullable');
         expect(schema).not.toContain('"null"');
@@ -404,6 +409,7 @@ describe('OpenAPI document', () => {
           [...input, 'NOT_FOUND', 'COURSE_NEEDS_PUBLISHED_LESSON'],
         ],
         ['/admin/courses/{courseId}/unpublish', 'post', [...input, 'NOT_FOUND']],
+        ['/admin/courses/{courseId}/price', 'put', [...input, 'NOT_FOUND']],
         ['/admin/courses/{courseId}/sections', 'post', [...input, 'NOT_FOUND']],
         ['/admin/course-sections/{sectionId}', 'put', [...input, 'NOT_FOUND']],
         [
@@ -499,7 +505,7 @@ describe('OpenAPI document', () => {
           'CourseAccessGrantDto',
           'CourseAccessUserDto',
           'LessonPlaybackDto',
-          'VimeoVideoDto',
+          'LessonVideoDto',
           'CourseAccessParams',
           'LessonPathParams',
         ]),
@@ -541,14 +547,16 @@ describe('OpenAPI document', () => {
         'title',
         'video',
       ]);
-      expect(propsOf('VimeoVideoDto')).toEqual(['privacyHash', 'provider', 'videoId']);
-      expect(schemaOf('VimeoVideoDto')?.properties?.provider).toMatchObject({ enum: ['vimeo'] });
+      expect(propsOf('LessonVideoDto')).toEqual(['privacyHash', 'provider', 'videoId']);
+      expect(schemaOf('LessonVideoDto')?.properties?.provider).toMatchObject({
+        enum: ['vimeo', 'youtube'],
+      });
       expect(schemaOf('CourseAccessGrantDto')?.properties?.source).toMatchObject({
-        enum: ['admin'],
+        enum: ['admin', 'purchase'], // course sales §5.3
       });
     });
 
-    it('puts video fields only on LessonPlaybackDto and VimeoVideoDto (spec §7, §14)', () => {
+    it('puts video fields only on LessonPlaybackDto and LessonVideoDto (spec §7, §14)', () => {
       for (const name of [...LEARNER_DTOS, 'CourseAccessGrantDto', 'CourseAccessUserDto']) {
         expect({ name, props: propsOf(name).filter((p) => /video|vimeo|hash/i.test(p)) }).toEqual({
           name,
@@ -1225,6 +1233,94 @@ describe('OpenAPI document', () => {
 
     it('has no internal or scheduled-delivery route', () => {
       expect(Object.keys(doc().paths).filter((path) => path.startsWith('/internal'))).toEqual([]);
+    });
+  });
+
+  describe('course sales contract (course sales spec §5.4)', () => {
+    const doc = () => createOpenApiDocument(app);
+    const schema = (name: string) =>
+      doc().components?.schemas?.[name] as
+        { properties?: Record<string, unknown>; required?: string[] } | undefined;
+    const propsOf = (name: string) => Object.keys(schema(name)?.properties ?? {}).sort();
+    const codes = (path: string, method: 'get' | 'post') =>
+      Object.values(doc().paths[path]?.[method]?.responses ?? {})
+        .flatMap((response) =>
+          String((response as { description?: string }).description).split(' | '),
+        )
+        .filter((code) => /^[A-Z_]+$/.test(code))
+        .sort();
+    const input = ['INTERNAL_ERROR', 'PAYLOAD_TOO_LARGE', 'UNAUTHENTICATED', 'VALIDATION_FAILED'];
+
+    it('names every orders component (I19)', () => {
+      expect(Object.keys(doc().components?.schemas ?? {})).toEqual(
+        expect.arrayContaining([
+          'CreateOrderDto',
+          'OrderReferenceParam',
+          'AdminOrdersQuery',
+          'CheckoutDto',
+          'OrderDto',
+          'OrderCourseDto',
+          'AdminOrderDto',
+          'OrderUserDto',
+        ]),
+      );
+    });
+
+    it('documents the DTO fields exactly', () => {
+      expect(propsOf('CheckoutDto')).toEqual(['order', 'paymentUrl']);
+      expect(propsOf('OrderDto')).toEqual([
+        'amountVnd',
+        'course',
+        'createdAt',
+        'expiresAt',
+        'failureCode',
+        'id',
+        'paidAt',
+        'reference',
+        'status',
+      ]);
+      expect(propsOf('OrderCourseDto')).toEqual(['id', 'slug', 'title']);
+      expect(propsOf('AdminOrderDto')).toEqual(
+        [
+          ...propsOf('OrderDto'),
+          'user',
+          'vnpBankCode',
+          'vnpCardType',
+          'vnpPayDate',
+          'vnpTransactionNo',
+        ].sort(),
+      );
+      expect(propsOf('OrderUserDto')).toEqual(['avatarUrl', 'displayName', 'id']);
+      expect(propsOf('CreateOrderDto')).toEqual(['courseId']);
+      expect(JSON.stringify(schema('OrderDto')?.properties?.status)).toContain('"failed"');
+    });
+
+    it('documents exactly the codes of each orders route (I18)', () => {
+      expect(codes('/orders', 'post')).toEqual(
+        [
+          ...input,
+          'FORBIDDEN',
+          'NOT_FOUND',
+          'COURSE_NOT_FOR_SALE',
+          'COURSE_ALREADY_OWNED',
+          'ORDER_PENDING',
+          'RATE_LIMITED',
+          'PAYMENTS_UNAVAILABLE',
+        ].sort(),
+      );
+      expect(codes('/orders/{reference}', 'get')).toEqual([...input, 'NOT_FOUND'].sort());
+      expect(codes('/admin/orders', 'get')).toEqual([...input, 'FORBIDDEN'].sort());
+    });
+
+    it('documents checkout as 201 (new order) and 200 (the live pending order, reused), both CheckoutDto (S16)', () => {
+      const responses = doc().paths['/orders']?.post?.responses ?? {};
+      for (const status of ['200', '201']) {
+        expect(JSON.stringify(responses[status])).toContain('#/components/schemas/CheckoutDto');
+      }
+    });
+
+    it('leaves the VNPAY IPN out: it is VNPAY’s contract, not xuan-web’s (S5)', () => {
+      expect(Object.keys(doc().paths).filter((path) => path.startsWith('/payments'))).toEqual([]);
     });
   });
 
