@@ -169,6 +169,7 @@ describe('OpenAPI document', () => {
       'get /courses',
       'get /courses/{slug}',
       'post /contact-submissions', // contact form: public, CSRF-checked
+      'post /coaching-registrations', // coaching registration forms: public, CSRF-checked
     ]);
     const methods = ['get', 'post', 'put', 'patch', 'delete'] as const;
     const missing: string[] = [];
