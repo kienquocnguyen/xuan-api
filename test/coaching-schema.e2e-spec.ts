@@ -42,9 +42,12 @@ describe('coaching_registrations invariants', () => {
       expertise: 'Dạy nấu ăn',
       goals: ['share_knowledge'],
       consented_at: new Date(),
+      notification_status: 'pending',
+      notification_attempted_at: new Date(),
       ...base,
       ...columns,
     };
+    for (const key of Object.keys(row)) if (row[key] === undefined) delete row[key];
     const names = Object.keys(row);
     return db.query<{ id: string }[]>(
       `INSERT INTO coaching_registrations (${names.map((n) => `"${n}"`).join(', ')}) VALUES (${names.map((_, i) => `$${i + 1}`).join(', ')}) RETURNING id`,
@@ -116,8 +119,43 @@ describe('coaching_registrations invariants', () => {
       { ...threeMonth, practice_commitment: 'maybe' },
     ],
     ['ck_coaching_registrations_status', { status: 'approved' }],
+    ['ck_coaching_registrations_notification_status', { notification_status: 'queued' }],
+    ['ck_coaching_registrations_notification_attempts', { notification_attempts: -1 }],
+    ['ck_coaching_registrations_notification_pending_attempt', { notification_attempted_at: null }],
+    [
+      'ck_coaching_registrations_notification_failed_error',
+      { notification_status: 'failed', notification_last_error: null },
+    ],
+    ['ck_coaching_registrations_notification_last_error', { notification_last_error: 'boom' }],
+    ['ck_coaching_registrations_notification_sent_pair', { notification_status: 'sent' }],
+    ['ck_coaching_registrations_notification_sent_pair', { notification_sent_at: new Date() }],
   ])('rejects a row breaking %s', async (constraint, columns) => {
     expect(await constraintOf(insert(columns))).toBe(constraint);
+  });
+
+  it('has no default notification status: every insert decides it (CR-12)', async () => {
+    const failure = await insert({ notification_status: undefined }).catch((error) => error);
+    expect(failure).toBeInstanceOf(QueryFailedError);
+    expect((failure.driverError as { code: string }).code).toBe('23502'); // not_null_violation
+  });
+
+  it('accepts sent, failed and never-attempted (NOT_CONFIGURED) notifications', async () => {
+    await insert({
+      notification_status: 'sent',
+      notification_sent_at: new Date(),
+      notification_provider_message_id: 'msg',
+    });
+    await insert({ notification_status: 'failed', notification_last_error: 'PROVIDER_REJECTED' });
+    await insert({
+      notification_status: 'failed',
+      notification_attempts: 0,
+      notification_attempted_at: null,
+      notification_last_error: 'NOT_CONFIGURED',
+    });
+    const [{ n }] = await db.query<{ n: number }[]>(
+      'SELECT count(*)::int AS n FROM coaching_registrations',
+    );
+    expect(n).toBe(3);
   });
 
   it('accepts other with its text on both programs, and a Kickstart other without text', async () => {

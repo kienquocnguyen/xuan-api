@@ -4,6 +4,7 @@ import { APP_CONFIG, AppConfigModule } from '../../config/app-config.module.js';
 import type { AppConfig } from '../../config/load-config.js';
 import { AdminCoachingRegistrationsController } from './coaching/admin-coaching-registrations.controller.js';
 import { CoachingInboxService } from './coaching/coaching-inbox.service.js';
+import { CoachingNotificationsService } from './coaching/coaching-notifications.service.js';
 import { CoachingRegistration } from './coaching/coaching-registration.entity.js';
 import { CoachingRegistrationsController } from './coaching/coaching-registrations.controller.js';
 import { CoachingRegistrationsService } from './coaching/coaching-registrations.service.js';
@@ -33,6 +34,7 @@ import { RECAPTCHA_VERIFIER } from './recaptcha/recaptcha.js';
     ContactInboxService,
     CoachingInboxService,
     ContactNotificationsService,
+    CoachingNotificationsService,
     HumanCheckService,
     // Gateways chosen from config (C5).
     {

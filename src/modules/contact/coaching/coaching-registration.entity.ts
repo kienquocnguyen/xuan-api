@@ -18,6 +18,8 @@ import {
   type PracticeCommitment,
   type YoutubeStage,
 } from './coaching-options.js';
+import type { NotificationStatus } from '../contact-submission.entity.js';
+import type { NotificationErrorCategory } from '../notifications/contact-notifier.js';
 
 const sqlList = (values: readonly string[]) =>
   `ARRAY[${values.map((value) => `'${value}'`).join(', ')}]::varchar[]`;
@@ -66,6 +68,27 @@ const sqlList = (values: readonly string[]) =>
   `"practice_commitment" IN ('can_commit', 'needs_arranging', 'unsure')`,
 )
 @Check('ck_coaching_registrations_status', `"status" IN ('new', 'contacted', 'archived')`)
+@Check(
+  'ck_coaching_registrations_notification_status',
+  `"notification_status" IN ('pending', 'sent', 'failed')`,
+)
+@Check('ck_coaching_registrations_notification_attempts', `"notification_attempts" >= 0`)
+@Check(
+  'ck_coaching_registrations_notification_pending_attempt',
+  `"notification_status" <> 'pending' OR "notification_attempted_at" IS NOT NULL`,
+)
+@Check(
+  'ck_coaching_registrations_notification_failed_error',
+  `"notification_status" <> 'failed' OR "notification_last_error" IS NOT NULL`,
+)
+@Check(
+  'ck_coaching_registrations_notification_last_error',
+  `"notification_last_error" IN ('NOT_CONFIGURED', 'TIMEOUT', 'NETWORK_ERROR', 'PROVIDER_REJECTED', 'PROVIDER_UNAVAILABLE', 'INVALID_RESPONSE')`,
+)
+@Check(
+  'ck_coaching_registrations_notification_sent_pair',
+  `("notification_status" = 'sent') = ("notification_sent_at" IS NOT NULL)`,
+)
 export class CoachingRegistration {
   @PrimaryColumn({
     type: 'uuid',
@@ -122,6 +145,34 @@ export class CoachingRegistration {
   /** HMAC of the client IP, for the per-IP limit only (CR-7). Never on the wire. */
   @Column({ name: 'client_ip_hash', type: 'varchar', length: 64, nullable: true })
   clientIpHash!: string | null;
+
+  /**
+   * Delivery of the business-inbox email (CR-12; the contact form's CF-10 states). No default: every insert decides
+   * it (`pending` with an attempt, or `failed` without a provider).
+   */
+  @Column({ name: 'notification_status', type: 'varchar', length: 16 })
+  notificationStatus!: NotificationStatus;
+
+  @Column({ name: 'notification_attempts', type: 'smallint', default: 0 })
+  notificationAttempts!: number;
+
+  /** When the latest attempt started; a `pending` row older than the retry window was interrupted (CF-12). */
+  @Column({ name: 'notification_attempted_at', type: 'timestamptz', nullable: true })
+  notificationAttemptedAt!: Date | null;
+
+  @Column({ name: 'notification_last_error', type: 'varchar', length: 32, nullable: true })
+  notificationLastError!: NotificationErrorCategory | null;
+
+  @Column({ name: 'notification_sent_at', type: 'timestamptz', nullable: true })
+  notificationSentAt!: Date | null;
+
+  @Column({
+    name: 'notification_provider_message_id',
+    type: 'varchar',
+    length: 200,
+    nullable: true,
+  })
+  notificationProviderMessageId!: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

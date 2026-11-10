@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import type { DataSource, EntityManager } from 'typeorm';
 import { APP_CONFIG } from '../../../config/app-config.module.js';
@@ -10,6 +10,8 @@ import { contactErrors } from '../contact.errors.js';
 import { HumanCheckService } from '../recaptcha/human-check.service.js';
 import { COACHING_RECAPTCHA_ACTION } from '../recaptcha/recaptcha.js';
 import { coachingErrors } from './coaching.errors.js';
+import { CoachingNotificationsService } from './coaching-notifications.service.js';
+import type { NotifiedRegistration } from './coaching-notification-email.js';
 import type { CreateCoachingRegistrationInput } from './dto/create-coaching-registration.dto.js';
 
 /** Accepted registrations per rolling hour (coaching registrations design CR-7). */
@@ -32,20 +34,7 @@ type Limits = {
 };
 
 /** The answers as stored: blank optional text is null, and the 3-month fields exist only on that program. */
-type StoredAnswers = Readonly<{
-  program: string;
-  name: string;
-  email: string;
-  youtubeStage: string;
-  youtubeChannelUrl: string | null;
-  expertise: string;
-  goals: readonly string[];
-  challenges: readonly string[];
-  challengeOther: string | null;
-  desiredOutcome: string | null;
-  practiceCommitment: string | null;
-  favoriteCreators: string | null;
-}>;
+type StoredAnswers = Omit<NotifiedRegistration, 'id' | 'createdAt'>;
 
 const blankToNull = (value: string | undefined): string | null => (value ? value : null);
 
@@ -70,14 +59,18 @@ function toStoredAnswers(input: CreateCoachingRegistrationInput): StoredAnswers 
 
 /**
  * The public coaching registration forms (coaching registrations design): duplicates answer like a success with
- * nothing written, and limits and reCAPTCHA guard the insert.
+ * nothing written, and limits and reCAPTCHA guard the insert. A new registration gets one notification attempt
+ * after it commits (CR-12); a duplicate gets none.
  */
 @Injectable()
 export class CoachingRegistrationsService {
+  private readonly logger = new Logger(CoachingRegistrationsService.name);
+
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly humanCheck: HumanCheckService,
+    private readonly notifications: CoachingNotificationsService,
   ) {}
 
   async submit(
@@ -112,20 +105,26 @@ export class CoachingRegistrationsService {
       throw new AppError(contactErrors.RECAPTCHA_VERIFICATION_FAILED);
     }
 
-    return this.dataSource.transaction(async (tx) => {
+    const notify = this.notifications.enabled;
+    const stored = await this.dataSource.transaction(async (tx) => {
       // Serializes registrations for one email, so check-then-insert can't race. I8: `tx` only.
       await this.lockEmail(tx, answers.email);
       const duplicate = await this.findDuplicate(tx, answers);
-      if (duplicate) return duplicate;
+      if (duplicate) return { id: null, ...duplicate }; // no second row, no second email
       await this.assertWithinLimits(tx, answers.email, ipHash);
-      // `consented_at` is the database's clock: the server's time of the visitor's consent (CR-9).
-      const [row] = await tx.query<CoachingReceipt[]>(
+      // `consented_at` is the database's clock: the server's time of the visitor's consent (CR-9). With a provider,
+      // the one notification attempt is claimed with the insert; without one, nothing will be attempted, so the
+      // notification is `failed` (`NOT_CONFIGURED`) from the start (CR-12, as the contact form's CF-10/CF-11).
+      const [row] = await tx.query<{ id: string; receivedAt: Date }[]>(
         `INSERT INTO coaching_registrations
            (program, name, email, youtube_stage, youtube_channel_url, expertise, goals, challenges,
             challenge_other, desired_outcome, practice_commitment, favorite_creators,
-            consented_at, client_ip_hash)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::varchar[], $8::varchar[], $9, $10, $11, $12, now(), $13)
-         RETURNING created_at AS "receivedAt"`,
+            consented_at, client_ip_hash,
+            notification_status, notification_attempts, notification_attempted_at, notification_last_error)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::varchar[], $8::varchar[], $9, $10, $11, $12, now(), $13,
+                 CASE WHEN $14::boolean THEN 'pending' ELSE 'failed' END, CASE WHEN $14 THEN 1 ELSE 0 END,
+                 CASE WHEN $14 THEN now() END, CASE WHEN $14 THEN NULL ELSE 'NOT_CONFIGURED' END)
+         RETURNING id, created_at AS "receivedAt"`,
         [
           answers.program,
           answers.name,
@@ -140,10 +139,26 @@ export class CoachingRegistrationsService {
           answers.practiceCommitment,
           answers.favoriteCreators,
           ipHash,
+          notify,
         ],
       );
       return row;
     });
+
+    if (stored.id === null) return { receivedAt: stored.receivedAt };
+    if (notify) {
+      // Awaited, never detached: the registration has committed, so this can't undo it, and it never throws.
+      await this.notifications.deliverNew({
+        id: stored.id,
+        ...answers,
+        createdAt: stored.receivedAt,
+      });
+    } else {
+      this.logger.warn(
+        `Coaching notification ${stored.id} not sent: no email provider configured.`,
+      );
+    }
+    return { receivedAt: stored.receivedAt };
   }
 
   /** Held until the transaction ends. */

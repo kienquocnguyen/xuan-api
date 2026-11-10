@@ -7,6 +7,7 @@ import { ApiErrorResponses } from '../../../http/openapi/api-error-responses.js'
 import { ApiPaginatedEnvelopeResponse } from '../../../http/openapi/api-paginated-envelope-response.js';
 import { ApiSchemaParameters } from '../../../http/openapi/api-schema-parameters.js';
 import { type Page, toPageInfo } from '../../../http/pagination/page.js';
+import { contactErrors } from '../contact.errors.js';
 import { CoachingInboxService } from './coaching-inbox.service.js';
 import {
   AdminCoachingRegistrationDto,
@@ -72,5 +73,25 @@ export class AdminCoachingRegistrationsController {
     @Param({ schema: coachingRegistrationIdParamSchema }) params: CoachingRegistrationIdParam,
   ): Promise<AdminCoachingRegistrationDto> {
     return toAdminCoachingRegistrationDto(await this.inbox.archive(params.registrationId));
+  }
+
+  // One attempt now when `notification.retryable`; otherwise the registration comes back unchanged (CR-12).
+  @Post(':registrationId/notification/retry')
+  @HttpCode(200)
+  @ApiSchemaParameters('path', coachingRegistrationIdParamSchema)
+  @ApiEnvelopeResponse(AdminCoachingRegistrationDto)
+  @ApiErrorResponses(
+    VALIDATION_FAILED,
+    UNAUTHENTICATED,
+    FORBIDDEN,
+    NOT_FOUND,
+    contactErrors.CONTACT_NOTIFICATIONS_UNAVAILABLE,
+  )
+  async retryNotification(
+    @Param({ schema: coachingRegistrationIdParamSchema }) params: CoachingRegistrationIdParam,
+  ): Promise<AdminCoachingRegistrationDto> {
+    return toAdminCoachingRegistrationDto(
+      await this.inbox.retryNotification(params.registrationId),
+    );
   }
 }

@@ -1375,5 +1375,47 @@ describe('OpenAPI document', () => {
       expect(JSON.stringify(schema.properties.practiceCommitment)).toContain('"nullable":true');
       expect(JSON.stringify(schema.properties.practiceCommitment)).toContain('can_commit');
     });
+
+    it('carries the notification state in its own named DTO (CR-12, I19)', () => {
+      const schema = (name: string) =>
+        schemas()[name] as { properties: Record<string, unknown> } | undefined;
+      expect(
+        JSON.stringify(schema('AdminCoachingRegistrationDto')?.properties.notification),
+      ).toContain('#/components/schemas/AdminCoachingNotificationDto');
+      const notification = schema('AdminCoachingNotificationDto');
+      expect(Object.keys(notification?.properties ?? {}).sort()).toEqual([
+        'attempts',
+        'lastAttemptAt',
+        'lastError',
+        'retryable',
+        'sentAt',
+        'status',
+      ]);
+      expect(JSON.stringify(notification?.properties.status)).toContain(
+        '["pending","sent","failed"]',
+      );
+      expect(JSON.stringify(notification?.properties.lastError)).toContain(
+        '["NOT_CONFIGURED","TIMEOUT","NETWORK_ERROR","PROVIDER_REJECTED","PROVIDER_UNAVAILABLE","INVALID_RESPONSE"]',
+      );
+      expect(JSON.stringify(schema('AdminCoachingRegistrationDto'))).not.toMatch(
+        /clientIpHash|providerMessageId/,
+      );
+    });
+
+    it('documents exactly the codes of the notification retry route (I18)', () => {
+      expect(
+        codes('/admin/coaching-registrations/{registrationId}/notification/retry', 'post'),
+      ).toEqual(
+        [
+          'CONTACT_NOTIFICATIONS_UNAVAILABLE',
+          'FORBIDDEN',
+          'INTERNAL_ERROR',
+          'NOT_FOUND',
+          'PAYLOAD_TOO_LARGE',
+          'UNAUTHENTICATED',
+          'VALIDATION_FAILED',
+        ].sort(),
+      );
+    });
   });
 });
