@@ -6,12 +6,12 @@
 
 ## 0. Status at a glance
 
-| Question | Answer |
-|---|---|
-| Is the backend contract final for FE? | **Yes.** Request/response shapes, enums and error codes below are stable contract identifiers (I19) |
-| Is it on production? | **No.** PR #31 is open, not merged, not deployed. Production does not expose these routes yet |
-| Can FE build now? | Yes, against this document and a locally generated snapshot (§11). Test end to end against a local xuan-api (`yarn start:dev`), where reCAPTCHA is skipped and no email is sent unless configured |
-| What does production need first? | Owner steps in §13–§15: reCAPTCHA keys, Resend domain + key, Vercel variables, the Neon migration, then the merge |
+| Question                              | Answer                                                                                                                                                                                            |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Is the backend contract final for FE? | **Yes.** Request/response shapes, enums and error codes below are stable contract identifiers (I19)                                                                                               |
+| Is it on production?                  | **No.** PR #31 is open, not merged, not deployed. Production does not expose these routes yet                                                                                                     |
+| Can FE build now?                     | Yes, against this document and a locally generated snapshot (§11). Test end to end against a local xuan-api (`yarn start:dev`), where reCAPTCHA is skipped and no email is sent unless configured |
+| What does production need first?      | Owner steps in §13–§15: reCAPTCHA keys, Resend domain + key, Vercel variables, the Neon migration, then the merge                                                                                 |
 
 ## 1. Public submit
 
@@ -48,24 +48,24 @@ What `202` means: **the message is stored** in the database. Show the thank-you 
 
 Send the value; show the label.
 
-| Value (send this) | Label (vi, show this) |
-|---|---|
-| `youtube_editing_course` | Hỏi về khóa học YouTube Editing Workflow |
-| `channel_kickstart_session` | Hỏi về buổi coaching Channel Kickstart Session |
+| Value (send this)           | Label (vi, show this)                            |
+| --------------------------- | ------------------------------------------------ |
+| `youtube_editing_course`    | Hỏi về khóa học YouTube Editing Workflow         |
+| `channel_kickstart_session` | Hỏi về buổi coaching Channel Kickstart Session   |
 | `youtube_coaching_3_months` | Hỏi về chương trình 3-Month 1:1 YouTube Coaching |
-| `general` | Liên hệ khác / Hợp tác |
+| `general`                   | Liên hệ khác / Hợp tác                           |
 
 The values are contract identifiers and won't change. The backend uses the same labels in the notification email. Labels never come over the wire, so keep this table in the web's constants.
 
 ## 3. Field rules (mirror them in the form for instant feedback)
 
-| Field | Rule (server) | Field codes on failure |
-|---|---|---|
-| `name` | trimmed; 1–100 characters; one line (no line breaks or control characters) | `REQUIRED`, `TOO_SHORT`, `TOO_LONG`, `INVALID` |
-| `email` | trimmed; valid email; ≤ 254; the server lowercases it | `REQUIRED`, `INVALID_FORMAT`, `TOO_LONG` |
-| `subject` | one of the four values | `REQUIRED`, `INVALID` |
-| `message` | line endings → `\n`; trimmed; 10–5 000 characters; newlines kept | `REQUIRED`, `TOO_SHORT`, `TOO_LONG`, `INVALID` |
-| `recaptchaToken` | non-empty string, ≤ 4 096; never stored | `REQUIRED`, `TOO_SHORT`, `TOO_LONG` |
+| Field            | Rule (server)                                                              | Field codes on failure                         |
+| ---------------- | -------------------------------------------------------------------------- | ---------------------------------------------- |
+| `name`           | trimmed; 1–100 characters; one line (no line breaks or control characters) | `REQUIRED`, `TOO_SHORT`, `TOO_LONG`, `INVALID` |
+| `email`          | trimmed; valid email; ≤ 254; the server lowercases it                      | `REQUIRED`, `INVALID_FORMAT`, `TOO_LONG`       |
+| `subject`        | one of the four values                                                     | `REQUIRED`, `INVALID`                          |
+| `message`        | line endings → `\n`; trimmed; 10–5 000 characters; newlines kept           | `REQUIRED`, `TOO_SHORT`, `TOO_LONG`, `INVALID` |
+| `recaptchaToken` | non-empty string, ≤ 4 096; never stored                                    | `REQUIRED`, `TOO_SHORT`, `TOO_LONG`            |
 
 - Characters are counted as Unicode code points (an emoji is one), after trimming. A value that is blank after trimming answers `TOO_SHORT` (not `REQUIRED`); `REQUIRED` means the field is missing or `null`.
 - A value of the wrong JSON type (e.g. `"name": 123`) answers `INVALID_TYPE` at that field.
@@ -85,7 +85,7 @@ The values are contract identifiers and won't change. The backend uses the same 
    );
    ```
    The action must be exactly **`contact_submit`**; the server refuses any other.
-3. Send it as `recaptchaToken`. A token works **once** and expires after **2 minutes** (the server also refuses a challenge older than 180 s). Get a **new token for every attempt**, including a retry after any error.
+3. Send it as `recaptchaToken`. A token works **once** and expires after **2 minutes**. Get a **new token for every attempt**, including a retry after any error.
 4. If `grecaptcha` failed to load (blocked script, offline), show the "temporarily unavailable" message (§5, 503 row) instead of sending a request without a token.
 5. Disable the submit button while a request is in flight. The backend also treats a double click as one submission.
 6. Privacy: if the badge is hidden with CSS, show Google's required notice near the button: "This site is protected by reCAPTCHA and the Google Privacy Policy and Terms of Service apply." (with both links). Mention reCAPTCHA in the site's privacy policy.
@@ -96,33 +96,40 @@ The server checks: Google's `success`, action `contact_submit`, a hostname in it
 
 Every error is the standard envelope: `{ "data": null, "error": { "code", "message", "details" } }`. Branch on `code`, never on `message` (English, user-safe).
 
-| Status | `error.code` | When | Suggested UI (vi) |
-|---|---|---|---|
-| 400 | `VALIDATION_FAILED` | A field breaks §3 (`details.fields[]`) | Field messages |
-| 403 | `RECAPTCHA_VERIFICATION_FAILED` | Token failed, reused, expired, low score, wrong action or host | "Không xác minh được, vui lòng thử lại." Get a **new** token and let them retry |
-| 403 | `FORBIDDEN` | Missing `X-Requested-With` or a foreign `Origin`: a bug | Generic error |
-| 413 | `PAYLOAD_TOO_LARGE` | Body over 100 kB (can't happen within the field limits) | Generic error |
-| 429 | `RATE_LIMITED` | Over 3 accepted submissions an hour for this email, or 5 an hour from this IP | "Bạn đã gửi nhiều lần, vui lòng thử lại sau." The `Retry-After` header (seconds) is readable through CORS |
-| 503 | `CONTACT_FORM_UNAVAILABLE` | Google unreachable, or reCAPTCHA not configured on the server | "Form tạm thời không khả dụng, vui lòng thử lại sau hoặc email trực tiếp." Don't auto-retry |
-| 500 | `INTERNAL_ERROR` | Anything unexpected | Generic error |
+| Status | `error.code`                    | When                                                                          | Suggested UI (vi)                                                                                         |
+| ------ | ------------------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| 400    | `VALIDATION_FAILED`             | A field breaks §3 (`details.fields[]`)                                        | Field messages                                                                                            |
+| 403    | `RECAPTCHA_VERIFICATION_FAILED` | Token failed, reused, expired, low score, wrong action or host                | "Không xác minh được, vui lòng thử lại." Get a **new** token and let them retry                           |
+| 403    | `FORBIDDEN`                     | Missing `X-Requested-With` or a foreign `Origin`: a bug                       | Generic error                                                                                             |
+| 413    | `PAYLOAD_TOO_LARGE`             | Body over 100 kB (can't happen within the field limits)                       | Generic error                                                                                             |
+| 429    | `RATE_LIMITED`                  | Over 3 accepted submissions an hour for this email, or 5 an hour from this IP | "Bạn đã gửi nhiều lần, vui lòng thử lại sau." The `Retry-After` header (seconds) is readable through CORS |
+| 503    | `CONTACT_FORM_UNAVAILABLE`      | Google unreachable, or reCAPTCHA not configured on the server                 | "Form tạm thời không khả dụng, vui lòng thử lại sau hoặc email trực tiếp." Don't auto-retry               |
+| 500    | `INTERNAL_ERROR`                | Anything unexpected                                                           | Generic error                                                                                             |
 
 Example (`429`):
 
 ```json
-{ "data": null, "error": { "code": "RATE_LIMITED", "message": "Too many requests. Try again in a moment.", "details": {} } }
+{
+  "data": null,
+  "error": {
+    "code": "RATE_LIMITED",
+    "message": "Too many requests. Try again in a moment.",
+    "details": {}
+  }
+}
 ```
 
 ## 6. Admin inbox: routes
 
 Admin role only. A session cookie is required (`credentials: 'include'`); writes also need `X-Requested-With`. Editors and users get `403`, so hide the inbox from them.
 
-| Method and path | Body | Answer |
-|---|---|---|
-| `GET /admin/contact-submissions?status=&page=&pageSize=` | — | `200 { data: { items: AdminContactSubmissionDto[], pageInfo } }` |
-| `GET /admin/contact-submissions/:submissionId` | — | `200 { data: AdminContactSubmissionDto }`. Does **not** mark it read |
-| `POST /admin/contact-submissions/:submissionId/read` | none | `200 { data: AdminContactSubmissionDto }` |
-| `POST /admin/contact-submissions/:submissionId/archive` | none | `200 { data: AdminContactSubmissionDto }` |
-| `POST /admin/contact-submissions/:submissionId/notification/retry` | none | `200 { data: AdminContactSubmissionDto }` |
+| Method and path                                                    | Body | Answer                                                               |
+| ------------------------------------------------------------------ | ---- | -------------------------------------------------------------------- |
+| `GET /admin/contact-submissions?status=&page=&pageSize=`           | —    | `200 { data: { items: AdminContactSubmissionDto[], pageInfo } }`     |
+| `GET /admin/contact-submissions/:submissionId`                     | —    | `200 { data: AdminContactSubmissionDto }`. Does **not** mark it read |
+| `POST /admin/contact-submissions/:submissionId/read`               | none | `200 { data: AdminContactSubmissionDto }`                            |
+| `POST /admin/contact-submissions/:submissionId/archive`            | none | `200 { data: AdminContactSubmissionDto }`                            |
+| `POST /admin/contact-submissions/:submissionId/notification/retry` | none | `200 { data: AdminContactSubmissionDto }`                            |
 
 Request components: `AdminContactSubmissionsQuery` (query), `ContactSubmissionIdParam` (path, a UUID).
 
@@ -166,11 +173,11 @@ Render `message` as **escaped plain text** with newlines kept (`white-space: pre
 
 The inbox is the source of truth for messages; the email is only a heads-up. One attempt is made per submission, during the submit request. There are **no automatic retries**.
 
-| `notification.status` | Meaning | Suggested badge |
-|---|---|---|
-| `sent` | Resend accepted the email (`sentAt` set). Not proof that it reached the mailbox | "Đã gửi email" |
-| `failed` | The attempt failed, or no email provider is configured (`lastError`) | "Gửi email lỗi" + retry button |
-| `pending` | An attempt is running right now, or it was interrupted (the request died). `retryable` turns `true` 10 minutes after `lastAttemptAt` | "Đang gửi…"; if `retryable`, show the retry button |
+| `notification.status` | Meaning                                                                                                                              | Suggested badge                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| `sent`                | Resend accepted the email (`sentAt` set). Not proof that it reached the mailbox                                                      | "Đã gửi email"                                     |
+| `failed`              | The attempt failed, or no email provider is configured (`lastError`)                                                                 | "Gửi email lỗi" + retry button                     |
+| `pending`             | An attempt is running right now, or it was interrupted (the request died). `retryable` turns `true` 10 minutes after `lastAttemptAt` | "Đang gửi…"; if `retryable`, show the retry button |
 
 `lastError` (a category, never provider text): `NOT_CONFIGURED` (no provider; `attempts` is 0), `TIMEOUT`, `NETWORK_ERROR`, `PROVIDER_REJECTED`, `PROVIDER_UNAVAILABLE`, `INVALID_RESPONSE`. It's cleared when a retry starts and once sent, so a `pending` notification has `lastError: null`.
 
@@ -199,8 +206,8 @@ The canonical workflow (`docs/api-contract.md` §0, §5): xuan-api produces the 
 
 ## 12. Frontend environment variables
 
-| Variable | Where | Value |
-|---|---|---|
+| Variable                         | Where                                            | Value                                                                    |
+| -------------------------------- | ------------------------------------------------ | ------------------------------------------------------------------------ |
 | `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` | xuan-web (all environments that show `/lien-he`) | The reCAPTCHA v3 **site** key (public). The secret never goes to the web |
 
 No other new web variable. The API base URL is unchanged.
@@ -227,16 +234,16 @@ No other new web variable. The API base URL is unchanged.
 
 ## 15. Owner setup: database, Vercel and activation order
 
-| # | Step | Notes |
-|---|---|---|
-| 1 | reCAPTCHA key (§13) | — |
-| 2 | Resend domain + key (§14) | DNS changes are yours |
-| 3 | Vercel → xuan-api → Production env: `RECAPTCHA_SECRET_KEY`, `RECAPTCHA_ALLOWED_HOSTNAMES`, (`RECAPTCHA_MIN_SCORE`), `RESEND_API_KEY`, `CONTACT_EMAIL_FROM`, `CONTACT_NOTIFICATION_TO` | `TRUST_PROXY_HOPS` can stay unset (production default 1, Vercel's edge). **No `CRON_SECRET` and no `vercel.json` cron**: scheduled retries were removed |
-| 4 | Vercel → xuan-web: `NEXT_PUBLIC_RECAPTCHA_SITE_KEY` | Public |
-| 5 | Neon production (`xuan_staging`): run `CreateContactSubmissions1793750400000` **before** the merge | The 2026-10-31 procedure: verified identity, a clean `git archive` of the commit being merged, DIRECT URL with `sslmode=verify-full`, a backup branch first. Additive: one new table, 3 indexes, no FK, no change to existing rows. `down()` drops the table (only safe while it's empty) |
-| 6 | Merge PR #31 into `dev` | Vercel's production branch is `dev`, so this deploys |
-| 7 | Production smoke test | below |
-| 8 | xuan-web: pull the production snapshot, ship the form and the inbox | — |
+| #   | Step                                                                                                                                                                                  | Notes                                                                                                                                                                                                                                                                                     |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | reCAPTCHA key (§13)                                                                                                                                                                   | —                                                                                                                                                                                                                                                                                         |
+| 2   | Resend domain + key (§14)                                                                                                                                                             | DNS changes are yours                                                                                                                                                                                                                                                                     |
+| 3   | Vercel → xuan-api → Production env: `RECAPTCHA_SECRET_KEY`, `RECAPTCHA_ALLOWED_HOSTNAMES`, (`RECAPTCHA_MIN_SCORE`), `RESEND_API_KEY`, `CONTACT_EMAIL_FROM`, `CONTACT_NOTIFICATION_TO` | `TRUST_PROXY_HOPS` can stay unset (production default 1, Vercel's edge). **No `CRON_SECRET` and no `vercel.json` cron**: scheduled retries were removed                                                                                                                                   |
+| 4   | Vercel → xuan-web: `NEXT_PUBLIC_RECAPTCHA_SITE_KEY`                                                                                                                                   | Public                                                                                                                                                                                                                                                                                    |
+| 5   | Neon production (`xuan_staging`): run `CreateContactSubmissions1793750400000` **before** the merge                                                                                    | The 2026-10-31 procedure: verified identity, a clean `git archive` of the commit being merged, DIRECT URL with `sslmode=verify-full`, a backup branch first. Additive: one new table, 3 indexes, no FK, no change to existing rows. `down()` drops the table (only safe while it's empty) |
+| 6   | Merge PR #31 into `dev`                                                                                                                                                               | Vercel's production branch is `dev`, so this deploys                                                                                                                                                                                                                                      |
+| 7   | Production smoke test                                                                                                                                                                 | below                                                                                                                                                                                                                                                                                     |
+| 8   | xuan-web: pull the production snapshot, ship the form and the inbox                                                                                                                   | —                                                                                                                                                                                                                                                                                         |
 
 Before steps 1–3 a deployed form answers `503` (safe). Without step 5 the contact routes answer `500` (table missing); nothing else breaks.
 
@@ -252,15 +259,15 @@ Before steps 1–3 a deployed form answers `503` (safe). Without step 5 the cont
 
 ## 16. Verified on the backend (2026-11-03)
 
-| Item | State |
-|---|---|
-| Implementation (module, migration, gateways, one-attempt notification, manual retry, inbox, docs) | Done on PR #31 |
-| Unit tests, lint, typecheck, format, build | Pass (see the PR for the exact run) |
-| E2E on `xuan_test` (submission, reCAPTCHA, limits, duplicates and concurrency, notification sent/failed/not configured/lost response, inbox, retry and concurrent retry, constraints, OpenAPI) | Pass |
-| Migration run → `\d+` → revert → run → second `migration:generate` empty, on `xuan_test` | Pass |
-| `xuan_dev`, Neon | **Not run** |
-| Google reCAPTCHA, Resend, Vercel variables | **Not configured, not verified** |
-| Production | **Not deployed, not verified** |
+| Item                                                                                                                                                                                           | State                               |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| Implementation (module, migration, gateways, one-attempt notification, manual retry, inbox, docs)                                                                                              | Done on PR #31                      |
+| Unit tests, lint, typecheck, format, build                                                                                                                                                     | Pass (see the PR for the exact run) |
+| E2E on `xuan_test` (submission, reCAPTCHA, limits, duplicates and concurrency, notification sent/failed/not configured/lost response, inbox, retry and concurrent retry, constraints, OpenAPI) | Pass                                |
+| Migration run → `\d+` → revert → run → second `migration:generate` empty, on `xuan_test`                                                                                                       | Pass                                |
+| `xuan_dev`, Neon                                                                                                                                                                               | **Not run**                         |
+| Google reCAPTCHA, Resend, Vercel variables                                                                                                                                                     | **Not configured, not verified**    |
+| Production                                                                                                                                                                                     | **Not deployed, not verified**      |
 
 ## 17. Known limitations
 

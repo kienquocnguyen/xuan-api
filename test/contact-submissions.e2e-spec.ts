@@ -247,7 +247,7 @@ describe('POST /contact-submissions (contact form design §3)', () => {
       ['a low score', { score: 0.3 }],
       ['another action', { action: 'login' }],
       ['another hostname', { hostname: 'evil.example' }],
-      ['an old challenge', { challengeTs: new Date(Date.now() - 600_000).toISOString() }],
+      ['an expired or reused token', { success: false, errorCodes: ['timeout-or-duplicate'] }],
     ])('refuses %s with 403 and stores nothing', async (_name, answer) => {
       fakeRecaptcha(app).willAnswer('bad', answer);
       const res = await submit({ recaptchaToken: 'bad' });
@@ -261,6 +261,14 @@ describe('POST /contact-submissions (contact form design §3)', () => {
     it('accepts a token from the allowed hostname at the threshold', async () => {
       fakeRecaptcha(app).willAnswer('edge', { score: 0.5, hostname: RECAPTCHA_TEST_HOSTNAME });
       expect((await submit({ recaptchaToken: 'edge' })).status).toBe(202);
+    });
+
+    it('accepts a valid token whose challenge loaded 10 minutes ago (expiry is left to Google)', async () => {
+      fakeRecaptcha(app).willAnswer('slow-writer', {
+        challengeTs: new Date(Date.now() - 600_000).toISOString(),
+      });
+      expect((await submit({ recaptchaToken: 'slow-writer' })).status).toBe(202);
+      expect(await rows()).toHaveLength(1);
     });
 
     it('refuses a token used a second time for another message', async () => {
