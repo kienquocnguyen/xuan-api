@@ -13,7 +13,7 @@ import {
   NOTIFICATION_ERROR_CATEGORIES,
   type NotificationErrorCategory,
 } from '../notifications/contact-notifier.js';
-import { STALE_ATTEMPT_SECONDS } from '../notifications/contact-notifications.service.js';
+import { isNotificationRetryable } from '../notifications/notification-retryable.js';
 
 export const adminContactSubmissionsQuerySchema = z
   .strictObject({
@@ -58,19 +58,6 @@ export class AdminContactSubmissionDto {
 
 const iso = (instant: Date | null) => (instant ? instant.toISOString() : null);
 
-/**
- * Same rule as the retry claim (ContactNotificationsService.retry), on the app's clock rather than the database's:
- * near the boundary a retry may claim nothing, and its answer shows the state as it is.
- */
-function isRetryable(row: ContactSubmission, now: Date): boolean {
-  if (row.notificationStatus === 'failed') return true;
-  return (
-    row.notificationStatus === 'pending' &&
-    row.notificationAttemptedAt !== null &&
-    now.getTime() - row.notificationAttemptedAt.getTime() > STALE_ATTEMPT_SECONDS * 1000
-  );
-}
-
 /** Whitelist by construction (I10). */
 export function toAdminContactSubmissionDto(
   row: ContactSubmission,
@@ -89,7 +76,7 @@ export function toAdminContactSubmissionDto(
       lastAttemptAt: iso(row.notificationAttemptedAt),
       lastError: row.notificationLastError,
       sentAt: iso(row.notificationSentAt),
-      retryable: isRetryable(row, now),
+      retryable: isNotificationRetryable(row, now),
     },
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

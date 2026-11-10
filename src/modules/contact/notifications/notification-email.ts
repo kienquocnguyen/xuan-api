@@ -21,7 +21,8 @@ const vietnamTime = new Intl.DateTimeFormat('en-GB', {
   second: '2-digit',
 });
 
-function formatVietnamTime(instant: Date): string {
+/** `HH:mm:ss dd/MM/yyyy` in Asia/Ho_Chi_Minh, for the business-inbox emails. */
+export function formatVietnamTime(instant: Date): string {
   const part = Object.fromEntries(
     vietnamTime.formatToParts(instant).map(({ type, value }) => [type, value]),
   );
