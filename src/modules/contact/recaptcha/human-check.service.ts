@@ -3,6 +3,7 @@ import { APP_CONFIG } from '../../../config/app-config.module.js';
 import type { AppConfig } from '../../../config/load-config.js';
 import {
   assessRecaptcha,
+  challengeAgeSeconds,
   RECAPTCHA_VERIFIER,
   RecaptchaUnavailableError,
   type RecaptchaVerifier,
@@ -28,9 +29,12 @@ export class HumanCheckService {
     let verdict: string;
     try {
       const result = await this.recaptcha.verify(token, clientIp);
-      verdict = assessRecaptcha(result, settings, new Date(), action);
-      if (verdict !== 'pass' && result.errorCodes.length > 0)
-        verdict += ` (${result.errorCodes.join(', ')})`;
+      verdict = assessRecaptcha(result, settings, action);
+      if (verdict !== 'pass') {
+        if (result.errorCodes.length > 0) verdict += ` (${result.errorCodes.join(', ')})`;
+        const age = challengeAgeSeconds(result, new Date());
+        if (age !== null) verdict += `, challenge loaded ${age}s ago`;
+      }
     } catch (error) {
       if (!(error instanceof RecaptchaUnavailableError)) throw error;
       this.logger.warn(error.message);

@@ -410,6 +410,19 @@ describe('POST /coaching-registrations (coaching registrations design)', () => {
       expect(await rows()).toEqual([]);
     });
 
+    it('202 for a valid token whose challenge loaded 10 minutes ago (a long form, 2026-11-10 incident)', async () => {
+      fakeRecaptcha(app).willAnswer('slow-writer', {
+        action: COACHING_RECAPTCHA_ACTION,
+        challengeTs: new Date(Date.now() - 600_000).toISOString(),
+      });
+      const res = await server()
+        .post('/coaching-registrations')
+        .set(XHR)
+        .send({ ...kickstart, recaptchaToken: 'slow-writer' });
+      expect(res.status).toBe(202);
+      expect(await rows()).toHaveLength(1);
+    });
+
     it('503 COACHING_REGISTRATION_UNAVAILABLE on a Google outage', async () => {
       fakeRecaptcha(app).willAnswer('down', 'unavailable');
       const res = await server()

@@ -85,7 +85,7 @@ The values are contract identifiers and won't change. The backend uses the same 
    );
    ```
    The action must be exactly **`contact_submit`**; the server refuses any other.
-3. Send it as `recaptchaToken`. A token works **once** and expires after **2 minutes** (the server also refuses a challenge older than 180 s). Get a **new token for every attempt**, including a retry after any error.
+3. Send it as `recaptchaToken`. A token works **once** and expires after **2 minutes**. Get a **new token for every attempt**, including a retry after any error.
 4. If `grecaptcha` failed to load (blocked script, offline), show the "temporarily unavailable" message (§5, 503 row) instead of sending a request without a token.
 5. Disable the submit button while a request is in flight. The backend also treats a double click as one submission.
 6. Privacy: if the badge is hidden with CSS, show Google's required notice near the button: "This site is protected by reCAPTCHA and the Google Privacy Policy and Terms of Service apply." (with both links). Mention reCAPTCHA in the site's privacy policy.

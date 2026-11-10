@@ -1,6 +1,7 @@
 import { GoogleRecaptchaVerifier } from './google-recaptcha-verifier.js';
 import {
   assessRecaptcha,
+  challengeAgeSeconds,
   COACHING_RECAPTCHA_ACTION,
   RECAPTCHA_ACTION,
   RecaptchaUnavailableError,
@@ -19,18 +20,24 @@ const passing: SiteVerifyResult = {
 };
 
 describe('assessRecaptcha (contact form design CF-4)', () => {
-  it('passes a successful, fresh, human-scored token for our action and host', () => {
-    expect(assessRecaptcha(passing, policy, now, RECAPTCHA_ACTION)).toBe('pass');
-    expect(assessRecaptcha({ ...passing, score: 0.5 }, policy, now, RECAPTCHA_ACTION)).toBe('pass');
+  it('passes a successful, human-scored token for our action and host', () => {
+    expect(assessRecaptcha(passing, policy, RECAPTCHA_ACTION)).toBe('pass');
+    expect(assessRecaptcha({ ...passing, score: 0.5 }, policy, RECAPTCHA_ACTION)).toBe('pass');
     expect(
-      assessRecaptcha(
-        { ...passing, hostname: 'WWW.xuancreative.com' },
-        policy,
-        now,
-        RECAPTCHA_ACTION,
-      ),
+      assessRecaptcha({ ...passing, hostname: 'WWW.xuancreative.com' }, policy, RECAPTCHA_ACTION),
     ).toBe('pass');
   });
+
+  it.each([
+    ['loaded 10 minutes ago', '2026-11-03T09:50:00Z'],
+    ['loaded an hour ago', '2026-11-03T09:00:00Z'],
+    ['with no challenge time', undefined],
+  ])(
+    'leaves expiry to Google: an otherwise valid token %s passes (CF-4, revised 2026-11-11)',
+    (_name, challengeTs) => {
+      expect(assessRecaptcha({ ...passing, challengeTs }, policy, RECAPTCHA_ACTION)).toBe('pass');
+    },
+  );
 
   it.each([
     [
@@ -43,19 +50,27 @@ describe('assessRecaptcha (contact form design CF-4)', () => {
     ['wrong_hostname', { ...passing, hostname: undefined }],
     ['low_score', { ...passing, score: 0.49 }],
     ['low_score', { ...passing, score: undefined }],
-    ['stale_challenge', { ...passing, challengeTs: '2026-11-03T09:56:59Z' }],
-    ['stale_challenge', { ...passing, challengeTs: '2026-11-03T10:01:01Z' }],
-    ['stale_challenge', { ...passing, challengeTs: 'yesterday' }],
-    ['stale_challenge', { ...passing, challengeTs: undefined }],
   ])('refuses with %s', (reason, result) => {
-    expect(assessRecaptcha(result as SiteVerifyResult, policy, now, RECAPTCHA_ACTION)).toBe(reason);
+    expect(assessRecaptcha(result as SiteVerifyResult, policy, RECAPTCHA_ACTION)).toBe(reason);
   });
 
   it('binds the token to the form it was issued for', () => {
-    expect(assessRecaptcha(passing, policy, now, COACHING_RECAPTCHA_ACTION)).toBe('wrong_action');
+    expect(assessRecaptcha(passing, policy, COACHING_RECAPTCHA_ACTION)).toBe('wrong_action');
     const coaching = { ...passing, action: COACHING_RECAPTCHA_ACTION };
-    expect(assessRecaptcha(coaching, policy, now, COACHING_RECAPTCHA_ACTION)).toBe('pass');
-    expect(assessRecaptcha(coaching, policy, now, RECAPTCHA_ACTION)).toBe('wrong_action');
+    expect(assessRecaptcha(coaching, policy, COACHING_RECAPTCHA_ACTION)).toBe('pass');
+    expect(assessRecaptcha(coaching, policy, RECAPTCHA_ACTION)).toBe('wrong_action');
+  });
+});
+
+describe('challengeAgeSeconds (for the refusal log only)', () => {
+  it.each([
+    ['2026-11-03T09:59:30Z', 30],
+    ['2026-11-03T09:50:00Z', 600],
+    ['2026-11-03T10:00:05Z', -5],
+    ['yesterday', null],
+    [undefined, null],
+  ])('measures a challenge loaded at %s as %s seconds old', (challengeTs, age) => {
+    expect(challengeAgeSeconds({ ...passing, challengeTs }, now)).toBe(age);
   });
 });
 

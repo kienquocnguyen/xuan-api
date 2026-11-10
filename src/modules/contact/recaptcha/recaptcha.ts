@@ -4,10 +4,6 @@ export const RECAPTCHA_ACTION = 'contact_submit';
 /** The action name the web passes to `grecaptcha.execute` for the coaching registration form (contract identifier). */
 export const COACHING_RECAPTCHA_ACTION = 'coaching_registration_submit';
 
-/** Tokens live 2 minutes at Google; the extra minute absorbs clock skew. */
-const MAX_CHALLENGE_AGE_MS = 180_000;
-const MAX_CLOCK_AHEAD_MS = 60_000;
-
 /** Google's siteverify answer, camel-cased. Google itself refuses reused or expired tokens. */
 export type SiteVerifyResult = Readonly<{
   success: boolean;
@@ -35,13 +31,16 @@ export class RecaptchaUnavailableError extends Error {
 
 export type RecaptchaPolicy = Readonly<{ allowedHostnames: readonly string[]; minScore: number }>;
 export type RecaptchaVerdict =
-  'pass' | 'not_successful' | 'wrong_action' | 'wrong_hostname' | 'low_score' | 'stale_challenge';
+  'pass' | 'not_successful' | 'wrong_action' | 'wrong_hostname' | 'low_score';
 
-/** Our own checks on top of Google's (contact form design CF-4). The verdict is logged, never sent. */
+/**
+ * Our own checks on top of Google's (contact form design CF-4). The verdict is logged, never sent.
+ * Token expiry and reuse are left to Google (`timeout-or-duplicate`): `challenge_ts` is when the
+ * widget loaded, not when the token was made, so an age bound refused people who took their time.
+ */
 export function assessRecaptcha(
   result: SiteVerifyResult,
   policy: RecaptchaPolicy,
-  now: Date,
   expectedAction: string,
 ): RecaptchaVerdict {
   if (!result.success) return 'not_successful';
@@ -49,9 +48,11 @@ export function assessRecaptcha(
   if (!result.hostname || !policy.allowedHostnames.includes(result.hostname.toLowerCase()))
     return 'wrong_hostname';
   if (result.score === undefined || result.score < policy.minScore) return 'low_score';
-  const issued = result.challengeTs ? Date.parse(result.challengeTs) : Number.NaN;
-  const age = now.getTime() - issued;
-  if (Number.isNaN(issued) || age > MAX_CHALLENGE_AGE_MS || age < -MAX_CLOCK_AHEAD_MS)
-    return 'stale_challenge';
   return 'pass';
+}
+
+/** Seconds since the reCAPTCHA challenge loaded (negative if Google's clock is ahead), or null. For logs only. */
+export function challengeAgeSeconds(result: SiteVerifyResult, now: Date): number | null {
+  const loaded = result.challengeTs ? Date.parse(result.challengeTs) : Number.NaN;
+  return Number.isNaN(loaded) ? null : Math.round((now.getTime() - loaded) / 1000);
 }
