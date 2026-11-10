@@ -72,6 +72,8 @@ export class AdminCoachingRegistrationDto {
   @ApiProperty({ type: String, enum: PRACTICE_COMMITMENTS, nullable: true })
   practiceCommitment!: PracticeCommitment | null;
   @ApiProperty({ type: String, nullable: true }) favoriteCreators!: string | null;
+  /** Canonical: `+84` and 9 digits for Vietnam, else `+` and 8 to 15 digits (CR-13). */
+  @ApiProperty({ type: String, nullable: true, example: '+84912345678' }) phone!: string | null;
   @ApiProperty({ enum: COACHING_REGISTRATION_STATUSES }) status!: CoachingRegistrationStatus;
   @ApiProperty({ type: AdminCoachingNotificationDto }) notification!: AdminCoachingNotificationDto;
   @ApiProperty({ format: 'date-time' }) consentedAt!: string;
@@ -100,6 +102,7 @@ export function toAdminCoachingRegistrationDto(
     desiredOutcome: row.desiredOutcome,
     practiceCommitment: row.practiceCommitment,
     favoriteCreators: row.favoriteCreators,
+    phone: row.phone,
     status: row.status,
     notification: {
       status: row.notificationStatus,

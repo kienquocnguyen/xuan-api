@@ -39,6 +39,10 @@ const sqlList = (values: readonly string[]) =>
 @Check('ck_coaching_registrations_name_not_blank', `"name" ~ '[^[:space:]]'`)
 @Check('ck_coaching_registrations_email_lowercase', `"email" = lower("email")`)
 @Check(
+  'ck_coaching_registrations_phone_format',
+  `"phone" IS NULL OR ("phone" ~ '^[+][1-9][0-9]{7,14}$' AND ("phone" NOT LIKE '+84%' OR "phone" ~ '^[+]84[0-9]{9}$'))`,
+)
+@Check(
   'ck_coaching_registrations_youtube_stage',
   `"youtube_stage" IN ('not_started', 'has_channel')`,
 )
@@ -134,6 +138,10 @@ export class CoachingRegistration {
 
   @Column({ name: 'favorite_creators', type: 'varchar', length: 2000, nullable: true })
   favoriteCreators!: string | null;
+
+  /** Optional, stored canonically: `+84` + 9 digits for Vietnam, else E.164 (CR-13). Personal data: never logged. */
+  @Column({ name: 'phone', type: 'varchar', length: 16, nullable: true })
+  phone!: string | null;
 
   /** The server's time of the visitor's consent (CR-9). */
   @Column({ name: 'consented_at', type: 'timestamptz' })

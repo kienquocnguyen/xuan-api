@@ -54,6 +54,7 @@ function toStoredAnswers(input: CreateCoachingRegistrationInput): StoredAnswers 
     desiredOutcome: threeMonth ? input.desiredOutcome : null,
     practiceCommitment: threeMonth ? input.practiceCommitment : null,
     favoriteCreators: blankToNull(input.favoriteCreators),
+    phone: blankToNull(input.phone),
   };
 }
 
@@ -118,12 +119,12 @@ export class CoachingRegistrationsService {
       const [row] = await tx.query<{ id: string; receivedAt: Date }[]>(
         `INSERT INTO coaching_registrations
            (program, name, email, youtube_stage, youtube_channel_url, expertise, goals, challenges,
-            challenge_other, desired_outcome, practice_commitment, favorite_creators,
+            challenge_other, desired_outcome, practice_commitment, favorite_creators, phone,
             consented_at, client_ip_hash,
             notification_status, notification_attempts, notification_attempted_at, notification_last_error)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::varchar[], $8::varchar[], $9, $10, $11, $12, now(), $13,
-                 CASE WHEN $14::boolean THEN 'pending' ELSE 'failed' END, CASE WHEN $14 THEN 1 ELSE 0 END,
-                 CASE WHEN $14 THEN now() END, CASE WHEN $14 THEN NULL ELSE 'NOT_CONFIGURED' END)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::varchar[], $8::varchar[], $9, $10, $11, $12, $14, now(), $13,
+                 CASE WHEN $15::boolean THEN 'pending' ELSE 'failed' END, CASE WHEN $15 THEN 1 ELSE 0 END,
+                 CASE WHEN $15 THEN now() END, CASE WHEN $15 THEN NULL ELSE 'NOT_CONFIGURED' END)
          RETURNING id, created_at AS "receivedAt"`,
         [
           answers.program,
@@ -139,6 +140,7 @@ export class CoachingRegistrationsService {
           answers.practiceCommitment,
           answers.favoriteCreators,
           ipHash,
+          answers.phone,
           notify,
         ],
       );
@@ -168,7 +170,7 @@ export class CoachingRegistrationsService {
     ]);
   }
 
-  /** Same email, program, name and every answer within 24 hours (CR-8); null equals null. */
+  /** Same email, program, name and every answer, phone included (CR-13), within 24 hours (CR-8); null equals null. */
   private async findDuplicate(
     manager: EntityManager,
     answers: StoredAnswers,
@@ -186,6 +188,7 @@ export class CoachingRegistrationsService {
           AND desired_outcome IS NOT DISTINCT FROM $9
           AND practice_commitment IS NOT DISTINCT FROM $10
           AND favorite_creators IS NOT DISTINCT FROM $11
+          AND phone IS NOT DISTINCT FROM $13
           AND created_at > now() - interval '24 hours'
         ORDER BY created_at LIMIT 1`,
       [
@@ -201,6 +204,7 @@ export class CoachingRegistrationsService {
         answers.practiceCommitment,
         answers.favoriteCreators,
         answers.name,
+        answers.phone,
       ],
     );
     return row ?? null;

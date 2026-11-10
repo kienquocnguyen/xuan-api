@@ -37,6 +37,7 @@ const kickstart: NotifiedRegistration = {
   desiredOutcome: null,
   practiceCommitment: null,
   favoriteCreators: 'Kênh A',
+  phone: '+84912345678',
   createdAt: new Date('2026-11-10T02:05:09Z'),
 };
 const threeMonth: NotifiedRegistration = {
@@ -53,6 +54,7 @@ const threeMonth: NotifiedRegistration = {
   desiredOutcome: 'Có kênh đều đặn.',
   practiceCommitment: 'needs_arranging',
   favoriteCreators: null,
+  phone: null,
 };
 
 describe('buildCoachingNotificationEmail (CR-12)', () => {
@@ -66,6 +68,7 @@ describe('buildCoachingNotificationEmail (CR-12)', () => {
         '',
         'Họ tên: Nguyễn Văn A',
         'Email: a@example.com',
+        'Số điện thoại: +84912345678',
         'Chương trình: Channel Kickstart Session',
         'Thời gian: 09:05:09 10/11/2026 (giờ Việt Nam)',
         'Mã đăng ký: 01900000-0000-7000-8000-000000000001',
@@ -129,6 +132,7 @@ describe('buildCoachingNotificationEmail (CR-12)', () => {
         '',
       ].join('\n'),
     );
+    expect(text).toContain('Email: b@example.com\nSố điện thoại: Không có\nChương trình:');
     expect(text).not.toContain('Chia sẻ thêm:'); // `other` not chosen
     expect(text).not.toMatch(/still_exploring|needs_arranging|hard_to_stay_consistent|not_started/);
   });
@@ -191,6 +195,7 @@ describe('CoachingRegistrationsService and its notification (CR-12)', () => {
     challenges: ['too_many_topics', 'other'],
     challengeOther: 'Thiếu thời gian',
     favoriteCreators: 'Kênh A',
+    phone: '+84912345678',
     consent: true,
     recaptchaToken: 'token-1',
   } as unknown as CreateCoachingRegistrationInput;
@@ -221,6 +226,25 @@ describe('CoachingRegistrationsService and its notification (CR-12)', () => {
     expect(db.updates()).toHaveLength(1);
     expect(db.updates()[0].sql).toContain(`notification_status = 'sent'`);
     expect(db.updates()[0].params).toEqual([kickstart.id, 'msg_1']);
+  });
+
+  it('stores the phone and compares it when looking for a duplicate (CR-13); blank is null', async () => {
+    const { service, db } = setup(fakeNotifier(true));
+    await service.submit(input, null);
+    const duplicateChecks = () =>
+      db.statements.filter(({ sql }) =>
+        sql.includes('AS "receivedAt" FROM coaching_registrations'),
+      );
+    expect(db.insert()?.sql).toMatch(/favorite_creators,\s+phone,/);
+    expect(db.insert()?.params).toContain('+84912345678');
+    for (const check of duplicateChecks()) {
+      expect(check.sql).toContain('phone IS NOT DISTINCT FROM');
+      expect(check.params).toContain('+84912345678');
+    }
+
+    const blank = setup(fakeNotifier(true));
+    await blank.service.submit({ ...input, phone: '' } as CreateCoachingRegistrationInput, null);
+    expect(blank.db.insert()?.params).not.toContain('');
   });
 
   it('provider failure: still answers the receipt and records failed with the category only', async () => {
@@ -323,6 +347,11 @@ describe('AdminCoachingRegistrationDto.notification', () => {
       retryable: false,
     });
     expect(JSON.stringify(dto)).not.toMatch(/msg_1|clientIpHash|f{64}/);
+  });
+
+  it('shows the phone, or null when none was given (CR-13)', () => {
+    expect(toAdminCoachingRegistrationDto(row({}), now).phone).toBe('+84912345678');
+    expect(toAdminCoachingRegistrationDto(row({ phone: null }), now).phone).toBeNull();
   });
 
   it('is retryable when failed, or pending past the stale window, and not while an attempt runs', () => {

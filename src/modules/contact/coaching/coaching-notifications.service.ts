@@ -20,7 +20,7 @@ const REGISTRATION_COLUMNS = `id, program, name, email, youtube_stage AS "youtub
   youtube_channel_url AS "youtubeChannelUrl", expertise, goals, challenges,
   challenge_other AS "challengeOther", desired_outcome AS "desiredOutcome",
   practice_commitment AS "practiceCommitment", favorite_creators AS "favoriteCreators",
-  created_at AS "createdAt"`;
+  phone, created_at AS "createdAt"`;
 
 /**
  * The business-inbox email for a new coaching registration (CR-12), on the contact form's notifier and rules
