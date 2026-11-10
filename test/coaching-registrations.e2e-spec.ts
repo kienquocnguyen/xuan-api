@@ -36,6 +36,7 @@ const kickstart = {
   challenges: ['too_many_topics', 'other'],
   challengeOther: ' Thiếu thời gian ',
   favoriteCreators: ' Kênh A, kênh B ',
+  phone: ' 091-234 5678 ',
   consent: true,
 };
 const threeMonth = {
@@ -65,6 +66,7 @@ type StoredRow = {
   desired_outcome: string | null;
   practice_commitment: string | null;
   favorite_creators: string | null;
+  phone: string | null;
   consented_at: Date;
   status: string;
   client_ip_hash: string | null;
@@ -133,6 +135,7 @@ describe('POST /coaching-registrations (coaching registrations design)', () => {
         desired_outcome: null,
         practice_commitment: null,
         favorite_creators: 'Kênh A, kênh B',
+        phone: '+84912345678',
         consented_at: expect.any(Date),
         status: 'new',
         client_ip_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
@@ -161,9 +164,21 @@ describe('POST /coaching-registrations (coaching registrations design)', () => {
           youtube_channel_url: null,
           challenge_other: null,
           favorite_creators: null,
+          phone: null,
         }),
       ]);
     });
+
+    it.each([
+      ['a Vietnamese number with +84', '+84 91 234 56 78', '+84912345678'],
+      ['an international number', '+44 (20) 7946-0958', '+442079460958'],
+    ])(
+      'stores %s on the 3-month form in its canonical form (CR-13)',
+      async (_name, phone, stored) => {
+        expect((await submit({ ...threeMonth, phone })).status).toBe(202);
+        expect((await rows()).map((row) => row.phone)).toEqual([stored]);
+      },
+    );
 
     it('stores blank optional fields as NULL', async () => {
       const res = await submit({
@@ -173,6 +188,7 @@ describe('POST /coaching-registrations (coaching registrations design)', () => {
         challenges: ['too_many_topics'],
         challengeOther: '   ',
         favoriteCreators: '',
+        phone: '   ',
       });
       expect(res.status).toBe(202);
       expect(await rows()).toEqual([
@@ -180,6 +196,7 @@ describe('POST /coaching-registrations (coaching registrations design)', () => {
           youtube_channel_url: null,
           challenge_other: null,
           favorite_creators: null,
+          phone: null,
         }),
       ]);
     });
@@ -217,6 +234,25 @@ describe('POST /coaching-registrations (coaching registrations design)', () => {
       await submit({ ...kickstart, goals: ['share_knowledge'] });
       await submit({ ...kickstart, favoriteCreators: undefined });
       expect(await rows()).toHaveLength(3);
+    });
+
+    it('stores a removed or changed phone as a new row (CR-13)', async () => {
+      await submit();
+      await submit({ ...kickstart, phone: undefined });
+      await submit({ ...kickstart, phone: '0987654321' });
+      expect((await rows()).map((row) => row.phone)).toEqual([
+        '+84912345678',
+        null,
+        '+84987654321',
+      ]);
+    });
+
+    it('answers the same phone written another way as a repeat (CR-13)', async () => {
+      const first = await submit();
+      const again = await submit({ ...kickstart, phone: '+84912345678' });
+      expect(again.status).toBe(202);
+      expect(again.body).toEqual(first.body);
+      expect(await rows()).toHaveLength(1);
     });
 
     it('stores a name-only correction as a new row', async () => {
@@ -444,6 +480,31 @@ describe('POST /coaching-registrations (coaching registrations design)', () => {
         expect.arrayContaining(['name', 'goals', 'consent']),
       );
       expect(fakeRecaptcha(app).calls).toEqual([]);
+      expect(await rows()).toEqual([]);
+    });
+
+    it.each([
+      ['too short', '091234567', 'INVALID_FORMAT', 'This value has an invalid format.'],
+      ['letters', '0912abc678', 'INVALID_FORMAT', 'This value has an invalid format.'],
+      ['a 0 after +', '+0912345678', 'INVALID_FORMAT', 'This value has an invalid format.'],
+      ['over 32 characters', `0912345678${' '.repeat(23)}`, 'TOO_LONG', 'This value is too long.'],
+    ])('400 VALIDATION_FAILED on phone for %s (CR-13)', async (_name, phone, code, message) => {
+      for (const body of [kickstart, threeMonth]) {
+        const res = await server()
+          .post('/coaching-registrations')
+          .set(XHR)
+          .send({ ...body, phone, recaptchaToken: 't' });
+
+        expect(res.status).toBe(400);
+        expect(res.body).toEqual({
+          data: null,
+          error: {
+            code: 'VALIDATION_FAILED',
+            message: 'The request is invalid.',
+            details: { fields: [{ field: 'phone', code, message }] },
+          },
+        });
+      }
       expect(await rows()).toEqual([]);
     });
   });

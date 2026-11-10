@@ -129,6 +129,11 @@ describe('coaching_registrations invariants', () => {
     ['ck_coaching_registrations_notification_last_error', { notification_last_error: 'boom' }],
     ['ck_coaching_registrations_notification_sent_pair', { notification_status: 'sent' }],
     ['ck_coaching_registrations_notification_sent_pair', { notification_sent_at: new Date() }],
+    ['ck_coaching_registrations_phone_format', { phone: '0912345678' }],
+    ['ck_coaching_registrations_phone_format', { phone: '+84 912345678' }],
+    ['ck_coaching_registrations_phone_format', { phone: '+0912345678' }],
+    ['ck_coaching_registrations_phone_format', { phone: '+1234567' }],
+    ['ck_coaching_registrations_phone_format', { phone: '+8491234567' }],
   ])('rejects a row breaking %s', async (constraint, columns) => {
     expect(await constraintOf(insert(columns))).toBe(constraint);
   });
@@ -157,6 +162,13 @@ describe('coaching_registrations invariants', () => {
     );
     expect(n).toBe(3);
   });
+
+  it.each([[null], ['+84912345678'], ['+14155552671'], ['+123456789012345']])(
+    'accepts the phone %j (CR-13)',
+    async (phone) => {
+      await expect(insert({ phone })).resolves.toHaveLength(1);
+    },
+  );
 
   it('accepts other with its text on both programs, and a Kickstart other without text', async () => {
     await insert({ challenges: ['other'], challenge_other: 'Điều khác' });

@@ -15,6 +15,47 @@ import {
 export const COACHING_TEXT_MAX = 5000;
 export const COACHING_CREATORS_MAX = 2000;
 export const COACHING_CHANNEL_URL_MAX = 500;
+/** Characters a visitor may type, separators included; the stored form is at most `+` and 15 digits. */
+export const COACHING_PHONE_INPUT_MAX = 32;
+
+const PHONE_SEPARATORS = /[ .()-]/g;
+const VIETNAM_LOCAL = /^0(\d{9})$/;
+const VIETNAM = /^\+84\d{9}$/;
+const E164 = /^\+[1-9]\d{7,14}$/;
+
+/**
+ * The stored form of a phone number, or null when it isn't one (CR-13): Vietnamese `0` + 9 digits or `+84` + 9
+ * digits become `+84` + 9 digits; any other `+` and 8 to 15 digits (E.164, no leading 0) stays as typed without
+ * its separators. A `+84` number of another length is refused rather than read as international.
+ */
+export function canonicalPhone(value: string): string | null {
+  const digits = value.replace(PHONE_SEPARATORS, '');
+  const local = VIETNAM_LOCAL.exec(digits);
+  if (local) return `+84${local[1]}`;
+  if (digits.startsWith('+84')) return VIETNAM.test(digits) ? digits : null;
+  return E164.test(digits) ? digits : null;
+}
+
+const isStoredPhone = (value: string) => canonicalPhone(value) === value;
+
+/** Trimmed, then stored canonically; blank stays blank (no phone). Plain string in OpenAPI (`overwrite`). */
+const phone = z
+  .string()
+  .max(COACHING_PHONE_INPUT_MAX)
+  .overwrite((value) => {
+    const trimmed = value.trim();
+    return trimmed === '' ? '' : (canonicalPhone(trimmed) ?? trimmed);
+  })
+  .superRefine((value, ctx) => {
+    if (value !== '' && !isStoredPhone(value))
+      ctx.addIssue({
+        code: 'invalid_format',
+        format: 'regex',
+        input: value,
+        message:
+          'Use a Vietnamese number (0912345678 or +84912345678) or an international one (+ and 8 to 15 digits).',
+      });
+  });
 
 const hasScheme = /^[a-z][a-z0-9+.-]*:(?!\d)/i;
 
@@ -63,6 +104,7 @@ const common = {
   goals,
   challengeOther: formText(0, COACHING_TEXT_MAX).optional(),
   favoriteCreators: formText(0, COACHING_CREATORS_MAX).optional(),
+  phone: phone.optional(),
   consent: z.literal(true),
   recaptchaToken: z.string().min(1).max(4096),
 };

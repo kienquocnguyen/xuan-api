@@ -1376,6 +1376,22 @@ describe('OpenAPI document', () => {
       expect(JSON.stringify(schema.properties.practiceCommitment)).toContain('can_commit');
     });
 
+    it('documents an optional phone on both request bodies and a nullable phone for admins (CR-13)', () => {
+      const schema = (name: string) =>
+        schemas()[name] as { properties: Record<string, unknown>; required?: string[] };
+      for (const name of [
+        'CreateChannelKickstartRegistrationDto',
+        'CreateThreeMonthCoachingRegistrationDto',
+      ]) {
+        expect(schema(name).properties.phone).toEqual({ type: 'string', maxLength: 32 });
+        expect(schema(name).required).not.toContain('phone');
+      }
+      expect(JSON.stringify(schema('AdminCoachingRegistrationDto').properties.phone)).toContain(
+        '"nullable":true',
+      );
+      expect(schema('AdminCoachingRegistrationDto').required).toContain('phone');
+    });
+
     it('carries the notification state in its own named DTO (CR-12, I19)', () => {
       const schema = (name: string) =>
         schemas()[name] as { properties: Record<string, unknown> } | undefined;

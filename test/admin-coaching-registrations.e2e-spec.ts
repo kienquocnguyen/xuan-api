@@ -38,6 +38,7 @@ describe('Admin coaching registrations inbox', () => {
       challenges: ['too_many_topics', 'other'],
       challenge_other: 'Thiếu thời gian',
       favorite_creators: 'Kênh A',
+      phone: '+84912345678',
       consented_at: new Date('2026-11-09T09:00:00Z'),
       client_ip_hash: IP_HASH,
       // Like a registration stored before notifications existed (the migration's backfill).
@@ -65,6 +66,7 @@ describe('Admin coaching registrations inbox', () => {
     desired_outcome: 'Có kênh đều đặn',
     practice_commitment: 'can_commit',
     favorite_creators: null,
+    phone: null,
   };
   const dto = (id: string, overrides: Record<string, unknown> = {}) => ({
     id,
@@ -80,6 +82,7 @@ describe('Admin coaching registrations inbox', () => {
     desiredOutcome: null,
     practiceCommitment: null,
     favoriteCreators: 'Kênh A',
+    phone: '+84912345678',
     status: 'new',
     notification: {
       status: 'failed',
@@ -132,6 +135,7 @@ describe('Admin coaching registrations inbox', () => {
               desiredOutcome: 'Có kênh đều đặn',
               practiceCommitment: 'can_commit',
               favoriteCreators: null,
+              phone: null,
             }),
           ],
           pageInfo: { page: 1, pageSize: 1, totalItems: 2, totalPages: 2 },

@@ -30,6 +30,7 @@ export type NotifiedRegistration = Readonly<{
   desiredOutcome: string | null;
   practiceCommitment: PracticeCommitment | null;
   favoriteCreators: string | null;
+  phone: string | null;
   createdAt: Date;
 }>;
 
@@ -54,6 +55,7 @@ export function buildCoachingNotificationEmail(
     '',
     `Họ tên: ${registration.name}`,
     `Email: ${registration.email}`,
+    `Số điện thoại: ${registration.phone ?? 'Không có'}`,
     `Chương trình: ${program}`,
     `Thời gian: ${formatVietnamTime(registration.createdAt)} (giờ Việt Nam)`,
     `Mã đăng ký: ${registration.id}`,

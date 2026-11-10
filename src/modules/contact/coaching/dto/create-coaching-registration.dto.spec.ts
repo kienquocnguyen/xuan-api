@@ -227,6 +227,67 @@ describe('CreateCoachingRegistrationDto (coaching registrations design, request 
     expectError(kickstart, { role: 'admin' }, 'role', 'UNKNOWN_FIELD');
   });
 
+  describe('phone (optional; CR-13)', () => {
+    const phoneOf = (base: Record<string, unknown>, phone: unknown) => {
+      const result = run(base, { phone });
+      expect(result.success).toBe(true);
+      return result.success ? (result.data as { phone?: string }).phone : undefined;
+    };
+
+    it.each([
+      ['0912345678', '+84912345678'],
+      ['+84912345678', '+84912345678'],
+      ['091 234 5678', '+84912345678'],
+      ['091-234-5678', '+84912345678'],
+      ['(091) 234.5678', '+84912345678'],
+      ['  +84 91 234 56 78  ', '+84912345678'],
+      ['+1 (415) 555-2671', '+14155552671'],
+      ['+44 20 7946 0958', '+442079460958'],
+      ['+12345678', '+12345678'],
+      ['+123456789012345', '+123456789012345'],
+    ])('accepts %j as %j', (input, stored) => {
+      expect(phoneOf(kickstart, input)).toBe(stored);
+      expect(phoneOf(threeMonth, input)).toBe(stored);
+    });
+
+    it.each([[''], ['   ']])('treats %j as no phone', (input) => {
+      expect(phoneOf(kickstart, input)).toBe('');
+    });
+
+    it('is optional', () => {
+      expect(phoneOf(kickstart, undefined)).toBeUndefined();
+    });
+
+    it.each([
+      ['too short', '091234567'],
+      ['too long for Vietnam', '09123456789'],
+      ['+84 with too few digits', '+8491234567'],
+      ['+84 with too many digits', '+849123456789'],
+      ['letters', '0912abc678'],
+      ['a 0 after +', '+0912345678'],
+      ['too few international digits', '+1234567'],
+      ['too many international digits', '+1234567890123456'],
+      ['no leading 0 or +', '912345678'],
+      ['00 instead of +', '0084912345678'],
+      ['a + in the middle', '09+12345678'],
+      ['other separators', '091/234/5678'],
+      ['full-width digits', '０９１２３４５６７８'],
+    ])('refuses %s with INVALID_FORMAT on phone', (_name, input) => {
+      expectError(kickstart, { phone: input }, 'phone', 'INVALID_FORMAT');
+      expectError(threeMonth, { phone: input }, 'phone', 'INVALID_FORMAT');
+    });
+
+    it('refuses more than 32 characters before normalizing', () => {
+      expectError(kickstart, { phone: '0912 345 678'.padEnd(33, ' ') + '.' }, 'phone', 'TOO_LONG');
+      expect(phoneOf(kickstart, '0 9 1 2 3 4 5 6 7 8'.padEnd(32, '-'))).toBe('+84912345678');
+    });
+
+    it('refuses a non-string phone', () => {
+      expectError(kickstart, { phone: 912345678 }, 'phone', 'INVALID_TYPE');
+      expectError(kickstart, { phone: null }, 'phone', 'INVALID_TYPE');
+    });
+  });
+
   it('requires a recaptcha token and keeps it as sent', () => {
     expectError(kickstart, { recaptchaToken: '' }, 'recaptchaToken', 'TOO_SHORT');
     expect(run(kickstart, { recaptchaToken: ' tok ' })).toMatchObject({
