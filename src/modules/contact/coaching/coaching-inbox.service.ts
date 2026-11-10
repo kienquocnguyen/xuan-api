@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import type { FindOptionsWhere, Repository } from 'typeorm';
 import { AppError } from '../../../errors/app-error.js';
 import { baselineErrors } from '../../../errors/baseline-errors.js';
+import { contactErrors } from '../contact.errors.js';
+import { CoachingNotificationsService } from './coaching-notifications.service.js';
 import type { CoachingProgram, CoachingRegistrationStatus } from './coaching-options.js';
 import { CoachingRegistration } from './coaching-registration.entity.js';
 
@@ -13,12 +15,13 @@ type InboxFilter = Readonly<{
   pageSize: number;
 }>;
 
-/** The admin inbox for coaching registrations: list, read, mark contacted, archive. */
+/** The admin inbox for coaching registrations: list, read, mark contacted, archive, retry the notification. */
 @Injectable()
 export class CoachingInboxService {
   constructor(
     @InjectRepository(CoachingRegistration)
     private readonly registrations: Repository<CoachingRegistration>,
+    private readonly notifications: CoachingNotificationsService,
   ) {}
 
   async list(filter: InboxFilter): Promise<{ items: CoachingRegistration[]; totalItems: number }> {
@@ -59,6 +62,18 @@ export class CoachingInboxService {
       .set({ status: 'archived' })
       .where('id = :id AND status <> :to', { id, to: 'archived' })
       .execute();
+    return this.get(id);
+  }
+
+  /**
+   * One delivery attempt now for a failed (or stale pending) notification (CR-12, as the contact form's CF-13). A
+   * sent notification, or one whose attempt is still running, is returned unchanged: the answer shows the current state.
+   */
+  async retryNotification(id: string): Promise<CoachingRegistration> {
+    await this.get(id);
+    if (!this.notifications.enabled)
+      throw new AppError(contactErrors.CONTACT_NOTIFICATIONS_UNAVAILABLE);
+    await this.notifications.retry(id);
     return this.get(id);
   }
 }

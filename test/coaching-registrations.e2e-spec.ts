@@ -7,7 +7,7 @@ import {
   RECAPTCHA_ACTION,
 } from '../src/modules/contact/recaptcha/recaptcha.js';
 import { XHR } from './support/auth.js';
-import { createTestApp, fakeRecaptcha } from './support/create-test-app.js';
+import { createTestApp, fakeNotifier, fakeRecaptcha } from './support/create-test-app.js';
 import { resetDatabase } from './support/reset-database.js';
 
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -68,6 +68,12 @@ type StoredRow = {
   consented_at: Date;
   status: string;
   client_ip_hash: string | null;
+  notification_status: string;
+  notification_attempts: number;
+  notification_attempted_at: Date | null;
+  notification_last_error: string | null;
+  notification_sent_at: Date | null;
+  notification_provider_message_id: string | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -100,6 +106,7 @@ describe('POST /coaching-registrations (coaching registrations design)', () => {
   beforeEach(async () => {
     await resetDatabase(app);
     fakeRecaptcha(app).reset();
+    fakeNotifier(app).reset();
   });
   afterAll(async () => {
     await app.close();
@@ -129,6 +136,12 @@ describe('POST /coaching-registrations (coaching registrations design)', () => {
         consented_at: expect.any(Date),
         status: 'new',
         client_ip_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+        notification_status: 'sent',
+        notification_attempts: 1,
+        notification_attempted_at: expect.any(Date),
+        notification_last_error: null,
+        notification_sent_at: expect.any(Date),
+        notification_provider_message_id: 'fake-1',
         created_at: expect.any(Date),
         updated_at: expect.any(Date),
       });
@@ -264,6 +277,74 @@ describe('POST /coaching-registrations (coaching registrations design)', () => {
       expect(results.map((res) => res.status)).toEqual([202, 202]);
       expect(results[1].body).toEqual(results[0].body);
       expect(await rows()).toHaveLength(1);
+    });
+  });
+
+  describe('notification email (CR-12)', () => {
+    it('sends one email for a new registration, naming the program, replying to the registrant', async () => {
+      const res = await submit(threeMonth);
+      expect(res.status).toBe(202);
+
+      const [row] = await rows();
+      expect(fakeNotifier(app).attempts).toBe(1);
+      const [sent] = fakeNotifier(app).sent;
+      expect(sent.idempotencyKey).toBe(`coaching-registration-${row.id}`);
+      expect(sent.email.subject).toBe('Đăng ký mới: 3-Month 1:1 YouTube Coaching - Trần B');
+      expect(sent.email.replyTo).toBe('b@example.com');
+      expect(sent.email.text).toContain('- Chưa rõ hướng xây Personal Brand và nội dung YouTube');
+      expect(sent.email.text).toContain('- Mình có thể chủ động dành thời gian thực hành');
+      expect(sent.email.text).toContain('/admin/coaching');
+      expect(row).toMatchObject({
+        notification_status: 'sent',
+        notification_attempts: 1,
+        notification_last_error: null,
+        notification_provider_message_id: 'fake-1',
+      });
+    });
+
+    it('sends no second email for a duplicate, including concurrent identical submits', async () => {
+      await submit();
+      await submit();
+      await Promise.all(Array.from({ length: 3 }, () => submit()));
+      expect(await rows()).toHaveLength(1);
+      expect(fakeNotifier(app).attempts).toBe(1);
+    });
+
+    it.each(['TIMEOUT', 'PROVIDER_REJECTED', 'PROVIDER_UNAVAILABLE'] as const)(
+      'a %s failure keeps the 202 and records failed with the category',
+      async (category) => {
+        fakeNotifier(app).willFail(category);
+        const res = await submit();
+        expect(res.status).toBe(202);
+        expect(res.body).toEqual({ data: { receivedAt: expect.stringMatching(ISO) } });
+        const [row] = await rows();
+        expect(row).toMatchObject({
+          notification_status: 'failed',
+          notification_attempts: 1,
+          notification_last_error: category,
+          notification_sent_at: null,
+        });
+      },
+    );
+
+    it('an unexpected delivery error keeps the 202 and leaves the notification pending', async () => {
+      fakeNotifier(app).willFail('unexpected');
+      expect((await submit()).status).toBe(202);
+      const [row] = await rows();
+      expect(row).toMatchObject({ notification_status: 'pending', notification_attempts: 1 });
+    });
+
+    it('without a provider: stores failed NOT_CONFIGURED with 0 attempts, 202, nothing sent', async () => {
+      fakeNotifier(app).enabled = false;
+      expect((await submit()).status).toBe(202);
+      const [row] = await rows();
+      expect(row).toMatchObject({
+        notification_status: 'failed',
+        notification_attempts: 0,
+        notification_attempted_at: null,
+        notification_last_error: 'NOT_CONFIGURED',
+      });
+      expect(fakeNotifier(app).attempts).toBe(0);
     });
   });
 

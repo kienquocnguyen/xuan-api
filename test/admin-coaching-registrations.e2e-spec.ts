@@ -2,7 +2,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { signInAs, XHR } from './support/auth.js';
-import { createTestApp } from './support/create-test-app.js';
+import { createTestApp, fakeNotifier } from './support/create-test-app.js';
 import { resetDatabase } from './support/reset-database.js';
 
 const UNKNOWN_ID = '01900000-0000-7000-8000-000000000000';
@@ -40,6 +40,10 @@ describe('Admin coaching registrations inbox', () => {
       favorite_creators: 'Kênh A',
       consented_at: new Date('2026-11-09T09:00:00Z'),
       client_ip_hash: IP_HASH,
+      // Like a registration stored before notifications existed (the migration's backfill).
+      notification_status: 'failed',
+      notification_attempts: 0,
+      notification_last_error: 'NOT_CONFIGURED',
       created_at: new Date('2026-11-09T09:00:00Z'),
       updated_at: new Date('2026-11-09T09:00:00Z'),
       ...columns,
@@ -77,6 +81,14 @@ describe('Admin coaching registrations inbox', () => {
     practiceCommitment: null,
     favoriteCreators: 'Kênh A',
     status: 'new',
+    notification: {
+      status: 'failed',
+      attempts: 0,
+      lastAttemptAt: null,
+      lastError: 'NOT_CONFIGURED',
+      sentAt: null,
+      retryable: true,
+    },
     consentedAt: '2026-11-09T09:00:00.000Z',
     createdAt: '2026-11-09T09:00:00.000Z',
     updatedAt: '2026-11-09T09:00:00.000Z',
@@ -93,6 +105,7 @@ describe('Admin coaching registrations inbox', () => {
   });
   beforeEach(async () => {
     await resetDatabase(app);
+    fakeNotifier(app).reset();
     ({ cookie: admin } = await signInAs(app, { role: 'admin' }));
   });
   afterAll(async () => {
@@ -224,6 +237,146 @@ describe('Admin coaching registrations inbox', () => {
     });
   });
 
+  describe('POST /notification/retry (CR-12)', () => {
+    const notificationOf = async (id: string) => {
+      const [row] = await db.query<
+        {
+          notification_status: string;
+          notification_attempts: number;
+          notification_last_error: string | null;
+          notification_provider_message_id: string | null;
+        }[]
+      >(
+        `SELECT notification_status, notification_attempts, notification_last_error,
+                notification_provider_message_id
+           FROM coaching_registrations WHERE id = $1`,
+        [id],
+      );
+      return row;
+    };
+
+    it('sends a failed notification once and answers the updated DTO', async () => {
+      const id = await insert();
+      const res = await post(`/${id}/notification/retry`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        data: dto(id, {
+          notification: {
+            status: 'sent',
+            attempts: 1,
+            lastAttemptAt: expect.stringMatching(/Z$/),
+            lastError: null,
+            sentAt: expect.stringMatching(/Z$/),
+            retryable: false,
+          },
+          updatedAt: expect.stringMatching(/Z$/),
+        }),
+      });
+      expect(res.body.data.updatedAt).not.toBe('2026-11-09T09:00:00.000Z');
+      expect(fakeNotifier(app).sent.map((sent) => sent.idempotencyKey)).toEqual([
+        `coaching-registration-${id}`,
+      ]);
+      const [sent] = fakeNotifier(app).sent;
+      expect(sent.email.subject).toBe('Đăng ký mới: Channel Kickstart Session - Nguyễn Văn A');
+      expect(sent.email.replyTo).toBe('a@example.com');
+      expect(await notificationOf(id)).toEqual({
+        notification_status: 'sent',
+        notification_attempts: 1,
+        notification_last_error: null,
+        notification_provider_message_id: 'fake-1',
+      });
+    });
+
+    it('records a failed retry with its category and keeps it retryable', async () => {
+      const id = await insert();
+      fakeNotifier(app).willFail('PROVIDER_REJECTED');
+      const res = await post(`/${id}/notification/retry`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.notification).toEqual({
+        status: 'failed',
+        attempts: 1,
+        lastAttemptAt: expect.stringMatching(/Z$/),
+        lastError: 'PROVIDER_REJECTED',
+        sentAt: null,
+        retryable: true,
+      });
+    });
+
+    it('sends nothing for a sent notification or one whose attempt is still running', async () => {
+      const sent = await insert({
+        notification_status: 'sent',
+        notification_attempts: 1,
+        notification_attempted_at: new Date(),
+        notification_last_error: null,
+        notification_sent_at: new Date(),
+        notification_provider_message_id: 'msg',
+      });
+      const running = await insert({
+        email: 'c@example.com',
+        notification_status: 'pending',
+        notification_attempts: 1,
+        notification_attempted_at: new Date(),
+        notification_last_error: null,
+      });
+      for (const id of [sent, running]) {
+        const before = await notificationOf(id);
+        const res = await post(`/${id}/notification/retry`);
+        expect(res.status).toBe(200);
+        expect(res.body.data.notification.retryable).toBe(false);
+        expect(await notificationOf(id)).toEqual(before);
+      }
+      expect(fakeNotifier(app).attempts).toBe(0);
+    });
+
+    it('retries a pending notification whose attempt is stale', async () => {
+      const id = await insert({
+        notification_status: 'pending',
+        notification_attempts: 1,
+        notification_attempted_at: new Date(Date.now() - 11 * 60 * 1000),
+        notification_last_error: null,
+      });
+      const res = await post(`/${id}/notification/retry`);
+      expect(res.body.data.notification).toEqual({
+        status: 'sent',
+        attempts: 2,
+        lastAttemptAt: expect.stringMatching(/Z$/),
+        lastError: null,
+        sentAt: expect.stringMatching(/Z$/),
+        retryable: false,
+      });
+      expect(fakeNotifier(app).attempts).toBe(1);
+    });
+
+    it('503 CONTACT_NOTIFICATIONS_UNAVAILABLE without a provider, changing nothing', async () => {
+      const id = await insert();
+      fakeNotifier(app).enabled = false;
+      const res = await post(`/${id}/notification/retry`);
+
+      expect(res.status).toBe(503);
+      expect(res.body).toEqual({
+        data: null,
+        error: {
+          code: 'CONTACT_NOTIFICATIONS_UNAVAILABLE',
+          message: 'Notification email is not configured.',
+          details: {},
+        },
+      });
+      expect(await notificationOf(id)).toEqual({
+        notification_status: 'failed',
+        notification_attempts: 0,
+        notification_last_error: 'NOT_CONFIGURED',
+        notification_provider_message_id: null,
+      });
+      expect(fakeNotifier(app).attempts).toBe(0);
+    });
+
+    it('404 for an unknown registration', async () => {
+      expect((await post(`/${UNKNOWN_ID}/notification/retry`)).body).toEqual(notFound);
+    });
+  });
+
   describe('access', () => {
     it('401 anonymous, 403 editor and user on every route', async () => {
       const id = await insert();
@@ -233,8 +386,9 @@ describe('Admin coaching registrations inbox', () => {
         await server().get(`${base}/${id}`),
         await server().post(`${base}/${id}/contacted`).set(XHR),
         await server().post(`${base}/${id}/archive`).set(XHR),
+        await server().post(`${base}/${id}/notification/retry`).set(XHR),
       ];
-      expect(anonymous.map((res) => res.status)).toEqual([401, 401, 401, 401]);
+      expect(anonymous.map((res) => res.status)).toEqual([401, 401, 401, 401, 401]);
       for (const role of ['user', 'editor'] as const) {
         const { cookie } = await signInAs(app, { role });
         const forbidden = [
@@ -242,16 +396,18 @@ describe('Admin coaching registrations inbox', () => {
           await get(`/${id}`, cookie),
           await post(`/${id}/contacted`, cookie),
           await post(`/${id}/archive`, cookie),
+          await post(`/${id}/notification/retry`, cookie),
         ];
-        expect(forbidden.map((res) => res.status)).toEqual([403, 403, 403, 403]);
+        expect(forbidden.map((res) => res.status)).toEqual([403, 403, 403, 403, 403]);
       }
       const [row] = await stored();
       expect(row.status).toBe('new');
+      expect(fakeNotifier(app).attempts).toBe(0);
     });
 
     it('403 FORBIDDEN on writes without X-Requested-With', async () => {
       const id = await insert();
-      for (const action of ['contacted', 'archive']) {
+      for (const action of ['contacted', 'archive', 'notification/retry']) {
         const res = await server()
           .post(`/admin/coaching-registrations/${id}/${action}`)
           .set('Cookie', admin);
