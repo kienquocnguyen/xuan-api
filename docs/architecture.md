@@ -110,7 +110,7 @@ src/
     contact/         contact_submissions · public form and admin inbox controllers · submissions / inbox /
                      notifications services · recaptcha/ (Google gateway + policy) · notifications/ (Resend gateway,
                      email builder, one-attempt delivery and manual retry) (AD20) ·
-                     coaching/ (coaching_registrations, public form + admin inbox, no email) (AD22)
+                     coaching/ (coaching_registrations, public form + admin inbox + notification email) (AD22)
 test/                e2e specs, test-only fixture controller, test support (development-workflow.md: Testing)
 ```
 
@@ -388,7 +388,7 @@ real env vars (production) ─────────────────�
 | `TRUST_PROXY_HOPS` | 0–5; Express `trust proxy`. Default **1 in production** (Vercel's edge), 0 elsewhere (AD20) |
 | `RECAPTCHA_SECRET_KEY` | Contact form reCAPTCHA v3 (secret). Without it: verification skipped in development and test; **every submission `503` in production** (AD20) |
 | `RECAPTCHA_ALLOWED_HOSTNAMES`, `RECAPTCHA_MIN_SCORE` | Hostnames a token may come from (required with the secret, refused without it); score threshold 0–1, default 0.5 |
-| `RESEND_API_KEY`, `CONTACT_EMAIL_FROM`, `CONTACT_NOTIFICATION_TO` | Contact notification email: all three or none (the key is a secret). None: submissions are still stored, and their notifications are `failed` with `NOT_CONFIGURED` |
+| `RESEND_API_KEY`, `CONTACT_EMAIL_FROM`, `CONTACT_NOTIFICATION_TO` | Contact and coaching registration notification emails, both to `CONTACT_NOTIFICATION_TO` (the business inbox): all three or none (the key is a secret). None: submissions and registrations are still stored, and their notifications are `failed` with `NOT_CONFIGURED` |
 | `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET`, `VNPAY_PAYMENT_URL`, `VNPAY_RETURN_URL` | Course payments (AD21): all four or none (the hash secret is a secret). Terminal code 8 alphanumerics; gateway URL `https`; return URL (xuan-web's result page) `https` in production. None: checkout answers `503 PAYMENTS_UNAVAILABLE` and the IPN `97` |
 
 Files and secrets: `development-workflow.md` (Secrets).
@@ -462,10 +462,11 @@ Each entry ends with *revisit when*. The full reasoning and the rejected alterna
   - **Config:** four `VNPAY_*` variables, all or none; none disables checkout (`503 PAYMENTS_UNAVAILABLE`), so the API deploys before credentials exist.
   - *Unverified until the sandbox:* the canonical encoding (S8, PHP `urlencode` form, as VNPAY's current demos) is confirmed by one sandbox payment before go-live.
   - *Revisit when* refunds go through the API (revoke the order's grant), a second payment provider appears (a gateway interface, C5), or IPNs go missing in practice (`querydr` reconciliation).
-- **AD22. Coaching registrations: a second public form in the `contact` module, reusing its reCAPTCHA gateway, with no notification email** (design `docs/superpowers/specs/2026-11-09-coaching-registrations-design.md`, CR-1…CR-11). `contact/coaching/` owns `coaching_registrations` (I1). `POST /coaching-registrations` is public, CSRF-checked and answers `202` with `receivedAt` only; the body is a Zod union on `program`, rendered as `oneOf` in OpenAPI.
+- **AD22. Coaching registrations: a second public form in the `contact` module, reusing its reCAPTCHA gateway and its notifier** (design `docs/superpowers/specs/2026-11-09-coaching-registrations-design.md`, CR-1…CR-12). `contact/coaching/` owns `coaching_registrations` (I1). `POST /coaching-registrations` is public, CSRF-checked and answers `202` with `receivedAt` only; the body is a Zod union on `program`, rendered as `oneOf` in OpenAPI.
   - **Reuse:** the `RecaptchaVerifier` gateway and policy are shared with the contact form (action `coaching_registration_submit`, same config); an unconfigured production answers `503 COACHING_REGISTRATION_UNAVAILABLE`. No new environment variable.
   - **Abuse:** as AD20, counted from this table's own rows: 3 per email and 5 per client IP an hour (IP stored as an HMAC, own label), a per-email advisory lock. A duplicate is the same email, program and every answer within 24 h; a corrected answer is a new row.
-  - **No email in V1:** Xuan reads the admin inbox. Statuses are `new` → `contacted` and `archived`; approval, scheduling and payment are decided elsewhere.
+  - **Notification email (CR-12, 2026-11-10; replaces V1's "no email"):** one email per new registration to the business inbox, through the contact form's `ContactNotifier` (Resend) and its rules (AD20: one awaited attempt after the commit, state on the row, idempotency key `coaching-registration-<id>`, a manual admin retry, never a changed `202`). `CoachingNotificationsService` mirrors `ContactNotificationsService` for its own table rather than generalizing it: two short services with the same rules are easier to read than one parameterized over table names. Same recipient as contact (`CONTACT_NOTIFICATION_TO`), so no new variable.
+  - Statuses are `new` → `contacted` and `archived`; approval, scheduling and payment are decided elsewhere.
 
 ## 14. Open product questions
 
