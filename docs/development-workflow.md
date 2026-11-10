@@ -199,6 +199,25 @@ Follow `xuan-database-change`, with `database.md` as the reference.
 - **The physical database map** (`database.md` §12) is updated in the same change whenever the schema changed. Checking it is part of schema-change review.
 - If the change alters business concepts or their relationships, `data-model.md` is updated too.
 
+### 8.1 Production: the migration runs before the merge
+
+**Merging into `dev` deploys Production** (Vercel's production branch for `api.xuancreative.com` is `dev`; the §9 table's "`main` = Production" is the intended model, not today's setup). Migrations never run on deploy (I7), so code that needs a new column reaches Production the moment its PR merges. If the column isn't there yet, every request that touches it is a `500`. This happened twice: PR #34 (2026-11-10, coaching registrations down until the migration ran) and PR #36 (2026-11-11, the same).
+
+**Rule:** a PR whose diff adds a file under `src/database/migrations/` is merged into `dev` only after **every one of its migrations has run on Production**. In order:
+
+1. The PR is complete and its `xuan_test` evidence observed (§8, §13).
+2. The owner approves the Production migration (database operations are never delegated by Git autonomy, §3.5).
+3. Restore point: a Neon branch or point-in-time timestamp, or a full `pg_dump` read back with `pg_restore --list`.
+4. `yarn migration:show` against Production lists **only this PR's migrations** as pending. Anything else pending: stop and ask.
+5. `yarn migration:run` against Production, then inspect the new schema (column, type, constraint) and that the migrations table records it.
+6. Merge. Then confirm the deployed routes answer without `500` (a request that is refused for another reason, e.g. reCAPTCHA, still proves the database path without storing data).
+
+The Production commands load only `DATABASE_URL` from the git-ignored `.env.production.local`, e.g. `(set -a; . ./.env.production.local; set +a; yarn migration:show)`; the URL is never printed.
+
+**Only an expand migration may go first.** Running before the merge means the **old** code runs on the **new** schema for a while, so the migration must not break it: new tables, nullable columns, columns with a default, new indexes, and checks that every existing row and every insert by the old code satisfies. A migration the old code can't live with (dropping or renaming a column the old code uses, `NOT NULL` without a default on a column the old code doesn't write, a check the old code's inserts would fail) is split into expand → migrate → contract across separate PRs (C10). Each PR then follows this rule.
+
+A merge is not blocked by the migration having run on `xuan_dev`; it is blocked by Production.
+
 ## 9. Git: branches, commits, PRs
 
 **Baseline: established.** The first commit on `main` contains `CLAUDE.md`, `docs/` and `.claude/skills/`. `dev` was created from it and is the default integration branch.
@@ -229,7 +248,7 @@ Release:  dev → PR → main → production
 - **Rebase** never maintains stacks of dependent branches, and `rebase`, `rebase --onto`, cherry-pick or force-push are never used to repair avoidable topology. A rebase that rewrites or materially alters pushed history needs the owner's approval first.
 - **Force-push:** never to `main`, `dev` or a shared branch; not routine on feature/fix branches. Any history rewrite needs the owner's approval.
 - **No direct commits or pushes to `dev` or `main`** after the baseline. When a Superpowers skill asks for the base branch, it's `dev`.
-- **PR merge autonomy** (§3.5): the agent may push, open the PR and merge it into its target (`dev` for work branches; `main` only for a `dev` release PR) when the merge conditions hold. Merging never includes deleting the source branch. Database operations keep their own approval (`xuan-database-change`); Git autonomy never grants it.
+- **PR merge autonomy** (§3.5): the agent may push, open the PR and merge it into its target (`dev` for work branches; `main` only for a `dev` release PR) when the merge conditions hold. **A PR with a migration is never merged into `dev` before that migration has run on Production (§8.1)**, by the agent or by the owner. Merging never includes deleting the source branch. Database operations keep their own approval (`xuan-database-change`); Git autonomy never grants it.
 
 | Unit   | Is                       | Named by                                          |
 | ------ | ------------------------ | ------------------------------------------------- |
@@ -306,7 +325,9 @@ What this PR accomplishes and why, in one or two sentences.
 ```markdown
 ## Database
 
+- ⚠️ **Merge only after the Production migration (§8.1):** `migration:show` on Production lists no pending migration from this PR
 - migration: `<migration-name>`
+- expand-only: the current Production code keeps working on the new schema (§8.1)
 - physical database map (`database.md` §12) updated
 - migration SQL reviewed
 - migration run successfully
@@ -408,6 +429,7 @@ During learning-first mode, the review runs only safe checks itself (§3.2). Mut
 - [ ] Tests at the level §11 picks exist, and were seen failing before passing where they prove new behavior.
 - [ ] `lint`, `typecheck`, `test` and `test:e2e` pass, with output observed (not assumed).
 - [ ] Schema changes: SQL read; reversible migrations reverted and re-run; the second generate is empty; the physical database map (`database.md` §12) matches the new schema.
+- [ ] Schema changes, before merging into `dev`: the migration has run on Production (§8.1); until then the PR is **not mergeable**, whoever merges it.
 - [ ] The OpenAPI document builds; new or changed responses and error codes are documented.
 - [ ] Contract changes followed §7. Docs are updated if a decision or rule changed.
 
