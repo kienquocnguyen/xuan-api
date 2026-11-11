@@ -10,7 +10,7 @@ Backend for **Xuan Creative**: NestJS 12 · REST · PostgreSQL 18 · TypeORM 1.x
 - In progress: **course sales with VNPAY** (design `docs/superpowers/specs/2026-11-07-course-sales-vnpay-design.md`; YouTube-unlisted lessons, course price, orders, VNPAY checkout and IPN, purchase grants), delegated 2026-11-07 on `feat/course-sales-vnpay`. Its three migrations are verified on `xuan_test` (e2e 724/724) and applied to `xuan_dev` (2026-11-08); PR #32 is open and not merged, and Production's migration, VNPAY sandbox verification and the SIT are still ahead.
 - Done also: **coaching registrations** (PR #33; design `docs/superpowers/specs/2026-11-09-coaching-registrations-design.md`; public forms for the two coaching programs plus an admin inbox), migrated on `xuan_dev` and Production 2026-11-09.
 - Done also: **coaching registration notifications** (PR #34; CR-12 in the coaching design; one email per new registration through the contact notifier, plus a manual admin retry), migrated on `xuan_dev` and Production 2026-11-11.
-- Also in progress: **coaching registration phone** (`feat/coaching-registration-phone`; CR-13 in the same design; an optional, normalized phone on both forms), delegated 2026-11-11 up to an open PR that the owner merges. Its migration `AddCoachingRegistrationPhone` is verified on `xuan_test` and applied to `xuan_dev`; it must run on Production **before** the merge.
+- Done also: **coaching registration phone** (PR #36; CR-13 in the coaching design; an optional, normalized phone on both forms), migrated on `xuan_dev` 2026-11-11 and on Production 2026-11-11, after the merge (§8.1 records why that order broke registrations).
 - Git: `main` is production; `dev` is the default integration branch (see "Git workflow" below).
 
 ## Working mode: LEARNING-FIRST (active)
@@ -92,6 +92,7 @@ Release:  dev → PR → main → production
 - Cherry-pick and history-rewriting rebase are exceptional and need owner approval. No stacked branches. Never force-push `main`, `dev` or shared branches; no direct pushes to `dev`/`main`.
 - No hotfix flow exists yet; if one seems needed, ask the owner.
 - Merging PRs is delegated (§3.5); database mutations are not (`xuan-database-change`).
+- **Merging into `dev` deploys Production.** A PR that adds a migration merges only after that migration has run on Production (`docs/development-workflow.md` §8.1); otherwise the deployed code hits a missing column and returns 500.
 
 ## Working with Superpowers
 
